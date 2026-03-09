@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.resources
+import logging
 import shutil
 import subprocess
 from pathlib import Path
@@ -57,8 +58,14 @@ def _write_pyproject(dest: Path, name: str, extra_deps: list[str] | None = None)
 
 
 @click.group()
-def main() -> None:
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
+def main(verbose: bool) -> None:
     """crucible — automated experiment loop."""
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="[%(asctime)s] %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
 
 @main.command()

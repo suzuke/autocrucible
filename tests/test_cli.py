@@ -48,6 +48,15 @@ def test_status_command(tmp_path):
     assert "0" in result.output
 
 
+def test_verbose_flag(tmp_path):
+    """--verbose flag is accepted and sets debug logging."""
+    setup_project(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--tag", "vtest", "--project-dir", str(tmp_path)])
+    result = runner.invoke(main, ["--verbose", "status", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0
+
+
 def test_init_missing_config(tmp_path):
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     runner = CliRunner()

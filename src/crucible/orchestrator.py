@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from crucible.agents.base import AgentInterface
 from crucible.config import Config
@@ -157,11 +159,10 @@ class Orchestrator:
 
                 best = self.results.best(self.config.metric.direction)
                 best_str = f"{best.metric_value}" if best else "N/A"
-                print(f"[iter {iteration}] {status} | best {self.config.metric.name}: {best_str}")
-                sys.stdout.flush()
+                logger.info(f"[iter {iteration}] {status} | best {self.config.metric.name}: {best_str}")
 
                 if self._consecutive_failures >= max_retries:
-                    print(f"[iter {iteration}] {max_retries} consecutive failures, stopping.")
+                    logger.warning(f"[iter {iteration}] {max_retries} consecutive failures, stopping.")
                     break
         except KeyboardInterrupt:
-            print(f"\nStopped after {iteration} iterations.")
+            logger.info(f"Stopped after {iteration} iterations.")

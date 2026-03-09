@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 from claude_agent_sdk import (
@@ -17,6 +17,8 @@ from claude_agent_sdk import (
 )
 
 from crucible.agents.base import AgentInterface, AgentResult
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_AGENT_TIMEOUT = 600
 
@@ -74,10 +76,9 @@ class ClaudeCodeAgent(AgentInterface):
                     for block in message.content:
                         if isinstance(block, TextBlock) and block.text.strip():
                             last_text = block.text.strip()
-                            # Stream to stdout for visibility
+                            # Stream agent output for visibility
                             for line in block.text.splitlines():
-                                sys.stdout.write(f"  {line}\n")
-                            sys.stdout.flush()
+                                logger.debug(f"  {line}")
 
                 elif isinstance(message, ResultMessage):
                     if message.is_error:
@@ -95,9 +96,9 @@ class ClaudeCodeAgent(AgentInterface):
         all_files = _detect_modified_files(workspace)
 
         if not all_files:
-            print("  [agent] no files changed")
+            logger.info("[agent] no files changed")
         else:
-            print(f"  [agent] modified: {[str(f) for f in all_files]}")
+            logger.info(f"[agent] modified: {[str(f) for f in all_files]}")
         return AgentResult(modified_files=all_files, description=description)
 
 
