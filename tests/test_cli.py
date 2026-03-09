@@ -1,3 +1,4 @@
+import json
 import subprocess
 import pytest
 from click.testing import CliRunner
@@ -64,6 +65,28 @@ def test_run_resumes_existing_branch(tmp_path):
     subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
     result = runner.invoke(main, ["run", "--tag", "test1", "--project-dir", str(tmp_path)])
     assert "No results.tsv found" not in (result.output or "")
+
+
+def test_status_json_output(tmp_path):
+    setup_project(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--tag", "json1", "--project-dir", str(tmp_path)])
+    result = runner.invoke(main, ["status", "--json", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert "total" in data
+    assert "kept" in data
+    assert "best" in data
+
+
+def test_history_json_output(tmp_path):
+    setup_project(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--tag", "json2", "--project-dir", str(tmp_path)])
+    result = runner.invoke(main, ["history", "--json", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert isinstance(data, list)
 
 
 def test_init_missing_config(tmp_path):

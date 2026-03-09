@@ -8,6 +8,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import json as json_module
+
 import click
 
 from crucible.config import ConfigError, load_config
@@ -218,7 +220,8 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int) -> None:
 
 @main.command()
 @click.option("--project-dir", default=".", help="Project root directory.")
-def status(project_dir: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def status(project_dir: str, as_json: bool) -> None:
     """Show summary of experiment results."""
     try:
         project = Path(project_dir).resolve()
@@ -231,11 +234,24 @@ def status(project_dir: str) -> None:
         raise click.ClickException("No results.tsv found. Run 'init' first.")
 
     summary = results.summary()
+    best = results.best(config.metric.direction)
+
+    if as_json:
+        data = {
+            "experiment": config.name,
+            **summary,
+            "best": {
+                "metric": best.metric_value,
+                "commit": best.commit,
+                "description": best.description,
+            } if best else None,
+        }
+        click.echo(json_module.dumps(data))
+        return
+
     click.echo(f"Experiment: {config.name}")
     click.echo(f"Total: {summary['total']}  Kept: {summary['kept']}  "
                f"Discarded: {summary['discarded']}  Crashed: {summary['crashed']}")
-
-    best = results.best(config.metric.direction)
     if best is not None:
         click.echo(f"Best {config.metric.name}: {best.metric_value} (commit {best.commit})")
 
@@ -243,7 +259,8 @@ def status(project_dir: str) -> None:
 @main.command()
 @click.option("--last", default=10, help="Number of recent results to show.")
 @click.option("--project-dir", default=".", help="Project root directory.")
-def history(last: int, project_dir: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def history(last: int, project_dir: str, as_json: bool) -> None:
     """Show recent experiment results."""
     project = Path(project_dir).resolve()
     results = ResultsLog(project / "results.tsv")
@@ -251,6 +268,15 @@ def history(last: int, project_dir: str) -> None:
         raise click.ClickException("No results.tsv found. Run 'init' first.")
 
     records = results.read_last(last)
+
+    if as_json:
+        data = [
+            {"commit": r.commit, "metric": r.metric_value, "status": r.status, "description": r.description}
+            for r in records
+        ]
+        click.echo(json_module.dumps(data))
+        return
+
     if not records:
         click.echo("No results yet.")
         return
