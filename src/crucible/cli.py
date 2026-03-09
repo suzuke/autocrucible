@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.resources
 import shutil
 import subprocess
 from pathlib import Path
@@ -12,27 +13,31 @@ from crucible.config import ConfigError, load_config
 from crucible.results import ResultsLog
 
 
-def _platform_dir() -> Path:
-    """Return the platform root (parent of src/)."""
-    return Path(__file__).resolve().parent.parent.parent
-
-
 def _examples_dir() -> Path:
-    """Return the path to the bundled examples directory."""
-    return _platform_dir() / "examples"
+    """Return the path to the bundled examples directory.
+
+    Works both in development (source tree) and when installed as a
+    global tool (examples are inside the crucible package).
+    """
+    ref = importlib.resources.files("crucible") / "examples"
+    # importlib.resources returns a Traversable; for copytree we need a real Path.
+    # With the files API on an installed package, this is already a PosixPath.
+    return Path(str(ref))
 
 
 def _write_pyproject(dest: Path, name: str, extra_deps: list[str] | None = None) -> None:
-    """Generate a pyproject.toml that depends on the platform package."""
-    platform_path = _platform_dir()
-    deps = [f'crucible @ file:///{platform_path}']
-    if extra_deps:
-        deps.extend(extra_deps)
-    deps_str = ", ".join(f'"{d}"' for d in deps)
+    """Generate a pyproject.toml for the experiment project.
+
+    Does NOT include crucible as a dependency — crucible is installed
+    as a global CLI tool (via `uv tool install`). Only experiment-specific
+    dependencies (numpy, torch, etc.) are listed here.
+    """
+    deps = list(extra_deps or [])
+    deps_str = ", ".join(f'"{d}"' for d in deps) if deps else ""
 
     # Add PyTorch index override if torch is a dependency
     torch_section = ""
-    if any("torch" in d for d in (extra_deps or [])):
+    if any("torch" in d for d in deps):
         torch_section = (
             "\n[tool.uv]\n"
             "[[tool.uv.index]]\n"
@@ -90,9 +95,9 @@ def new(dest: str, example: str | None, list_examples: bool) -> None:
         click.echo(f"Created empty project at {dest_path}")
         click.echo("Edit .crucible/config.yaml and program.md, then run:")
         click.echo(f"  cd {dest_path}")
-        click.echo("  uv sync")
+        click.echo("  uv sync          # install experiment dependencies")
         click.echo("  git init && git add -A && git commit -m 'initial'")
-        click.echo("  uv run crucible init --tag run1")
+        click.echo("  crucible init --tag run1")
         return
 
     # Copy from example
@@ -133,10 +138,11 @@ def new(dest: str, example: str | None, list_examples: bool) -> None:
     click.echo(f"Created project from example '{example}' at {dest_path}")
     click.echo("Next steps:")
     click.echo(f"  cd {dest_path}")
-    click.echo("  uv sync")
+    if extra_deps:
+        click.echo("  uv sync          # install experiment dependencies")
     click.echo("  git init && git add -A && git commit -m 'initial'")
-    click.echo("  uv run crucible init --tag run1")
-    click.echo("  uv run crucible run --tag run1")
+    click.echo("  crucible init --tag run1")
+    click.echo("  crucible run --tag run1")
 
 
 @main.command()

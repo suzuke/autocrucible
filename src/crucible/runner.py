@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -24,15 +25,28 @@ class ExperimentRunner:
     def __init__(self, workspace: Path) -> None:
         self.workspace = Path(workspace)
 
+    def _make_env(self) -> dict[str, str]:
+        """Build env dict that activates the project's .venv if present."""
+        env = os.environ.copy()
+        venv_bin = self.workspace / ".venv" / "bin"
+        if venv_bin.is_dir():
+            env["PATH"] = f"{venv_bin}:{env.get('PATH', '')}"
+            env["VIRTUAL_ENV"] = str(self.workspace / ".venv")
+        return env
+
     def execute(self, command: str, timeout: int) -> RunResult:
         """Run a shell command with a timeout.
 
         Returns a RunResult with exit code, timeout flag, and last 50 lines of stderr.
+        If the project has a .venv, its bin/ is prepended to PATH so that
+        ``python3`` resolves to the project's interpreter.
         """
+        env = self._make_env()
         proc = subprocess.Popen(
             command,
             shell=True,
             cwd=self.workspace,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -69,6 +83,7 @@ class ExperimentRunner:
                 eval_command,
                 shell=True,
                 cwd=self.workspace,
+                env=self._make_env(),
                 capture_output=True,
                 text=True,
                 timeout=30,
