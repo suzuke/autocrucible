@@ -103,3 +103,25 @@ def test_iteration_with_readonly_violation(tmp_path):
 
     result = orch.run_one_iteration()
     assert result == "violation"
+
+
+def test_resume_existing_branch(tmp_path):
+    setup_repo(tmp_path)
+    cfg = make_config()
+    mock_agent = MagicMock()
+
+    orch1 = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch1.init()
+    orch1.results.log(commit="abc1234", metric_value=0.5, status="keep", description="first")
+
+    subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
+
+    orch2 = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch2.resume()
+
+    result = subprocess.run(["git", "branch", "--show-current"], cwd=tmp_path, capture_output=True, text=True)
+    assert result.stdout.strip() == "crucible/test"
+
+    records = orch2.results.read_all()
+    assert len(records) == 1
+    assert records[0].metric_value == 0.5

@@ -57,6 +57,15 @@ def test_verbose_flag(tmp_path):
     assert result.exit_code == 0
 
 
+def test_run_resumes_existing_branch(tmp_path):
+    setup_project(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--tag", "test1", "--project-dir", str(tmp_path)])
+    subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
+    result = runner.invoke(main, ["run", "--tag", "test1", "--project-dir", str(tmp_path)])
+    assert "No results.tsv found" not in (result.output or "")
+
+
 def test_init_missing_config(tmp_path):
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     runner = CliRunner()

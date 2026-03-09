@@ -68,6 +68,12 @@ class Orchestrator:
             # Commit .gitignore so it's clean before the experiment loop
             self.git.commit("chore: update .gitignore with results.tsv")
 
+    def resume(self) -> None:
+        """Resume an existing experiment branch."""
+        self.git.checkout_branch(self.tag)
+        existing = self.results.read_all()
+        self._fail_seq = sum(1 for r in existing if r.status in ("crash", "discard"))
+
     def run_one_iteration(self) -> str:
         """Execute one full experiment cycle.
 

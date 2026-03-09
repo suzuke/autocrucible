@@ -193,20 +193,24 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int) -> None:
     except ConfigError as e:
         raise click.ClickException(str(e))
 
-    # Check that init was already run
-    results_path = project / "results.tsv"
-    if not results_path.exists():
-        raise click.ClickException(
-            f"No results.tsv found. Run 'crucible init --tag {tag}' first."
-        )
-
     from crucible.agents.claude_code import ClaudeCodeAgent
     from crucible.orchestrator import Orchestrator
 
     agent = ClaudeCodeAgent(timeout=timeout, model=model)
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
 
-    click.echo(f"Starting experiment loop for '{tag}'…")
+    # Resume if branch exists, otherwise require init
+    if orch.git.branch_exists(tag):
+        orch.resume()
+        existing = orch.results.read_all()
+        click.echo(f"Resuming experiment '{tag}' ({len(existing)} previous iterations)")
+    else:
+        results_path = project / "results.tsv"
+        if not results_path.exists():
+            raise click.ClickException(
+                f"No results.tsv found. Run 'crucible init --tag {tag}' first."
+            )
+
     click.echo("Press Ctrl+C to stop gracefully.")
     orch.run_loop()
     click.echo("Stopped.")
