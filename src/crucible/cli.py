@@ -95,10 +95,78 @@ def new(dest: str, example: str | None, list_examples: bool) -> None:
         dest_path.mkdir(parents=True, exist_ok=True)
         ar_dir = dest_path / ".crucible"
         ar_dir.mkdir(exist_ok=True)
-        (ar_dir / "config.yaml").write_text(
-            'name: "my-experiment"\ndescription: ""\n\nfiles:\n  editable:\n    - "solution.py"\n  readonly:\n    - "evaluate.py"\n\ncommands:\n  run: "python3 evaluate.py > run.log 2>&1"\n  eval: "grep \'^metric:\' run.log"\n\nmetric:\n  name: "metric"\n  direction: "minimize"\n'
-        )
-        (ar_dir / "program.md").write_text("# Experiment Instructions\n\nDescribe the optimization goal and rules here.\n")
+        (ar_dir / "config.yaml").write_text("""\
+name: "my-experiment"
+description: ""
+
+files:
+  editable:
+    - "solution.py"
+  readonly:
+    - "evaluate.py"
+
+commands:
+  run: "python3 evaluate.py > run.log 2>&1"
+  eval: "grep '^metric:' run.log"
+  # setup: "pip install -r requirements.txt"  # one-time setup (run on init)
+
+metric:
+  name: "metric"
+  direction: "minimize"   # "minimize" or "maximize"
+
+# constraints:
+#   timeout_seconds: 600  # kill experiment after this
+#   max_retries: 3        # max consecutive failures before stop
+
+# agent:
+#   instructions: "program.md"
+#   system_prompt: "system.md"  # custom system prompt (optional)
+#   context_window:
+#     include_history: true
+#     history_limit: 20
+#     include_best: true
+""")
+        (ar_dir / "program.md").write_text("""\
+# Experiment Instructions
+
+Describe the optimization goal and rules here.
+
+## Goal
+
+Minimize the `metric` value by modifying `solution.py`.
+
+## Rules
+
+- Keep the code correct — the evaluation harness validates output.
+- Try one change at a time so you can measure its effect.
+""")
+        (dest_path / "solution.py").write_text("""\
+\"\"\"Editable solution file. Modify this to optimize the metric.\"\"\"
+
+
+def solve():
+    return 42
+
+
+if __name__ == "__main__":
+    print(solve())
+""")
+        (dest_path / "evaluate.py").write_text("""\
+\"\"\"Evaluation harness (readonly). Measures the metric for the current solution.\"\"\"
+
+from solution import solve
+
+
+def evaluate():
+    result = solve()
+    # Replace this with your actual evaluation logic
+    metric = abs(result - 0)
+    print(f"metric: {metric}")
+
+
+if __name__ == "__main__":
+    evaluate()
+""")
         (dest_path / ".gitignore").write_text("results.tsv\nrun.log\n__pycache__/\n*.pyc\n.venv/\nuv.lock\n")
         _write_pyproject(dest_path, "my-experiment")
         click.echo(f"Created empty project at {dest_path}")
