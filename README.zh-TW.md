@@ -146,10 +146,17 @@ crucible run --tag run1
 
 按 `Ctrl+C` 優雅停止（會等當前實驗完成）。
 
+如果中斷了，直接重新執行同一指令——crucible 會自動偵測既有 branch 並從上次狀態繼續：
+
+```bash
+crucible run --tag run1   # 自動恢復先前進度
+```
+
 ### 4. 查看結果
 
 ```bash
 crucible status
+# Experiment: optimize-sorting
 # Total: 15  Kept: 8  Discarded: 5  Crashed: 2
 # Best ops_per_sec: 142000.0 (commit b2c3d4e)
 
@@ -159,6 +166,14 @@ crucible history --last 5
 # b2c3d4e   142000.0 keep     switch to radix sort for large arrays
 # a1b2c3d   138000.0 keep     add insertion sort for small partitions
 # ...
+
+# JSON 輸出，方便程式化使用
+crucible status --json
+crucible history --json --last 20
+
+# 比較兩個實驗
+crucible compare run1 run2
+crucible compare run1 run2 --json
 ```
 
 ## 運作原理
@@ -182,6 +197,23 @@ crucible run --tag run1
 - **Agent**：使用 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)，搭配工具白名單（Read、Edit、Write、Glob、Grep）。Agent 可以讀取檔案、精準編輯和搜尋程式碼——但不能執行任意指令。
 - **執行環境**：如果專案有 `.venv/`，crucible 會自動啟用它來執行實驗指令，確保 `python3 evaluate.py` 使用正確的直譯器和套件。
 - **Git**：每次嘗試都會 commit。改善就推進 branch；失敗則打 tag 後 reset，保留 diff 供事後分析。
+
+### 執行前驗證
+
+```bash
+crucible validate
+#   [PASS] Config: config.yaml is valid
+#   [PASS] Instructions: .crucible/program.md exists
+#   [PASS] Editable files: All files exist
+#   [PASS] Run command: Executed successfully
+#   [PASS] Eval/metric: ops_per_sec: 42000.0
+```
+
+### 詳細 log 輸出
+
+```bash
+crucible -v run --tag run1   # debug 級別輸出
+```
 
 ## 設定檔參考
 
@@ -210,6 +242,7 @@ constraints:
 agent:
   type: "claude-code"                      # Agent 後端
   instructions: "program.md"              # 靜態指令檔
+  system_prompt: "system.md"              # 自訂系統提示詞（選填，預設使用內建）
   context_window:
     include_history: true                  # 注入過去實驗結果
     history_limit: 20                      # prompt 中最多帶幾筆歷史

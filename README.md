@@ -146,10 +146,17 @@ The platform will loop indefinitely:
 
 Press `Ctrl+C` to stop gracefully (waits for current experiment to finish).
 
+If interrupted, simply re-run the same command — crucible automatically detects the existing branch and resumes where it left off:
+
+```bash
+crucible run --tag run1   # resumes from previous state
+```
+
 ### 4. Check results
 
 ```bash
 crucible status
+# Experiment: optimize-sorting
 # Total: 15  Kept: 8  Discarded: 5  Crashed: 2
 # Best ops_per_sec: 142000.0 (commit b2c3d4e)
 
@@ -159,6 +166,14 @@ crucible history --last 5
 # b2c3d4e   142000.0 keep     switch to radix sort for large arrays
 # a1b2c3d   138000.0 keep     add insertion sort for small partitions
 # ...
+
+# JSON output for programmatic use
+crucible status --json
+crucible history --json --last 20
+
+# Compare two experiment runs
+crucible compare run1 run2
+crucible compare run1 run2 --json
 ```
 
 ## How It Works
@@ -182,6 +197,23 @@ crucible run --tag run1
 - **Agent**: Uses the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) with a tool allowlist (Read, Edit, Write, Glob, Grep). The agent can read files, make targeted edits, and search the codebase — but cannot execute arbitrary commands.
 - **Environment**: If your project has a `.venv/`, crucible automatically activates it when running experiment commands, so `python3 evaluate.py` uses the correct interpreter and packages.
 - **Git**: Every attempt is committed. Improvements advance the branch; failures are tagged and reset, preserving the diff for analysis.
+
+### Validate before running
+
+```bash
+crucible validate
+#   [PASS] Config: config.yaml is valid
+#   [PASS] Instructions: .crucible/program.md exists
+#   [PASS] Editable files: All files exist
+#   [PASS] Run command: Executed successfully
+#   [PASS] Eval/metric: ops_per_sec: 42000.0
+```
+
+### Verbose logging
+
+```bash
+crucible -v run --tag run1   # debug-level output
+```
 
 ## Config Reference
 
@@ -210,6 +242,7 @@ constraints:
 agent:
   type: "claude-code"                      # Agent backend
   instructions: "program.md"              # Static instructions file
+  system_prompt: "system.md"              # Custom system prompt (optional, default: built-in)
   context_window:
     include_history: true                  # Inject past experiment results
     history_limit: 20                      # Max history entries in prompt
