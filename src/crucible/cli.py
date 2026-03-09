@@ -188,7 +188,7 @@ if __name__ == "__main__":
     if dest_path.exists() and any(dest_path.iterdir()):
         raise click.ClickException(f"Destination '{dest_path}' is not empty.")
 
-    shutil.copytree(src, dest_path)
+    shutil.copytree(src, dest_path, dirs_exist_ok=True)
 
     # Generate pyproject.toml with platform dependency + any requirements.txt deps
     req_file = dest_path / "requirements.txt"
