@@ -28,13 +28,38 @@ A general-purpose autonomous experiment platform. Define what to edit, how to ru
 ## Install
 
 ```bash
-uv sync
+# Install as a global CLI tool
+uv tool install crucible
+
+# Or install from a local clone
+git clone https://github.com/user/crucible.git
+uv tool install ./crucible
 ```
 
-This installs the `crucible` CLI command. Verify:
+Verify:
 
 ```bash
 crucible --help
+```
+
+### Updating
+
+```bash
+# From PyPI
+uv tool install crucible --force
+
+# From local source (after pulling changes)
+uv tool install ./crucible --force
+```
+
+### For development
+
+```bash
+git clone https://github.com/user/crucible.git
+cd crucible
+uv sync                 # install in local .venv
+uv run crucible --help  # run from source
+uv run pytest           # run tests
 ```
 
 ## Quick Start
@@ -60,6 +85,12 @@ crucible new ~/my-experiment
 cd ~/my-experiment
 # Edit .crucible/config.yaml and program.md
 git init && git add -A && git commit -m 'initial'
+```
+
+If your experiment needs third-party packages (numpy, torch, etc.), they are listed in the generated `pyproject.toml`. Install them:
+
+```bash
+uv sync
 ```
 
 **Or manually** — in your project repo, create `.crucible/config.yaml`:
@@ -130,6 +161,28 @@ crucible history --last 5
 # ...
 ```
 
+## How It Works
+
+```
+crucible run --tag run1
+        │
+        ▼
+┌─────────────────────────────────┐
+│  1. Assemble prompt             │  instructions + history + state
+│  2. Claude Agent SDK            │  agent reads/edits files
+│  3. Guard rails                 │  validate edits
+│  4. Git commit                  │  snapshot the change
+│  5. Run experiment              │  python evaluate.py > run.log
+│  6. Parse metric                │  grep '^metric:' run.log
+│  7. Keep or discard             │  improved? keep : reset
+│  8. Loop                        │
+└─────────────────────────────────┘
+```
+
+- **Agent**: Uses the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) with a tool allowlist (Read, Edit, Write, Glob, Grep). The agent can read files, make targeted edits, and search the codebase — but cannot execute arbitrary commands.
+- **Environment**: If your project has a `.venv/`, crucible automatically activates it when running experiment commands, so `python3 evaluate.py` uses the correct interpreter and packages.
+- **Git**: Every attempt is committed. Improvements advance the branch; failures are tagged and reset, preserving the diff for analysis.
+
 ## Config Reference
 
 ### `.crucible/config.yaml`
@@ -153,7 +206,7 @@ commands:
   setup: "pip install -r requirements.txt" # One-time setup (run on init)
 constraints:
   timeout_seconds: 600                     # Kill experiment after this
-  max_retries: 3                           # Max retries on crash/violation
+  max_retries: 3                           # Max consecutive failures before stop
 agent:
   type: "claude-code"                      # Agent backend
   instructions: "program.md"              # Static instructions file
@@ -187,7 +240,7 @@ The platform extracts the value matching `metric.name`. This is compatible with 
 
 **Pre-commit:** readonly files not modified, only listed files changed, at least one file edited.
 
-**Post-execution:** timeout enforced (SIGTERM → SIGKILL), metric must be a valid number (not NaN/inf).
+**Post-execution:** timeout enforced (SIGTERM → SIGKILL), metric must be a valid number (not NaN/inf), consecutive failures capped at `max_retries`.
 
 ### Context Assembly
 
@@ -212,4 +265,38 @@ crucible new ~/my-project -e <example-name>
 | `optimize-sorting` | `ops_per_sec` | maximize | Pure Python sorting throughput optimization |
 | `optimize-regression` | `val_mse` | minimize | Synthetic regression with nonlinear interactions |
 | `optimize-classifier` | `val_accuracy` | maximize | Numpy-only neural network on 8-class dataset |
+| `optimize-compress` | `compression_ratio` | maximize | Lossless text compression (no zlib/gzip allowed) |
 | `optimize-gomoku` | `win_rate` | maximize | AlphaZero-style Gomoku agent training |
+
+### Demo: optimize-compress
+
+A showcase example where the agent builds a lossless text compressor from scratch:
+
+```bash
+crucible new ~/compress -e optimize-compress
+cd ~/compress
+git init && git add -A && git commit -m 'initial'
+crucible init --tag run1
+crucible run --tag run1
+```
+
+Starting from a baseline RLE compressor (0.51x — worse than no compression), the agent typically:
+- **Iter 1**: Implements LZ77 + Huffman → ~2.63x
+- **Iter 2**: Adds optimal parsing DP + symbol remapping → ~2.81x (beats zlib's 2.65x)
+- **Iter 3+**: Context modeling, arithmetic coding → 3.0x+
+
+## Project Structure
+
+```
+my-experiment/
+├── .crucible/
+│   ├── config.yaml     # What to optimize, how to run, what to measure
+│   └── program.md      # Instructions for the LLM agent
+├── solution.py          # Code the agent modifies (editable)
+├── evaluate.py          # Fixed harness that measures the metric (readonly)
+├── pyproject.toml       # Experiment dependencies (NOT crucible itself)
+├── results.tsv          # Auto-generated experiment log
+└── run.log              # Latest experiment output
+```
+
+Crucible is installed as a **global CLI tool** — it is NOT a dependency of your experiment project. Your project's `pyproject.toml` only lists experiment-specific packages (numpy, torch, etc.).

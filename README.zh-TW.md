@@ -28,13 +28,38 @@
 ## 安裝
 
 ```bash
-uv sync
+# 安裝為全域 CLI 工具
+uv tool install crucible
+
+# 或從本地 clone 安裝
+git clone https://github.com/user/crucible.git
+uv tool install ./crucible
 ```
 
-安裝完成後會建立 `crucible` CLI 指令。驗證：
+驗證：
 
 ```bash
 crucible --help
+```
+
+### 更新
+
+```bash
+# 從 PyPI
+uv tool install crucible --force
+
+# 從本地原始碼（pull 最新後）
+uv tool install ./crucible --force
+```
+
+### 開發模式
+
+```bash
+git clone https://github.com/user/crucible.git
+cd crucible
+uv sync                 # 安裝到本地 .venv
+uv run crucible --help  # 從原始碼執行
+uv run pytest           # 執行測試
 ```
 
 ## 快速開始
@@ -60,6 +85,12 @@ crucible new ~/my-experiment
 cd ~/my-experiment
 # 編輯 .crucible/config.yaml 和 program.md
 git init && git add -A && git commit -m 'initial'
+```
+
+如果實驗需要第三方套件（numpy、torch 等），會列在產生的 `pyproject.toml` 中。安裝它們：
+
+```bash
+uv sync
 ```
 
 **或手動設定** — 在專案 repo 中建立 `.crucible/config.yaml`：
@@ -130,6 +161,28 @@ crucible history --last 5
 # ...
 ```
 
+## 運作原理
+
+```
+crucible run --tag run1
+        │
+        ▼
+┌─────────────────────────────────┐
+│  1. 組裝 prompt                  │  指令 + 歷史 + 狀態
+│  2. Claude Agent SDK             │  agent 讀取/編輯檔案
+│  3. Guard rails                  │  驗證編輯合規
+│  4. Git commit                   │  快照變更
+│  5. 執行實驗                      │  python evaluate.py > run.log
+│  6. 解析指標                      │  grep '^metric:' run.log
+│  7. 保留或丟棄                    │  改善? 保留 : reset
+│  8. 循環                         │
+└─────────────────────────────────┘
+```
+
+- **Agent**：使用 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)，搭配工具白名單（Read、Edit、Write、Glob、Grep）。Agent 可以讀取檔案、精準編輯和搜尋程式碼——但不能執行任意指令。
+- **執行環境**：如果專案有 `.venv/`，crucible 會自動啟用它來執行實驗指令，確保 `python3 evaluate.py` 使用正確的直譯器和套件。
+- **Git**：每次嘗試都會 commit。改善就推進 branch；失敗則打 tag 後 reset，保留 diff 供事後分析。
+
 ## 設定檔參考
 
 ### `.crucible/config.yaml`
@@ -153,7 +206,7 @@ commands:
   setup: "pip install -r requirements.txt" # 一次性初始化指令（init 時執行）
 constraints:
   timeout_seconds: 600                     # 超過此秒數強制終止實驗
-  max_retries: 3                           # crash/violation 連續失敗上限
+  max_retries: 3                           # 連續失敗上限，超過即停止
 agent:
   type: "claude-code"                      # Agent 後端
   instructions: "program.md"              # 靜態指令檔
@@ -187,7 +240,7 @@ metric_name: 0.12345
 
 **Commit 前：** 確認 readonly 檔案未被修改、只有列出的檔案被更動、至少有一個檔案被編輯。
 
-**執行後：** 強制 timeout（SIGTERM → SIGKILL）、指標必須是合法數字（非 NaN/inf）、連續失敗超過 max_retries 次自動停止。
+**執行後：** 強制 timeout（SIGTERM → SIGKILL）、指標必須是合法數字（非 NaN/inf）、連續失敗超過 `max_retries` 次自動停止。
 
 ### Context 組裝
 
@@ -212,4 +265,38 @@ crucible new ~/my-project -e <範例名稱>
 | `optimize-sorting` | `ops_per_sec` | maximize | 純 Python 排序吞吐量優化 |
 | `optimize-regression` | `val_mse` | minimize | 合成回歸（非線性交互） |
 | `optimize-classifier` | `val_accuracy` | maximize | Numpy 手寫神經網路，8 類別分類 |
+| `optimize-compress` | `compression_ratio` | maximize | 無損文字壓縮（禁用 zlib/gzip） |
 | `optimize-gomoku` | `win_rate` | maximize | AlphaZero 風格五子棋 agent 訓練 |
+
+### 範例展示：optimize-compress
+
+一個展示 crucible 效果的範例——agent 從零開始建構無損文字壓縮器：
+
+```bash
+crucible new ~/compress -e optimize-compress
+cd ~/compress
+git init && git add -A && git commit -m 'initial'
+crucible init --tag run1
+crucible run --tag run1
+```
+
+從 baseline RLE 壓縮器（0.51x——比不壓還差）出發，agent 通常會：
+- **Iter 1**：實作 LZ77 + Huffman → ~2.63x
+- **Iter 2**：加入最佳解析 DP + symbol remapping → ~2.81x（超越 zlib 的 2.65x）
+- **Iter 3+**：上下文建模、算術編碼 → 3.0x+
+
+## 專案結構
+
+```
+my-experiment/
+├── .crucible/
+│   ├── config.yaml     # 做什麼、怎麼跑、量什麼
+│   └── program.md      # 給 LLM agent 的指令
+├── solution.py          # Agent 修改的程式碼（editable）
+├── evaluate.py          # 固定的評估碼（readonly）
+├── pyproject.toml       # 實驗依賴（不含 crucible 本身）
+├── results.tsv          # 自動產生的實驗紀錄
+└── run.log              # 最新一次實驗輸出
+```
+
+Crucible 安裝為**全域 CLI 工具**——它不是你實驗專案的依賴。專案的 `pyproject.toml` 只列出實驗所需的套件（numpy、torch 等）。
