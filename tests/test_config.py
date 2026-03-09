@@ -82,6 +82,46 @@ def test_load_missing_config(tmp_path):
         load_config(tmp_path)
 
 
+def test_system_prompt_config(tmp_path):
+    config_yaml = """\
+name: test
+files:
+  editable: ["x.py"]
+commands:
+  run: "echo ok"
+  eval: "echo 'metric: 1'"
+metric:
+  name: metric
+  direction: minimize
+agent:
+  system_prompt: "custom_system.md"
+"""
+    cfg_dir = tmp_path / ".crucible"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(config_yaml)
+    config = load_config(tmp_path)
+    assert config.agent.system_prompt == "custom_system.md"
+
+
+def test_system_prompt_default_none(tmp_path):
+    config_yaml = """\
+name: test
+files:
+  editable: ["x.py"]
+commands:
+  run: "echo ok"
+  eval: "echo 'metric: 1'"
+metric:
+  name: metric
+  direction: minimize
+"""
+    cfg_dir = tmp_path / ".crucible"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(config_yaml)
+    config = load_config(tmp_path)
+    assert config.agent.system_prompt is None
+
+
 def test_load_missing_required_fields(tmp_path):
     cfg_dir = tmp_path / ".crucible"
     cfg_dir.mkdir()

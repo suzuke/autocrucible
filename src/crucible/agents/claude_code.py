@@ -31,9 +31,23 @@ SYSTEM_PROMPT = (
 
 
 class ClaudeCodeAgent(AgentInterface):
-    def __init__(self, timeout: int = DEFAULT_AGENT_TIMEOUT, model: str | None = None):
+    def __init__(
+        self,
+        timeout: int = DEFAULT_AGENT_TIMEOUT,
+        model: str | None = None,
+        system_prompt_file: str | None = None,
+    ):
         self.timeout = timeout
         self.model = model
+        self.system_prompt_file = system_prompt_file
+
+    def get_system_prompt(self, workspace: Path) -> str:
+        """Return system prompt: custom file content or default."""
+        if self.system_prompt_file:
+            prompt_path = workspace / ".crucible" / self.system_prompt_file
+            if prompt_path.exists():
+                return prompt_path.read_text().strip()
+        return SYSTEM_PROMPT
 
     def generate_edit(self, prompt: str, workspace: Path) -> AgentResult:
         """Run Claude Agent SDK to generate code edits.
@@ -60,7 +74,7 @@ class ClaudeCodeAgent(AgentInterface):
 
     async def _run_query(self, prompt: str, workspace: Path) -> AgentResult:
         options = ClaudeAgentOptions(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=self.get_system_prompt(workspace),
             permission_mode="bypassPermissions",
             allowed_tools=["Read", "Edit", "Write", "Glob", "Grep"],
             model=self.model,

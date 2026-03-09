@@ -24,6 +24,7 @@ class ContextWindowConfig:
 class AgentConfig:
     type: str = "claude-code"
     instructions: Optional[str] = None
+    system_prompt: Optional[str] = None
     context_window: ContextWindowConfig = field(default_factory=ContextWindowConfig)
 
 
@@ -86,6 +87,7 @@ def _build_agent(data: dict) -> AgentConfig:
     return AgentConfig(
         type=data.get("type", "claude-code"),
         instructions=data.get("instructions"),
+        system_prompt=data.get("system_prompt"),
         context_window=_build_context_window(data.get("context_window", {})),
     )
 

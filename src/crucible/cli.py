@@ -168,7 +168,7 @@ def init(tag: str, project_dir: str) -> None:
     from crucible.agents.claude_code import ClaudeCodeAgent
     from crucible.orchestrator import Orchestrator
 
-    agent = ClaudeCodeAgent()
+    agent = ClaudeCodeAgent(system_prompt_file=config.agent.system_prompt)
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
     orch.init()
 
@@ -198,7 +198,7 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int) -> None:
     from crucible.agents.claude_code import ClaudeCodeAgent
     from crucible.orchestrator import Orchestrator
 
-    agent = ClaudeCodeAgent(timeout=timeout, model=model)
+    agent = ClaudeCodeAgent(timeout=timeout, model=model, system_prompt_file=config.agent.system_prompt)
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
 
     # Resume if branch exists, otherwise require init

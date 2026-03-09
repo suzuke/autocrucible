@@ -51,6 +51,17 @@ def test_claude_code_agent_generate_edit(tmp_path):
     assert "Changed x" in result.description
 
 
+def test_custom_system_prompt(tmp_path):
+    from crucible.agents.claude_code import SYSTEM_PROMPT
+    agent = ClaudeCodeAgent()
+    assert agent.get_system_prompt(tmp_path) == SYSTEM_PROMPT
+    crucible_dir = tmp_path / ".crucible"
+    crucible_dir.mkdir()
+    (crucible_dir / "my_prompt.md").write_text("You are a custom agent.")
+    agent = ClaudeCodeAgent(system_prompt_file="my_prompt.md")
+    assert agent.get_system_prompt(tmp_path) == "You are a custom agent."
+
+
 def test_claude_code_agent_error_handling(tmp_path):
     """Test that agent errors are handled gracefully."""
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
