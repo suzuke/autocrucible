@@ -1,7 +1,7 @@
 import subprocess
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 from crucible.agents.base import AgentInterface, AgentResult
 from crucible.agents.claude_code import ClaudeCodeAgent
 
@@ -13,7 +13,7 @@ def test_agent_result_dataclass():
 
 
 def test_claude_code_agent_generate_edit(tmp_path):
-    """Test with mocked claude CLI call."""
+    """Test with mocked Claude Agent SDK query()."""
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True, capture_output=True)
@@ -23,22 +23,85 @@ def test_claude_code_agent_generate_edit(tmp_path):
 
     agent = ClaudeCodeAgent()
 
-    real_run = subprocess.run
+    # Simulate: agent edits the file and returns text + result messages
+    async def mock_query(prompt, options=None):
+        # Simulate the agent editing the file
+        (tmp_path / "train.py").write_text("x = 2  # optimized")
 
-    def mock_run(*args, **kwargs):
-        cmd = args[0] if args else kwargs.get("args", [])
-        cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
-        if "claude" in cmd_str:
-            (tmp_path / "train.py").write_text("x = 2  # optimized")
-            mock = MagicMock()
-            mock.returncode = 0
-            mock.stdout = "Changed x to 2 for better performance"
-            mock.stderr = ""
-            return mock
-        return real_run(*args, **kwargs)
+        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
 
-    with patch("crucible.agents.claude_code.subprocess.run", side_effect=mock_run):
+        yield AssistantMessage(
+            content=[TextBlock(text="Changed x to 2 for better performance")],
+            model="claude-sonnet-4-20250514",
+        )
+        yield ResultMessage(
+            subtype="result",
+            duration_ms=1000,
+            duration_api_ms=800,
+            is_error=False,
+            num_turns=1,
+            session_id="test-session",
+        )
+
+    with patch("crucible.agents.claude_code.query", mock_query):
         result = agent.generate_edit("optimize x", tmp_path)
 
     assert Path("train.py") in result.modified_files
     assert len(result.description) > 0
+    assert "Changed x" in result.description
+
+
+def test_claude_code_agent_error_handling(tmp_path):
+    """Test that agent errors are handled gracefully."""
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    agent = ClaudeCodeAgent()
+
+    async def mock_query_error(prompt, options=None):
+        from claude_agent_sdk import ResultMessage
+        yield ResultMessage(
+            subtype="result",
+            duration_ms=100,
+            duration_api_ms=0,
+            is_error=True,
+            num_turns=0,
+            session_id="test-session",
+            result="API key invalid",
+        )
+
+    with patch("crucible.agents.claude_code.query", mock_query_error):
+        result = agent.generate_edit("optimize x", tmp_path)
+
+    assert result.modified_files == []
+    assert "error" in result.description.lower()
+
+
+def test_claude_code_agent_no_edits(tmp_path):
+    """Test when agent responds but makes no file changes."""
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "train.py").write_text("x = 1")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    agent = ClaudeCodeAgent()
+
+    async def mock_query_noop(prompt, options=None):
+        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+        yield AssistantMessage(
+            content=[TextBlock(text="No changes needed")],
+            model="claude-sonnet-4-20250514",
+        )
+        yield ResultMessage(
+            subtype="result",
+            duration_ms=500,
+            duration_api_ms=400,
+            is_error=False,
+            num_turns=1,
+            session_id="test-session",
+        )
+
+    with patch("crucible.agents.claude_code.query", mock_query_noop):
+        result = agent.generate_edit("optimize x", tmp_path)
+
+    assert result.modified_files == []
+    assert "No changes needed" in result.description

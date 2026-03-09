@@ -84,6 +84,7 @@ class Orchestrator:
         # 4. Handle violation
         if violation is not None:
             if violation.kind == "no_edits":
+                self._consecutive_failures += 1
                 return "skip"
             self.git.revert_changes()
             self.context.add_error(violation.message)
