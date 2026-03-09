@@ -262,6 +262,30 @@ metric_name: 0.12345
 
 The platform extracts the value matching `metric.name`. This is compatible with common patterns like `grep '^loss:' run.log`.
 
+### Single Metric by Design
+
+Crucible uses a single scalar metric — this is a deliberate design choice, not a limitation. A single number makes the keep/discard decision unambiguous, keeps the loop simple and reliable, and forces you to define "better" clearly in your evaluation harness.
+
+**Multi-objective optimization** is handled in `evaluate.py`, not the platform:
+
+```python
+latency = measure_latency()
+throughput = measure_throughput()
+
+# Weighted combination
+metric = throughput / latency
+
+# Constraint-based (zero the metric if a constraint is violated)
+metric = throughput if latency < 100 else 0
+
+# Staged (correctness first, then optimize)
+metric = throughput if correctness == 1.0 else -1000
+
+print(f"metric: {metric}")
+```
+
+This keeps complexity in your domain logic (where it belongs) rather than in the platform.
+
 ### Git Strategy
 
 - Each session runs on a branch: `<branch_prefix>/<tag>`

@@ -60,17 +60,70 @@ def _write_pyproject(dest: Path, name: str, extra_deps: list[str] | None = None)
     )
 
 
+# Noisy log messages to suppress (from asyncio, SDK internals, etc.)
+_LOG_NOISE = {"Using selector:", "Skipping unknown message type:", "Using bundled Claude Code CLI:"}
+
+
+class _ColorFormatter(logging.Formatter):
+    """Colored log formatter for terminal output."""
+
+    COLORS = {
+        logging.DEBUG: "bright_black",
+        logging.INFO: "green",
+        logging.WARNING: "yellow",
+        logging.ERROR: "red",
+    }
+    LEVEL_LABELS = {
+        logging.DEBUG: "DBG",
+        logging.INFO: "INF",
+        logging.WARNING: "WRN",
+        logging.ERROR: "ERR",
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        # Suppress noisy messages
+        msg = record.getMessage()
+        if any(noise in msg for noise in _LOG_NOISE):
+            return ""
+
+        ts = self.formatTime(record, "%H:%M:%S")
+        color = self.COLORS.get(record.levelno, "white")
+        label = self.LEVEL_LABELS.get(record.levelno, record.levelname)
+        styled_label = click.style(label, fg=color, bold=True)
+        styled_ts = click.style(ts, fg="bright_black")
+
+        # Highlight iteration results
+        if "[iter" in msg:
+            if "keep" in msg:
+                msg = click.style(msg, fg="green", bold=True)
+            elif "discard" in msg:
+                msg = click.style(msg, fg="yellow")
+            elif "crash" in msg:
+                msg = click.style(msg, fg="red")
+        elif record.levelno == logging.DEBUG:
+            msg = click.style(msg, fg="bright_black")
+
+        return f"{styled_ts} {styled_label} {msg}"
+
+
+class _NoEmptyFilter(logging.Filter):
+    """Filter out records that format to empty strings (suppressed noise)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(noise in msg for noise in _LOG_NOISE)
+
+
 def _setup_logging(verbose: bool) -> None:
     """Configure logging level. Safe to call multiple times."""
     root = logging.getLogger()
     if verbose and root.level != logging.DEBUG:
         root.setLevel(logging.DEBUG)
         if not root.handlers:
-            logging.basicConfig(
-                level=logging.DEBUG,
-                format="[%(asctime)s] %(levelname)s %(message)s",
-                datefmt="%H:%M:%S",
-            )
+            handler = logging.StreamHandler()
+            handler.setFormatter(_ColorFormatter())
+            handler.addFilter(_NoEmptyFilter())
+            root.addHandler(handler)
 
 
 def _verbose_callback(ctx: click.Context, param: click.Parameter, value: bool) -> bool:
@@ -91,10 +144,12 @@ _verbose_option = click.option(
 @click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
 def main(verbose: bool) -> None:
     """crucible — automated experiment loop."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(_ColorFormatter())
+    handler.addFilter(_NoEmptyFilter())
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
-        format="[%(asctime)s] %(levelname)s %(message)s",
-        datefmt="%H:%M:%S",
+        handlers=[handler],
     )
 
 

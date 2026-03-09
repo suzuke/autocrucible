@@ -262,6 +262,30 @@ metric_name: 0.12345
 
 平台會擷取與 `metric.name` 匹配的值。這與常見的 `grep '^loss:' run.log` 模式完全相容。
 
+### 單一指標是刻意的設計
+
+Crucible 使用單一標量指標——這是刻意的設計選擇，不是缺陷。單一數字讓保留/丟棄的判斷毫無歧義，保持迴圈簡單可靠，並迫使你在評估碼中明確定義「什麼叫更好」。
+
+**多目標優化**應在 `evaluate.py` 中處理，而非平台層：
+
+```python
+latency = measure_latency()
+throughput = measure_throughput()
+
+# 加權組合
+metric = throughput / latency
+
+# 約束式（違反約束就歸零）
+metric = throughput if latency < 100 else 0
+
+# 分階段（先保證正確性，再優化效能）
+metric = throughput if correctness == 1.0 else -1000
+
+print(f"metric: {metric}")
+```
+
+把複雜度放在你的領域邏輯裡（它本來就屬於那裡），而不是平台裡。
+
 ### Git 策略
 
 - 每個 session 在一個 branch 上執行：`<branch_prefix>/<tag>`

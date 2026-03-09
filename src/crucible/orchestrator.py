@@ -161,6 +161,7 @@ class Orchestrator:
         try:
             while True:
                 iteration += 1
+                logger.info(f"--- iter {iteration} ---")
                 status = self.run_one_iteration()
 
                 best = self.results.best(self.config.metric.direction)
