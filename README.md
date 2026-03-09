@@ -473,3 +473,37 @@ The agent cannot run arbitrary commands — it only has access to Read, Edit, Wr
 - **Review the git log.** Every change is committed — you can audit exactly what the agent did.
 
 This is the same trust model as CI/CD: you review the code, the system runs it. Crucible just automates the iteration loop.
+
+### Where's the web dashboard?
+
+There isn't one — by design. `results.tsv` is a plain TSV file that any tool can read, and experiments typically run tens of iterations, not thousands. A full web UI would be a separate project-sized effort for marginal benefit.
+
+**Live monitoring** (in a separate terminal):
+
+```bash
+watch -n 5 crucible status
+watch -n 5 crucible history --last 10
+```
+
+**Quick trend chart:**
+
+```bash
+# ASCII chart with gnuplot
+tail -n +2 results.tsv | cut -f2 | gnuplot -e "set terminal dumb; plot '-' with lines"
+
+# Or Python
+python3 -c "
+import csv
+with open('results.tsv') as f:
+    for i, x in enumerate(csv.DictReader(f, delimiter='\t')):
+        bar = '#' * int(float(x['metric_value']) / 10)
+        print(f'{i+1:3d} {float(x[\"metric_value\"]):8.2f} {bar}')
+"
+```
+
+**Programmatic access:**
+
+```bash
+crucible status --json | jq .
+crucible history --json --last 50 | jq '.[].metric'
+```
