@@ -437,3 +437,39 @@ crucible run --tag run1-variant
 ### 為什麼只支援一個指標？多目標優化怎麼辦？
 
 參見上方的[單一指標是刻意的設計](#單一指標是刻意的設計)。單一標量指標讓保留/丟棄的判斷毫無歧義。多目標的權衡屬於你的 `evaluate.py`，因為你有完整的領域知識來定義「什麼叫更好」。
+
+### 為什麼不平行跑多個 agent？
+
+Crucible 每個 tag 串行跑一個 agent。這是刻意的：
+
+- **成本效率**：平行 agent 成倍增加 API 費用，但串行 agent 會從歷史學習——第 N+1 次迭代比第 N 次更聰明，因為它看到了什麼有效、什麼無效。盲目平行探索沒有這個優勢。
+- **簡單性**：平行 agent 修改同一份檔案會造成 git 衝突。解決這個需要 worktree 隔離、結果同步和合併策略——大量複雜度換取有限收益。
+
+**手動方式已涵蓋大部分需求。** 在不同終端跑多個 tag：
+
+```bash
+# Terminal 1                        # Terminal 2
+crucible run --tag algo-focus       crucible run --tag lowlevel-focus
+```
+
+每個 tag 是獨立的實驗分支。完成後比較結果：
+
+```bash
+crucible compare algo-focus lowlevel-focus
+```
+
+你可以完全掌控哪些方向值得平行投入，零額外複雜度。
+
+### Agent 修改的程式碼會被執行，這安全嗎？
+
+Agent 無法執行任意指令——它只能使用 Read、Edit、Write、Glob、Grep 工具。但它寫入 editable 檔案的程式碼**會**被 `commands.run` 執行。如果 editable 檔案能發網路請求、刪除檔案或執行其他危險操作，guard rails 擋不住。
+
+**緩解措施：**
+
+- **縮小 editable 檔案的範圍。** 如果 `sort.py` 只包含一個排序函式，即使 agent 寫了壞程式碼，影響範圍也很有限。
+- **讓評估碼（readonly）以受控方式 import 並呼叫 editable 程式碼。** Agent 無法修改 `evaluate.py`。
+- **設定 `constraints.timeout_seconds`** 來終止失控的實驗。
+- **在容器或 VM 中執行**（針對不信任的工作負載）。Crucible 不需要 root 或網路存取。
+- **檢查 git log。** 每個變更都有 commit——你可以審計 agent 做了什麼。
+
+這跟 CI/CD 是同樣的信任模型：你審查程式碼，系統執行它。Crucible 只是把迭代迴圈自動化了。

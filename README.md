@@ -437,3 +437,39 @@ crucible run --tag run1-variant
 ### Why only one metric? What about multi-objective optimization?
 
 See [Single Metric by Design](#single-metric-by-design) above. The single scalar metric is a deliberate design choice that keeps the keep/discard decision unambiguous. Multi-objective trade-offs belong in your `evaluate.py`, where you have full domain knowledge to define what "better" means.
+
+### Why not run multiple agents in parallel?
+
+Crucible runs one agent per tag, serially. This is deliberate:
+
+- **Cost efficiency**: Parallel agents multiply API costs, but serial agents learn from history — iteration N+1 is smarter than N because it sees what worked and what didn't. Blind parallel exploration doesn't have this advantage.
+- **Simplicity**: Parallel agents editing the same files in the same repo cause git conflicts. Solving this requires worktree isolation, result synchronization, and merge strategies — significant complexity for marginal gain.
+
+**The manual approach covers most needs.** Run multiple tags in separate terminals:
+
+```bash
+# Terminal 1                        # Terminal 2
+crucible run --tag algo-focus       crucible run --tag lowlevel-focus
+```
+
+Each tag is an independent experiment branch. Compare results when done:
+
+```bash
+crucible compare algo-focus lowlevel-focus
+```
+
+This gives you full control over which directions to explore in parallel, with zero additional complexity.
+
+### Is it safe to let the agent modify code that gets executed?
+
+The agent cannot run arbitrary commands — it only has access to Read, Edit, Write, Glob, and Grep tools. However, the code it writes into editable files **is** executed by `commands.run`. If the editable file can make network requests, delete files, or perform other dangerous operations, guard rails won't catch that.
+
+**Mitigations:**
+
+- **Scope the editable files narrowly.** If `sort.py` only contains a sort function, the blast radius is limited even if the agent writes bad code.
+- **Make the evaluation harness (readonly) import and call the editable code in a controlled way.** The agent can't modify `evaluate.py`.
+- **Use `constraints.timeout_seconds`** to kill runaway experiments.
+- **Run in a container or VM** for untrusted workloads. Crucible doesn't require root or network access.
+- **Review the git log.** Every change is committed — you can audit exactly what the agent did.
+
+This is the same trust model as CI/CD: you review the code, the system runs it. Crucible just automates the iteration loop.
