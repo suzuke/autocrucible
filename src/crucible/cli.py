@@ -173,8 +173,7 @@ if __name__ == "__main__":
         click.echo("Edit .crucible/config.yaml and program.md, then run:")
         click.echo(f"  cd {dest_path}")
         click.echo("  uv sync          # install experiment dependencies")
-        click.echo("  git init && git add -A && git commit -m 'initial'")
-        click.echo("  crucible init --tag run1")
+        click.echo("  crucible init --tag run1   # auto git-init if needed")
         return
 
     # Copy from example
@@ -217,8 +216,7 @@ if __name__ == "__main__":
     click.echo(f"  cd {dest_path}")
     if extra_deps:
         click.echo("  uv sync          # install experiment dependencies")
-    click.echo("  git init && git add -A && git commit -m 'initial'")
-    click.echo("  crucible init --tag run1")
+    click.echo("  crucible init --tag run1   # auto git-init if needed")
     click.echo("  crucible run --tag run1")
 
 
@@ -227,8 +225,22 @@ if __name__ == "__main__":
 @click.option("--project-dir", default=".", help="Project root directory.")
 def init(tag: str, project_dir: str) -> None:
     """Initialise an experiment branch and results log."""
+    project = Path(project_dir).resolve()
+
+    # Auto-initialize git repo if needed
+    if not (project / ".git").exists():
+        click.echo("No git repo found — initializing...")
+        subprocess.run(["git", "init"], cwd=project, check=True,
+                       capture_output=True)
+        subprocess.run(["git", "add", "-A"], cwd=project, check=True,
+                       capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "initial"],
+            cwd=project, check=True, capture_output=True,
+        )
+        click.echo("Git repo initialized with initial commit.")
+
     try:
-        project = Path(project_dir).resolve()
         config = load_config(project)
     except ConfigError as e:
         raise click.ClickException(str(e))
@@ -369,10 +381,21 @@ def history(last: int, project_dir: str, as_json: bool) -> None:
         click.echo("No results yet.")
         return
 
+    # Determine available width for description
+    try:
+        term_width = shutil.get_terminal_size().columns
+    except Exception:
+        term_width = 80
+    fixed_cols = 10 + 1 + 10 + 1 + 10 + 1  # commit + metric + status + spaces
+    desc_width = max(20, term_width - fixed_cols)
+
     click.echo(f"{'Commit':<10} {'Metric':>10} {'Status':<10} Description")
-    click.echo("-" * 60)
+    click.echo("-" * min(term_width, 120))
     for r in records:
-        click.echo(f"{r.commit:<10} {r.metric_value:>10.4f} {r.status:<10} {r.description}")
+        desc = r.description
+        if len(desc) > desc_width:
+            desc = desc[:desc_width - 1] + "…"
+        click.echo(f"{r.commit:<10} {r.metric_value:>10.4f} {r.status:<10} {desc}")
 
 
 @main.command()
