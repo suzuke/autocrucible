@@ -34,16 +34,17 @@ assemble prompt (instructions + state + history + errors)
 
 ### Module Responsibilities
 
-- **`cli.py`** — Click CLI: `new`, `init`, `run`, `status`, `history`
+- **`cli.py`** — Click CLI: `new`, `init`, `run`, `status`, `history`, `validate`, `compare`; supports `--verbose` and `--json` flags
 - **`orchestrator.py`** — Main loop tying all modules together
 - **`agents/base.py`** — Abstract `AgentInterface` + `AgentResult` dataclass
-- **`agents/claude_code.py`** — Claude Agent SDK wrapper; strips `CLAUDECODE` env var for nested execution
+- **`agents/claude_code.py`** — Claude Agent SDK wrapper; strips `CLAUDECODE` env var for nested execution; supports custom system prompts via `agent.system_prompt` config
 - **`config.py`** — Loads `.crucible/config.yaml` into typed dataclasses
 - **`context.py`** — Assembles dynamic prompts: instructions (program.md) + state + history + error feedback
 - **`guardrails.py`** — Validates edits (editable/readonly policy) and metric values (rejects NaN/Inf)
 - **`runner.py`** — Subprocess execution with SIGTERM→SIGKILL timeout; metric parsing via regex
-- **`git_manager.py`** — Branch creation, commits, failed-attempt tagging, reverts
-- **`results.py`** — Append-only TSV log (commit, metric, status, description)
+- **`git_manager.py`** — Branch creation, commits, failed-attempt tagging, reverts, branch detection for resume
+- **`results.py`** — Append-only TSV log (commit, metric, status, description); `read_from_string()` for cross-branch comparison
+- **`validator.py`** — Project validation: config, files, run/eval commands
 
 ### Git Strategy
 
