@@ -403,3 +403,37 @@ Claude Code 會自動啟用 `crucible-setup` skill，引導你完成 7 步驟工
 | Claude Code skill | 自訂問題、獨特指標、架構約束 |
 
 Skill 在有**架構約束**時特別有價值（例如「必須使用神經網路」、「用 MCTS 實作」）。它會在評估碼中產生 `verify_method()` 檢查，如果 agent 放棄指定架構就歸零指標——否則你得自己手寫這些驗證。
+
+## FAQ
+
+### 貪心策略不會卡在局部最優嗎？
+
+Crucible 使用貪心的保留/丟棄迴圈——有改善就保留，沒有就丟棄。聽起來容易卡住，但 LLM agent 跟傳統優化有本質差異：
+
+- Agent 看到**完整歷史**，包含被丟棄和 crash 的嘗試，知道什麼方向走不通、為什麼
+- 它能推理失敗原因，刻意嘗試不同的架構方向，而非只做參數微調
+- 每次迭代都會讀取實際程式碼，可以做結構性變更——盲目搜索永遠做不到這點
+
+但長時間運行確實有局部最優的風險。內建的脫困方式是**多 tag**——本質上是手動的 beam search：
+
+```bash
+# 從同一 baseline 探索不同方向
+crucible init --tag approach-a
+crucible init --tag approach-b
+crucible run --tag approach-a    # 例如「專注演算法改進」
+crucible run --tag approach-b    # 例如「專注底層優化」
+crucible compare approach-a approach-b
+```
+
+也可以回溯到較早的 commit 重新分支：
+
+```bash
+git log crucible/run1              # 找到有潛力的 commit
+git checkout <commit>
+crucible init --tag run1-variant   # 從那個點開新分支
+crucible run --tag run1-variant
+```
+
+### 為什麼只支援一個指標？多目標優化怎麼辦？
+
+參見上方的[單一指標是刻意的設計](#單一指標是刻意的設計)。單一標量指標讓保留/丟棄的判斷毫無歧義。多目標的權衡屬於你的 `evaluate.py`，因為你有完整的領域知識來定義「什麼叫更好」。

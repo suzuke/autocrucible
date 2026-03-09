@@ -403,3 +403,37 @@ Claude Code will automatically activate the `crucible-setup` skill and walk you 
 | Claude Code skill | Custom problems, unique metrics, architecture constraints |
 
 The skill is especially valuable when you have **architecture constraints** (e.g., "must use neural network", "implement with MCTS"). It generates `verify_method()` checks in the evaluation harness that zero the metric if the agent abandons the required approach — something you'd have to write manually otherwise.
+
+## FAQ
+
+### Won't the greedy strategy get stuck in local optima?
+
+Crucible uses a greedy keep/discard loop — improvements are kept, regressions are discarded. This sounds like it could get stuck, but an LLM agent is fundamentally different from traditional optimization:
+
+- The agent sees **full history** including discarded and crashed attempts, so it knows what didn't work and why
+- It can reason about failures and deliberately try different architectural approaches, not just parameter tweaks
+- It reads the actual code each iteration, so it can make structural changes that a blind search never would
+
+That said, local optima is a real risk for long runs. The built-in escape hatch is **multiple tags** — essentially manual beam search:
+
+```bash
+# Explore different directions from the same baseline
+crucible init --tag approach-a
+crucible init --tag approach-b
+crucible run --tag approach-a    # e.g. "focus on algorithmic improvements"
+crucible run --tag approach-b    # e.g. "focus on low-level optimizations"
+crucible compare approach-a approach-b
+```
+
+You can also backtrack to an earlier commit and branch from there:
+
+```bash
+git log crucible/run1              # find a promising commit
+git checkout <commit>
+crucible init --tag run1-variant   # new branch from that point
+crucible run --tag run1-variant
+```
+
+### Why only one metric? What about multi-objective optimization?
+
+See [Single Metric by Design](#single-metric-by-design) above. The single scalar metric is a deliberate design choice that keeps the keep/discard decision unambiguous. Multi-objective trade-offs belong in your `evaluate.py`, where you have full domain knowledge to define what "better" means.
