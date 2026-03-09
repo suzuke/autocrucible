@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import importlib.resources
 import logging
 import shutil
@@ -57,6 +58,33 @@ def _write_pyproject(dest: Path, name: str, extra_deps: list[str] | None = None)
         f'dependencies = [{deps_str}]\n'
         f'{torch_section}'
     )
+
+
+def _setup_logging(verbose: bool) -> None:
+    """Configure logging level. Safe to call multiple times."""
+    root = logging.getLogger()
+    if verbose and root.level != logging.DEBUG:
+        root.setLevel(logging.DEBUG)
+        if not root.handlers:
+            logging.basicConfig(
+                level=logging.DEBUG,
+                format="[%(asctime)s] %(levelname)s %(message)s",
+                datefmt="%H:%M:%S",
+            )
+
+
+def _verbose_callback(ctx: click.Context, param: click.Parameter, value: bool) -> bool:
+    """Click callback that configures logging when --verbose is used."""
+    if value:
+        _setup_logging(True)
+    return value
+
+
+_verbose_option = click.option(
+    "--verbose", "-v", is_flag=True, default=False,
+    help="Enable debug logging.", expose_value=False,
+    is_eager=True, callback=_verbose_callback,
+)
 
 
 @click.group()
@@ -267,6 +295,7 @@ def init(tag: str, project_dir: str) -> None:
 @click.option("--project-dir", default=".", help="Project root directory.")
 @click.option("--model", default=None, help="Claude model to use (e.g. sonnet, opus).")
 @click.option("--timeout", default=600, type=int, help="Agent timeout per iteration (seconds).")
+@_verbose_option
 def run(tag: str, project_dir: str, model: str | None, timeout: int) -> None:
     """Run the experiment loop until interrupted."""
     try:
