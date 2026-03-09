@@ -1,0 +1,32 @@
+name: "optimize-regression"
+description: "Minimize MSE on a synthetic regression task (no GPU needed)"
+
+files:
+  editable:
+    - "model.py"
+  readonly:
+    - "evaluate.py"
+
+commands:
+  run: "python3 model.py > run.log 2>&1"
+  eval: "grep '^val_mse:' run.log"
+
+metric:
+  name: "val_mse"
+  direction: "minimize"
+
+constraints:
+  timeout_seconds: 120
+  max_retries: 3
+
+agent:
+  type: "claude-code"
+  instructions: "program.md"
+  context_window:
+    include_history: true
+    history_limit: 20
+    include_best: true
+
+git:
+  branch_prefix: "crucible"
+  tag_failed: true

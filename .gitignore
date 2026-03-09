@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+uv.lock
+results.tsv
+run.log
+*.so
+.DS_Store
+
+# Claude Code settings (keep skills tracked)
+.claude/*
+!.claude/skills/

@@ -1,0 +1,33 @@
+name: "optimize-gomoku"
+description: "Train an AlphaZero-style Gomoku agent to maximize win rate against baseline opponents"
+
+files:
+  editable:
+    - "agent.py"
+  readonly:
+    - "game.py"
+    - "evaluate.py"
+
+commands:
+  run: "python3 evaluate.py > run.log 2>&1"
+  eval: "grep '^win_rate:' run.log"
+
+metric:
+  name: "win_rate"
+  direction: "maximize"
+
+constraints:
+  timeout_seconds: 600
+  max_retries: 3
+
+agent:
+  type: "claude-code"
+  instructions: "program.md"
+  context_window:
+    include_history: true
+    history_limit: 15
+    include_best: true
+
+git:
+  branch_prefix: "crucible"
+  tag_failed: true
