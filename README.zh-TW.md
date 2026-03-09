@@ -300,3 +300,50 @@ my-experiment/
 ```
 
 Crucible 安裝為**全域 CLI 工具**——它不是你實驗專案的依賴。專案的 `pyproject.toml` 只列出實驗所需的套件（numpy、torch 等）。
+
+## Claude Code Skill：互動式建立專案
+
+Crucible 附帶一個 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill，提供互動式引導工作流程，從零開始建立實驗專案。
+
+### 安裝 Skill
+
+```bash
+# 複製 skill 到你的 Claude Code skills 目錄
+cp -r /path/to/crucible/.claude/skills/crucible-setup ~/.claude/skills/
+```
+
+或者，如果你 clone 了 crucible repo，可以加到專案的 `.claude/` 目錄：
+
+```bash
+mkdir -p .claude/skills
+cp -r /path/to/crucible/.claude/skills/crucible-setup .claude/skills/
+```
+
+### 使用方式
+
+安裝後，直接告訴 Claude Code 你想優化什麼：
+
+```
+> 我想優化一個矩陣乘法演算法
+> 幫我建立一個最大化推理吞吐量的實驗
+> 為我的排序實作建立 benchmark
+```
+
+Claude Code 會自動啟用 `crucible-setup` skill，引導你完成 7 步驟工作流程：
+
+1. **定義指標** — 量什麼、方向（最小化/最大化）、依賴套件
+2. **架構約束** — 如果你要求特定方法，skill 會在 `evaluate.py` 中用程式碼強制（而非只靠 prompt），防止 [Goodhart's Law](https://en.wikipedia.org/wiki/Goodhart%27s_law) 問題
+3. **建立評估碼** — readonly 的 `evaluate.py`，含正確性閘門和方法驗證
+4. **建立 baseline** — 簡單但正確的起始實作
+5. **撰寫 agent 指令** — `program.md`，區分硬規則（程式碼強制）與軟規則（建議）
+6. **撰寫 config.yaml** — 指標、指令、timeout、防護機制
+7. **驗證 baseline** — 實際跑一次確認一切正常
+
+### 何時用 Skill vs 範例？
+
+| 方式 | 適用場景 |
+|------|----------|
+| `crucible new -e <範例>` | 標準問題，類似內建範例 |
+| Claude Code skill | 自訂問題、獨特指標、架構約束 |
+
+Skill 在有**架構約束**時特別有價值（例如「必須使用神經網路」、「用 MCTS 實作」）。它會在評估碼中產生 `verify_method()` 檢查，如果 agent 放棄指定架構就歸零指標——否則你得自己手寫這些驗證。

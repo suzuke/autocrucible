@@ -300,3 +300,50 @@ my-experiment/
 ```
 
 Crucible is installed as a **global CLI tool** — it is NOT a dependency of your experiment project. Your project's `pyproject.toml` only lists experiment-specific packages (numpy, torch, etc.).
+
+## Claude Code Skill: Interactive Setup
+
+Crucible ships with a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that provides an interactive, guided workflow for creating experiment projects from scratch.
+
+### Installing the skill
+
+```bash
+# Copy the skill to your Claude Code skills directory
+cp -r /path/to/crucible/.claude/skills/crucible-setup ~/.claude/skills/
+```
+
+Or, if you cloned the crucible repo, add it to your project's `.claude/` directory:
+
+```bash
+mkdir -p .claude/skills
+cp -r /path/to/crucible/.claude/skills/crucible-setup .claude/skills/
+```
+
+### Using the skill
+
+Once installed, simply tell Claude Code what you want to optimize:
+
+```
+> I want to optimize a matrix multiplication algorithm
+> Set up a new experiment to maximize inference throughput
+> Create a benchmark for my sorting implementation
+```
+
+Claude Code will automatically activate the `crucible-setup` skill and walk you through a 7-step workflow:
+
+1. **Define the metric** — what to measure, direction (min/max), dependencies
+2. **Architecture constraints** — if you require a specific approach, the skill enforces it in `evaluate.py` (not just prompts) to prevent [Goodhart's Law](https://en.wikipedia.org/wiki/Goodhart%27s_law) violations
+3. **Create evaluation harness** — readonly `evaluate.py` with correctness gating and method verification
+4. **Create baseline** — simple, correct starting implementation
+5. **Write agent instructions** — `program.md` with hard rules (code-enforced) vs soft rules (guidelines)
+6. **Write config.yaml** — metric, commands, timeout, guard rails
+7. **Verify baseline** — run the experiment to confirm everything works
+
+### Why use the skill instead of examples?
+
+| Approach | Best for |
+|----------|----------|
+| `crucible new -e <example>` | Standard problems similar to bundled examples |
+| Claude Code skill | Custom problems, unique metrics, architecture constraints |
+
+The skill is especially valuable when you have **architecture constraints** (e.g., "must use neural network", "implement with MCTS"). It generates `verify_method()` checks in the evaluation harness that zero the metric if the agent abandons the required approach — something you'd have to write manually otherwise.
