@@ -257,6 +257,26 @@ def status(project_dir: str, as_json: bool) -> None:
 
 
 @main.command()
+@click.option("--project-dir", default=".", help="Project root directory.")
+def validate(project_dir: str) -> None:
+    """Validate project configuration and run a test execution."""
+    from crucible.validator import validate_project
+
+    project = Path(project_dir).resolve()
+    results = validate_project(project)
+
+    all_passed = True
+    for r in results:
+        icon = "PASS" if r.passed else "FAIL"
+        click.echo(f"  [{icon}] {r.name}: {r.message}")
+        if not r.passed:
+            all_passed = False
+
+    if not all_passed:
+        raise click.ClickException("Validation failed.")
+
+
+@main.command()
 @click.option("--last", default=10, help="Number of recent results to show.")
 @click.option("--project-dir", default=".", help="Project root directory.")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")

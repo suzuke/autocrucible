@@ -89,6 +89,18 @@ def test_history_json_output(tmp_path):
     assert isinstance(data, list)
 
 
+def test_validate_command(tmp_path):
+    cfg_dir = tmp_path / ".crucible"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(VALID_CONFIG)
+    (cfg_dir / "program.md").write_text("Optimize.")
+    (tmp_path / "train.py").write_text("print('loss: 0.5')")
+    runner = CliRunner()
+    result = runner.invoke(main, ["validate", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "PASS" in result.output
+
+
 def test_init_missing_config(tmp_path):
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     runner = CliRunner()
