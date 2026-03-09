@@ -75,7 +75,7 @@ crucible new . --list
 # Create from example
 crucible new ~/my-experiment -e optimize-sorting
 cd ~/my-experiment
-git init && git add -A && git commit -m 'initial'
+crucible init --tag run1   # auto git-init if needed
 ```
 
 **From scratch:**
@@ -84,7 +84,7 @@ git init && git add -A && git commit -m 'initial'
 crucible new ~/my-experiment
 cd ~/my-experiment
 # Edit .crucible/config.yaml and program.md
-git init && git add -A && git commit -m 'initial'
+crucible init --tag run1   # auto git-init if needed
 ```
 
 If your experiment needs third-party packages (numpy, torch, etc.), they are listed in the generated `pyproject.toml`. Install them:
@@ -128,7 +128,7 @@ Try different algorithms, data structures, and optimizations.
 crucible init --tag run1
 ```
 
-This creates a git branch `crucible/run1` and initializes `results.tsv`.
+This creates a git branch `crucible/run1` and initializes `results.tsv`. If the project isn't a git repo yet, `init` automatically runs `git init`, stages all files, and creates an initial commit.
 
 ### 3. Run
 
@@ -308,7 +308,6 @@ A showcase example where the agent builds a lossless text compressor from scratc
 ```bash
 crucible new ~/compress -e optimize-compress
 cd ~/compress
-git init && git add -A && git commit -m 'initial'
 crucible init --tag run1
 crucible run --tag run1
 ```

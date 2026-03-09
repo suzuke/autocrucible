@@ -75,7 +75,7 @@ crucible new . --list
 # 從範例建立
 crucible new ~/my-experiment -e optimize-sorting
 cd ~/my-experiment
-git init && git add -A && git commit -m 'initial'
+crucible init --tag run1   # 自動 git-init（如果還沒有）
 ```
 
 **從零開始：**
@@ -84,7 +84,7 @@ git init && git add -A && git commit -m 'initial'
 crucible new ~/my-experiment
 cd ~/my-experiment
 # 編輯 .crucible/config.yaml 和 program.md
-git init && git add -A && git commit -m 'initial'
+crucible init --tag run1   # 自動 git-init（如果還沒有）
 ```
 
 如果實驗需要第三方套件（numpy、torch 等），會列在產生的 `pyproject.toml` 中。安裝它們：
@@ -128,7 +128,7 @@ metric:
 crucible init --tag run1
 ```
 
-這會建立 git branch `crucible/run1` 並初始化 `results.tsv`。
+這會建立 git branch `crucible/run1` 並初始化 `results.tsv`。如果專案還不是 git repo，`init` 會自動執行 `git init`、暫存所有檔案並建立初始 commit。
 
 ### 3. 執行
 
@@ -308,7 +308,6 @@ crucible new ~/my-project -e <範例名稱>
 ```bash
 crucible new ~/compress -e optimize-compress
 cd ~/compress
-git init && git add -A && git commit -m 'initial'
 crucible init --tag run1
 crucible run --tag run1
 ```
