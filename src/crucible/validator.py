@@ -56,11 +56,12 @@ def validate_project(project_root: Path) -> List[CheckResult]:
 
     # 4. Run command executes
     runner = ExperimentRunner(workspace=project_root)
-    run_result = runner.execute(config.commands.run, timeout=30)
+    validate_timeout = min(config.constraints.timeout_seconds, 120)
+    run_result = runner.execute(config.commands.run, timeout=validate_timeout)
     if run_result.exit_code == 0 and not run_result.timed_out:
         results.append(CheckResult("Run command", True, "Executed successfully"))
     elif run_result.timed_out:
-        results.append(CheckResult("Run command", False, "Timed out (30s)"))
+        results.append(CheckResult("Run command", False, f"Timed out ({validate_timeout}s)"))
     else:
         results.append(CheckResult("Run command", False, f"Exit code {run_result.exit_code}"))
 
