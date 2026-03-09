@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import threading
@@ -48,9 +49,12 @@ class ClaudeCodeAgent(AgentInterface):
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
 
+        # Strip CLAUDECODE env var to allow running inside a Claude Code session
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
         try:
             proc = subprocess.Popen(
-                cmd, cwd=workspace,
+                cmd, cwd=workspace, env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
             t_out = threading.Thread(
