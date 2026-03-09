@@ -101,6 +101,48 @@ def test_validate_command(tmp_path):
     assert "PASS" in result.output
 
 
+def test_compare_command(tmp_path):
+    setup_project(tmp_path)
+    runner = CliRunner()
+    # Create branch a with a result
+    runner.invoke(main, ["init", "--tag", "a", "--project-dir", str(tmp_path)])
+    results_path = tmp_path / "results.tsv"
+    with results_path.open("a") as f:
+        f.write("abc1234\t0.5\tkeep\tfirst improvement\n")
+    subprocess.run(["git", "add", "-f", "results.tsv"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "result"], cwd=tmp_path, check=True, capture_output=True)
+    # Go back to main and create branch b
+    subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
+    runner.invoke(main, ["init", "--tag", "b", "--project-dir", str(tmp_path)])
+    with results_path.open("a") as f:
+        f.write("def5678\t0.3\tkeep\tsecond improvement\n")
+    subprocess.run(["git", "add", "-f", "results.tsv"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "result"], cwd=tmp_path, check=True, capture_output=True)
+
+    result = runner.invoke(main, ["compare", "a", "b", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "a" in result.output
+    assert "b" in result.output
+
+
+def test_compare_json_output(tmp_path):
+    setup_project(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--tag", "x", "--project-dir", str(tmp_path)])
+    subprocess.run(["git", "add", "-f", "results.tsv"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "result"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
+    runner.invoke(main, ["init", "--tag", "y", "--project-dir", str(tmp_path)])
+    subprocess.run(["git", "add", "-f", "results.tsv"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "result"], cwd=tmp_path, check=True, capture_output=True)
+
+    result = runner.invoke(main, ["compare", "x", "y", "--json", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert "x" in data
+    assert "y" in data
+
+
 def test_init_missing_config(tmp_path):
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     runner = CliRunner()

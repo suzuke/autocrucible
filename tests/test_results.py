@@ -93,6 +93,14 @@ def test_read_all_missing_file(tmp_path):
     assert log.read_all() == []
 
 
+def test_read_from_string(tmp_path):
+    tsv_content = "commit\tmetric_value\tstatus\tdescription\nabc1234\t0.5\tkeep\tfirst\ndef5678\t0.3\tdiscard\tsecond\n"
+    records = ResultsLog.read_from_string(tsv_content)
+    assert len(records) == 2
+    assert records[0].metric_value == 0.5
+    assert records[1].status == "discard"
+
+
 def test_description_with_tabs(tmp_path):
     tsv = tmp_path / "results.tsv"
     log = ResultsLog(tsv)

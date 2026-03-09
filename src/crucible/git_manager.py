@@ -72,6 +72,11 @@ class GitManager:
         branch_name = f"{self.branch_prefix}/{tag}"
         self._run("checkout", branch_name)
 
+    def show_file(self, tag: str, file_path: str) -> str:
+        """Read a file's content from a specific experiment branch."""
+        branch_name = f"{self.branch_prefix}/{tag}"
+        return self._run("show", f"{branch_name}:{file_path}")
+
     def revert_changes(self) -> None:
         """Discard all working tree changes and remove untracked files."""
         self._run("checkout", "--", ".")

@@ -305,3 +305,56 @@ def history(last: int, project_dir: str, as_json: bool) -> None:
     click.echo("-" * 60)
     for r in records:
         click.echo(f"{r.commit:<10} {r.metric_value:>10.4f} {r.status:<10} {r.description}")
+
+
+@main.command()
+@click.argument("tags", nargs=2)
+@click.option("--project-dir", default=".", help="Project root directory.")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
+    """Compare two experiment runs side by side."""
+    try:
+        project = Path(project_dir).resolve()
+        config = load_config(project)
+    except ConfigError as e:
+        raise click.ClickException(str(e))
+
+    from crucible.git_manager import GitManager
+
+    git = GitManager(workspace=project, branch_prefix=config.git.branch_prefix)
+    comparison = {}
+
+    for tag in tags:
+        try:
+            content = git.show_file(tag, "results.tsv")
+        except subprocess.CalledProcessError:
+            raise click.ClickException(f"Cannot read results.tsv from branch {config.git.branch_prefix}/{tag}")
+        records = ResultsLog.read_from_string(content)
+        kept = [r for r in records if r.status == "keep"]
+        best = None
+        if kept:
+            if config.metric.direction == "minimize":
+                best = min(kept, key=lambda r: r.metric_value)
+            else:
+                best = max(kept, key=lambda r: r.metric_value)
+        comparison[tag] = {
+            "iterations": len(records),
+            "kept": len(kept),
+            "discarded": sum(1 for r in records if r.status == "discard"),
+            "crashed": sum(1 for r in records if r.status == "crash"),
+            "best_metric": best.metric_value if best else None,
+            "best_commit": best.commit if best else None,
+        }
+
+    if as_json:
+        click.echo(json_module.dumps(comparison))
+        return
+
+    tag_a, tag_b = tags
+    col_w = max(len(tag_a), len(tag_b), 12)
+    click.echo(f"{'':>16} {tag_a:>{col_w}} {tag_b:>{col_w}}")
+    for key in ("iterations", "kept", "discarded", "crashed", "best_metric", "best_commit"):
+        va = comparison[tag_a].get(key, "N/A")
+        vb = comparison[tag_b].get(key, "N/A")
+        label = key.replace("_", " ").title()
+        click.echo(f"{label:>16} {str(va):>{col_w}} {str(vb):>{col_w}}")

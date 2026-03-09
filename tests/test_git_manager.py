@@ -70,6 +70,15 @@ def test_branch_exists(git_repo):
     assert gm.branch_exists("nonexistent") is False
 
 
+def test_show_file(git_repo):
+    gm = GitManager(workspace=git_repo)
+    gm.create_branch("run1")
+    (git_repo / "data.txt").write_text("hello world")
+    gm.commit("add data")
+    content = gm.show_file("run1", "data.txt")
+    assert content == "hello world"
+
+
 def test_checkout_branch(git_repo):
     gm = GitManager(workspace=git_repo)
     gm.create_branch("run1")
