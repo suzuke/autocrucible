@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from crucible.agents.base import AgentInterface
 from crucible.config import Config
@@ -65,6 +67,12 @@ class Orchestrator:
             gitignore.write_text("\n".join(lines) + "\n")
             # Commit .gitignore so it's clean before the experiment loop
             self.git.commit("chore: update .gitignore with results.tsv")
+
+    def resume(self) -> None:
+        """Resume an existing experiment branch."""
+        self.git.checkout_branch(self.tag)
+        existing = self.results.read_all()
+        self._fail_seq = sum(1 for r in existing if r.status in ("crash", "discard"))
 
     def run_one_iteration(self) -> str:
         """Execute one full experiment cycle.
@@ -157,11 +165,10 @@ class Orchestrator:
 
                 best = self.results.best(self.config.metric.direction)
                 best_str = f"{best.metric_value}" if best else "N/A"
-                print(f"[iter {iteration}] {status} | best {self.config.metric.name}: {best_str}")
-                sys.stdout.flush()
+                logger.info(f"[iter {iteration}] {status} | best {self.config.metric.name}: {best_str}")
 
                 if self._consecutive_failures >= max_retries:
-                    print(f"[iter {iteration}] {max_retries} consecutive failures, stopping.")
+                    logger.warning(f"[iter {iteration}] {max_retries} consecutive failures, stopping.")
                     break
         except KeyboardInterrupt:
-            print(f"\nStopped after {iteration} iterations.")
+            logger.info(f"Stopped after {iteration} iterations.")

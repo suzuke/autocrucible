@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 from claude_agent_sdk import (
@@ -18,6 +18,8 @@ from claude_agent_sdk import (
 
 from crucible.agents.base import AgentInterface, AgentResult
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_AGENT_TIMEOUT = 600
 
 SYSTEM_PROMPT = (
@@ -29,9 +31,23 @@ SYSTEM_PROMPT = (
 
 
 class ClaudeCodeAgent(AgentInterface):
-    def __init__(self, timeout: int = DEFAULT_AGENT_TIMEOUT, model: str | None = None):
+    def __init__(
+        self,
+        timeout: int = DEFAULT_AGENT_TIMEOUT,
+        model: str | None = None,
+        system_prompt_file: str | None = None,
+    ):
         self.timeout = timeout
         self.model = model
+        self.system_prompt_file = system_prompt_file
+
+    def get_system_prompt(self, workspace: Path) -> str:
+        """Return system prompt: custom file content or default."""
+        if self.system_prompt_file:
+            prompt_path = workspace / ".crucible" / self.system_prompt_file
+            if prompt_path.exists():
+                return prompt_path.read_text().strip()
+        return SYSTEM_PROMPT
 
     def generate_edit(self, prompt: str, workspace: Path) -> AgentResult:
         """Run Claude Agent SDK to generate code edits.
@@ -58,7 +74,7 @@ class ClaudeCodeAgent(AgentInterface):
 
     async def _run_query(self, prompt: str, workspace: Path) -> AgentResult:
         options = ClaudeAgentOptions(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=self.get_system_prompt(workspace),
             permission_mode="bypassPermissions",
             allowed_tools=["Read", "Edit", "Write", "Glob", "Grep"],
             model=self.model,
@@ -74,10 +90,9 @@ class ClaudeCodeAgent(AgentInterface):
                     for block in message.content:
                         if isinstance(block, TextBlock) and block.text.strip():
                             last_text = block.text.strip()
-                            # Stream to stdout for visibility
+                            # Stream agent output for visibility
                             for line in block.text.splitlines():
-                                sys.stdout.write(f"  {line}\n")
-                            sys.stdout.flush()
+                                logger.debug(f"  {line}")
 
                 elif isinstance(message, ResultMessage):
                     if message.is_error:
@@ -95,9 +110,9 @@ class ClaudeCodeAgent(AgentInterface):
         all_files = _detect_modified_files(workspace)
 
         if not all_files:
-            print("  [agent] no files changed")
+            logger.info("[agent] no files changed")
         else:
-            print(f"  [agent] modified: {[str(f) for f in all_files]}")
+            logger.info(f"[agent] modified: {[str(f) for f in all_files]}")
         return AgentResult(modified_files=all_files, description=description)
 
 

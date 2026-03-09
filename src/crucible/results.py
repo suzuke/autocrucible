@@ -91,6 +91,27 @@ class ResultsLog:
             return value < current_best.metric_value
         return value > current_best.metric_value
 
+    @staticmethod
+    def read_from_string(content: str) -> list[ExperimentRecord]:
+        """Parse records from TSV string content (e.g., from git show)."""
+        records: list[ExperimentRecord] = []
+        lines = content.splitlines()
+        for line in lines[1:]:  # skip header
+            if not line.strip():
+                continue
+            parts = line.split("\t", maxsplit=3)
+            if len(parts) < 4:
+                continue
+            records.append(
+                ExperimentRecord(
+                    commit=parts[0],
+                    metric_value=float(parts[1]),
+                    status=parts[2],
+                    description=parts[3],
+                )
+            )
+        return records
+
     def summary(self) -> dict[str, int]:
         """Return counts by status category."""
         records = self.read_all()

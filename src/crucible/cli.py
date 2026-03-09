@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import importlib.resources
+import logging
 import shutil
 import subprocess
 from pathlib import Path
+
+import json as json_module
 
 import click
 
@@ -57,8 +60,14 @@ def _write_pyproject(dest: Path, name: str, extra_deps: list[str] | None = None)
 
 
 @click.group()
-def main() -> None:
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
+def main(verbose: bool) -> None:
     """crucible — automated experiment loop."""
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="[%(asctime)s] %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
 
 @main.command()
@@ -159,7 +168,7 @@ def init(tag: str, project_dir: str) -> None:
     from crucible.agents.claude_code import ClaudeCodeAgent
     from crucible.orchestrator import Orchestrator
 
-    agent = ClaudeCodeAgent()
+    agent = ClaudeCodeAgent(system_prompt_file=config.agent.system_prompt)
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
     orch.init()
 
@@ -186,20 +195,24 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int) -> None:
     except ConfigError as e:
         raise click.ClickException(str(e))
 
-    # Check that init was already run
-    results_path = project / "results.tsv"
-    if not results_path.exists():
-        raise click.ClickException(
-            f"No results.tsv found. Run 'crucible init --tag {tag}' first."
-        )
-
     from crucible.agents.claude_code import ClaudeCodeAgent
     from crucible.orchestrator import Orchestrator
 
-    agent = ClaudeCodeAgent(timeout=timeout, model=model)
+    agent = ClaudeCodeAgent(timeout=timeout, model=model, system_prompt_file=config.agent.system_prompt)
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
 
-    click.echo(f"Starting experiment loop for '{tag}'…")
+    # Resume if branch exists, otherwise require init
+    if orch.git.branch_exists(tag):
+        orch.resume()
+        existing = orch.results.read_all()
+        click.echo(f"Resuming experiment '{tag}' ({len(existing)} previous iterations)")
+    else:
+        results_path = project / "results.tsv"
+        if not results_path.exists():
+            raise click.ClickException(
+                f"No results.tsv found. Run 'crucible init --tag {tag}' first."
+            )
+
     click.echo("Press Ctrl+C to stop gracefully.")
     orch.run_loop()
     click.echo("Stopped.")
@@ -207,7 +220,8 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int) -> None:
 
 @main.command()
 @click.option("--project-dir", default=".", help="Project root directory.")
-def status(project_dir: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def status(project_dir: str, as_json: bool) -> None:
     """Show summary of experiment results."""
     try:
         project = Path(project_dir).resolve()
@@ -220,19 +234,53 @@ def status(project_dir: str) -> None:
         raise click.ClickException("No results.tsv found. Run 'init' first.")
 
     summary = results.summary()
+    best = results.best(config.metric.direction)
+
+    if as_json:
+        data = {
+            "experiment": config.name,
+            **summary,
+            "best": {
+                "metric": best.metric_value,
+                "commit": best.commit,
+                "description": best.description,
+            } if best else None,
+        }
+        click.echo(json_module.dumps(data))
+        return
+
     click.echo(f"Experiment: {config.name}")
     click.echo(f"Total: {summary['total']}  Kept: {summary['kept']}  "
                f"Discarded: {summary['discarded']}  Crashed: {summary['crashed']}")
-
-    best = results.best(config.metric.direction)
     if best is not None:
         click.echo(f"Best {config.metric.name}: {best.metric_value} (commit {best.commit})")
 
 
 @main.command()
+@click.option("--project-dir", default=".", help="Project root directory.")
+def validate(project_dir: str) -> None:
+    """Validate project configuration and run a test execution."""
+    from crucible.validator import validate_project
+
+    project = Path(project_dir).resolve()
+    results = validate_project(project)
+
+    all_passed = True
+    for r in results:
+        icon = "PASS" if r.passed else "FAIL"
+        click.echo(f"  [{icon}] {r.name}: {r.message}")
+        if not r.passed:
+            all_passed = False
+
+    if not all_passed:
+        raise click.ClickException("Validation failed.")
+
+
+@main.command()
 @click.option("--last", default=10, help="Number of recent results to show.")
 @click.option("--project-dir", default=".", help="Project root directory.")
-def history(last: int, project_dir: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def history(last: int, project_dir: str, as_json: bool) -> None:
     """Show recent experiment results."""
     project = Path(project_dir).resolve()
     results = ResultsLog(project / "results.tsv")
@@ -240,6 +288,15 @@ def history(last: int, project_dir: str) -> None:
         raise click.ClickException("No results.tsv found. Run 'init' first.")
 
     records = results.read_last(last)
+
+    if as_json:
+        data = [
+            {"commit": r.commit, "metric": r.metric_value, "status": r.status, "description": r.description}
+            for r in records
+        ]
+        click.echo(json_module.dumps(data))
+        return
+
     if not records:
         click.echo("No results yet.")
         return
@@ -248,3 +305,56 @@ def history(last: int, project_dir: str) -> None:
     click.echo("-" * 60)
     for r in records:
         click.echo(f"{r.commit:<10} {r.metric_value:>10.4f} {r.status:<10} {r.description}")
+
+
+@main.command()
+@click.argument("tags", nargs=2)
+@click.option("--project-dir", default=".", help="Project root directory.")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
+    """Compare two experiment runs side by side."""
+    try:
+        project = Path(project_dir).resolve()
+        config = load_config(project)
+    except ConfigError as e:
+        raise click.ClickException(str(e))
+
+    from crucible.git_manager import GitManager
+
+    git = GitManager(workspace=project, branch_prefix=config.git.branch_prefix)
+    comparison = {}
+
+    for tag in tags:
+        try:
+            content = git.show_file(tag, "results.tsv")
+        except subprocess.CalledProcessError:
+            raise click.ClickException(f"Cannot read results.tsv from branch {config.git.branch_prefix}/{tag}")
+        records = ResultsLog.read_from_string(content)
+        kept = [r for r in records if r.status == "keep"]
+        best = None
+        if kept:
+            if config.metric.direction == "minimize":
+                best = min(kept, key=lambda r: r.metric_value)
+            else:
+                best = max(kept, key=lambda r: r.metric_value)
+        comparison[tag] = {
+            "iterations": len(records),
+            "kept": len(kept),
+            "discarded": sum(1 for r in records if r.status == "discard"),
+            "crashed": sum(1 for r in records if r.status == "crash"),
+            "best_metric": best.metric_value if best else None,
+            "best_commit": best.commit if best else None,
+        }
+
+    if as_json:
+        click.echo(json_module.dumps(comparison))
+        return
+
+    tag_a, tag_b = tags
+    col_w = max(len(tag_a), len(tag_b), 12)
+    click.echo(f"{'':>16} {tag_a:>{col_w}} {tag_b:>{col_w}}")
+    for key in ("iterations", "kept", "discarded", "crashed", "best_metric", "best_commit"):
+        va = comparison[tag_a].get(key, "N/A")
+        vb = comparison[tag_b].get(key, "N/A")
+        label = key.replace("_", " ").title()
+        click.echo(f"{label:>16} {str(va):>{col_w}} {str(vb):>{col_w}}")

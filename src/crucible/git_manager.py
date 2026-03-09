@@ -58,6 +58,25 @@ class GitManager:
             return []
         return output.splitlines()
 
+    def branch_exists(self, tag: str) -> bool:
+        """Check if the experiment branch already exists."""
+        branch_name = f"{self.branch_prefix}/{tag}"
+        result = subprocess.run(
+            ["git", "branch", "--list", branch_name],
+            cwd=self.workspace, capture_output=True, text=True,
+        )
+        return bool(result.stdout.strip())
+
+    def checkout_branch(self, tag: str) -> None:
+        """Checkout an existing experiment branch."""
+        branch_name = f"{self.branch_prefix}/{tag}"
+        self._run("checkout", branch_name)
+
+    def show_file(self, tag: str, file_path: str) -> str:
+        """Read a file's content from a specific experiment branch."""
+        branch_name = f"{self.branch_prefix}/{tag}"
+        return self._run("show", f"{branch_name}:{file_path}")
+
     def revert_changes(self) -> None:
         """Discard all working tree changes and remove untracked files."""
         self._run("checkout", "--", ".")

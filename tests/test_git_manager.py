@@ -61,3 +61,28 @@ def test_revert_changes(git_repo):
     (git_repo / "file.txt").write_text("dirty")
     gm.revert_changes()
     assert (git_repo / "file.txt").read_text() == "initial"
+
+
+def test_branch_exists(git_repo):
+    gm = GitManager(workspace=git_repo)
+    gm.create_branch("run1")
+    assert gm.branch_exists("run1") is True
+    assert gm.branch_exists("nonexistent") is False
+
+
+def test_show_file(git_repo):
+    gm = GitManager(workspace=git_repo)
+    gm.create_branch("run1")
+    (git_repo / "data.txt").write_text("hello world")
+    gm.commit("add data")
+    content = gm.show_file("run1", "data.txt")
+    assert content == "hello world"
+
+
+def test_checkout_branch(git_repo):
+    gm = GitManager(workspace=git_repo)
+    gm.create_branch("run1")
+    subprocess.run(["git", "checkout", "main"], cwd=git_repo, check=True, capture_output=True)
+    gm.checkout_branch("run1")
+    result = subprocess.run(["git", "branch", "--show-current"], cwd=git_repo, capture_output=True, text=True)
+    assert result.stdout.strip() == "crucible/run1"
