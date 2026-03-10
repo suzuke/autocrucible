@@ -78,10 +78,28 @@ uv.lock
 """
 
 
+def _extract_json(text: str) -> str:
+    """Extract JSON from text that may be wrapped in markdown code fences."""
+    import re
+
+    # Try raw text first
+    stripped = text.strip()
+    if stripped.startswith("{"):
+        return stripped
+
+    # Extract from ```json ... ``` or ``` ... ```
+    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", stripped, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+
+    return stripped
+
+
 def _call_claude(prompt: str, system_prompt: str = "") -> str:
     """Bridge async Claude Agent SDK call to sync."""
     try:
-        return asyncio.run(_call_claude_async(prompt, system_prompt))
+        raw = asyncio.run(_call_claude_async(prompt, system_prompt))
+        return _extract_json(raw)
     except Exception as e:
         logger.error(f"Claude call failed: {e}")
         raise
@@ -114,7 +132,11 @@ class ExperimentWizard:
     def analyze(self, description: str) -> dict:
         """Phase 1: send description to Claude, return parsed JSON with inferred + uncertain."""
         raw = _call_claude(description, system_prompt=ANALYZE_SYSTEM_PROMPT)
-        return json.loads(raw)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            logger.error(f"Claude returned non-JSON: {raw[:200]}")
+            raise
 
     def generate(self, description: str, decisions: dict, dest: Path) -> str:
         """Phase 2: send decisions to Claude, write files, return summary."""
