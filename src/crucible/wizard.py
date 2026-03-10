@@ -16,11 +16,19 @@ ANALYZE_SYSTEM_PROMPT = """\
 You are an experiment design assistant. The user will describe an optimization experiment.
 Return ONLY valid JSON with two keys:
 - "inferred": a dict of parameters you can confidently determine from the description, including:
-  name, metric_name, metric_direction, editable_files, timeout_seconds
+  name, metric_name, metric_direction, editable_files, timeout_seconds,
+  and "architecture_guards" — a list of code-enforced constraints to embed in evaluate.py
+  (e.g. "verify neural network is called during decision", "cap editable LOC at 500",
+  "ban more than 5 hand-written heuristic functions").
 - "uncertain": a list of at most 3 items where you need clarification. Each item has:
   - "param": the parameter name
   - "question": a clear question for the user
   - "choices": a list of options, each with "label" and "explanation"
+
+When the user specifies an algorithmic approach (e.g. "AlphaZero", "genetic algorithm",
+"reinforcement learning"), you MUST infer architecture_guards that prevent the agent
+from bypassing that approach with hand-coded rules. The metric alone is not enough —
+the agent will find shortcuts if constraints are only stated in text.
 Do not include any text outside the JSON object.
 """
 
@@ -31,6 +39,33 @@ Return ONLY valid JSON with two keys:
   .crucible/config.yaml, .crucible/program.md, and any source files needed.
 - "summary": a one-line summary of the generated experiment.
 Do not include any text outside the JSON object.
+
+## Architecture Guards (CRITICAL)
+
+The evaluate.py you generate MUST include code-enforced architecture constraints.
+The agent will try to maximize the metric by any means — if you only state constraints
+in program.md, the agent WILL bypass them. Constraints must be checked in evaluate.py
+(which is readonly) and violations must result in metric penalties.
+
+Include these guards in evaluate.py as appropriate:
+
+1. **Code complexity cap**: Use `ast` or line counting on the editable file(s).
+   If LOC exceeds a threshold (e.g. 2x the initial size), apply a penalty multiplier.
+
+2. **Required module usage**: If the experiment specifies an approach (e.g. neural network,
+   genetic algorithm), verify at runtime that the core module is actually used in
+   decision-making — not bypassed by hand-coded rules. For example, instrument the
+   model's forward() call and check it was invoked during evaluation.
+
+3. **Banned patterns**: If the approach should learn behavior (not hard-code it),
+   use `ast.parse` on the editable file to detect excessive hand-written heuristic
+   functions (e.g. more than N function definitions beyond the expected API).
+
+4. **Decision attribution**: Where possible, have the agent's interface return metadata
+   about how the decision was made, and verify the stated approach was actually used.
+
+Apply penalties as a multiplier on the primary metric (e.g. `metric *= 0.3` for
+violations) rather than zeroing it out, so the agent still gets gradient signal.
 """
 
 GITIGNORE_CONTENT = """\

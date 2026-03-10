@@ -75,3 +75,40 @@ def test_wizard_generate_creates_gitignore(tmp_path: Path):
         )
     gitignore = (tmp_path / ".gitignore").read_text()
     assert "results.tsv" in gitignore
+
+
+def test_wizard_analyze_includes_architecture_guards():
+    """analyze() response with architecture_guards should be accepted."""
+    response_with_guards = json.dumps({
+        "inferred": {
+            "name": "gomoku-alphazero",
+            "metric_name": "win_rate",
+            "metric_direction": "maximize",
+            "editable_files": ["agent.py"],
+            "timeout_seconds": 600,
+            "architecture_guards": [
+                "verify neural network forward() is called during choose_move",
+                "cap agent.py LOC at 500",
+                "ban more than 5 non-API function definitions",
+            ],
+        },
+        "uncertain": [],
+    })
+    wizard = ExperimentWizard()
+    with patch("crucible.wizard._call_claude", return_value=response_with_guards):
+        result = wizard.analyze("AlphaZero Gomoku agent")
+    assert "architecture_guards" in result["inferred"]
+    assert len(result["inferred"]["architecture_guards"]) == 3
+
+
+def test_analyze_prompt_mentions_architecture_guards():
+    """The analyze system prompt should instruct Claude to infer architecture_guards."""
+    from crucible.wizard import ANALYZE_SYSTEM_PROMPT
+    assert "architecture_guards" in ANALYZE_SYSTEM_PROMPT
+
+
+def test_generate_prompt_mentions_architecture_guards():
+    """The generate system prompt should instruct Claude to embed guards in evaluate.py."""
+    from crucible.wizard import GENERATE_SYSTEM_PROMPT
+    assert "Architecture Guards" in GENERATE_SYSTEM_PROMPT
+    assert "penalty" in GENERATE_SYSTEM_PROMPT.lower()
