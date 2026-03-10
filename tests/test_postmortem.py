@@ -1,7 +1,7 @@
 import subprocess
 import pytest
 from pathlib import Path
-from crucible.postmortem import PostmortemAnalyzer, PostmortemReport
+from crucible.postmortem import PostmortemAnalyzer, PostmortemReport, render_text
 from crucible.results import HEADER
 
 
@@ -93,3 +93,38 @@ def test_postmortem_minimize_direction(tmp_path):
     assert report.best_metric == 0.5
     assert report.best_commit == "aaa0002"
     assert report.best_description == "better"
+
+
+def test_render_text_contains_summary():
+    report = PostmortemReport(
+        total=3,
+        kept=2,
+        discarded=0,
+        crashed=1,
+        best_metric=20.0,
+        best_commit="ccc3333",
+        best_description="improved",
+        trend=[
+            {"iteration": 1, "metric": 10.0, "status": "keep", "description": "baseline", "commit": "aaa1111"},
+            {"iteration": 2, "metric": 20.0, "status": "keep", "description": "improved", "commit": "ccc3333"},
+            {"iteration": 3, "metric": 0.0, "status": "crash", "description": "broke it", "commit": "ddd4444"},
+        ],
+        failure_streaks=[],
+    )
+    text = render_text(report)
+    assert "## Summary" in text
+    assert "Best: 20.0" in text
+    assert "ccc3333" in text
+    assert "Kept: 2/3" in text
+    assert "66%" in text
+    assert "Crashed: 1" in text
+    assert "\u2588" in text  # filled bar char
+    assert "\u2591" in text  # empty bar char
+    assert "\u2605" in text  # star marker on best
+    assert "## Metric Trend" in text
+
+
+def test_render_text_empty_results():
+    report = PostmortemReport()
+    text = render_text(report)
+    assert text == "No iterations recorded."

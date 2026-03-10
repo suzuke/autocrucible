@@ -79,3 +79,74 @@ class PostmortemAnalyzer:
         if streak_len >= 2:
             streaks.append({"start": streak_start, "length": streak_len})
         return streaks
+
+
+def render_text(report: PostmortemReport) -> str:
+    """Render a PostmortemReport as a human-readable terminal string."""
+    if report.total == 0:
+        return "No iterations recorded."
+
+    lines: list[str] = []
+
+    # Summary
+    lines.append("## Summary")
+    best_str = f"{report.best_metric} ({report.best_commit})" if report.best_metric is not None else "N/A"
+    lines.append(f"  Best: {best_str}")
+    kept_pct = int(100 * report.kept / report.total) if report.total else 0
+    lines.append(
+        f"  Kept: {report.kept}/{report.total} ({kept_pct}%)  |  "
+        f"Discarded: {report.discarded}  |  Crashed: {report.crashed}"
+    )
+    lines.append("")
+
+    # Metric Trend
+    if report.trend:
+        lines.append("## Metric Trend")
+        max_metric = max(
+            (t["metric"] for t in report.trend if t["metric"] is not None and t["metric"] > 0),
+            default=1.0,
+        )
+        bar_width = 20
+        for t in report.trend:
+            metric = t["metric"] if t["metric"] is not None else 0.0
+            filled = round(bar_width * metric / max_metric) if max_metric > 0 else 0
+            filled = max(0, min(bar_width, filled))
+            empty = bar_width - filled
+            bar = "\u2588" * filled + "\u2591" * empty
+
+            # Star marker for the best commit with keep status
+            is_best = (
+                t["commit"] == report.best_commit
+                and t["status"] == "keep"
+            )
+            star = " \u2605 " if is_best else "   "
+
+            # Truncate description to 40 chars
+            desc = t.get("description", "") or ""
+            if len(desc) > 40:
+                desc = desc[:39] + "\u2026"
+
+            lines.append(
+                f"  iter {t['iteration']:>3} {bar} {metric:>5}  "
+                f"  {t['status']:<9}{star}{desc}"
+            )
+        lines.append("")
+
+    # Failure Streaks
+    if report.failure_streaks:
+        lines.append("## Failure Streaks")
+        for s in report.failure_streaks:
+            end = s["start"] + s["length"] - 1
+            lines.append(
+                f"  iter {s['start']}-{end}: {s['length']} consecutive failures"
+            )
+        lines.append("")
+
+    # AI Insights
+    if report.ai_insights:
+        lines.append("## Key Insights")
+        lines.append(f"  {report.ai_insights}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
