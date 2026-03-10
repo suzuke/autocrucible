@@ -78,6 +78,16 @@ cd ~/my-experiment
 crucible init --tag run1   # auto git-init if needed
 ```
 
+**Using the wizard (AI-generated scaffold):**
+
+```bash
+crucible wizard ~/my-experiment --describe "Train an AlphaZero Gomoku agent using NN and MCTS"
+cd ~/my-experiment
+crucible init --tag run1
+```
+
+The wizard analyzes your description, asks clarifying questions, and generates a complete project with **architecture guards** baked into `evaluate.py` — preventing the agent from bypassing your intended approach.
+
 **From scratch:**
 
 ```bash
@@ -197,6 +207,18 @@ crucible run --tag run1
 - **Agent**: Uses the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) with a tool allowlist (Read, Edit, Write, Glob, Grep). The agent can read files, make targeted edits, and search the codebase — but cannot execute arbitrary commands.
 - **Environment**: If your project has a `.venv/`, crucible automatically activates it when running experiment commands, so `python3 evaluate.py` uses the correct interpreter and packages.
 - **Git**: Every attempt is committed. Improvements advance the branch; failures are tagged and reset, preserving the diff for analysis.
+
+### Postmortem analysis
+
+After a run completes (or is interrupted), analyze what happened:
+
+```bash
+crucible postmortem                   # text report with trend chart
+crucible postmortem --json            # machine-readable output
+crucible postmortem --ai              # include AI-generated insights
+```
+
+The postmortem shows metric trends, failure streaks, and the best result. With `--ai`, Claude analyzes the iteration history and provides actionable insights about turning points, plateaus, and suggested next directions.
 
 ### Validate before running
 

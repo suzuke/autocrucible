@@ -78,6 +78,16 @@ cd ~/my-experiment
 crucible init --tag run1   # 自動 git-init（如果還沒有）
 ```
 
+**使用 Wizard（AI 生成腳手架）：**
+
+```bash
+crucible wizard ~/my-experiment --describe "用 AlphaZero 架構訓練五子棋 agent"
+cd ~/my-experiment
+crucible init --tag run1
+```
+
+Wizard 會分析你的描述、提出澄清問題，然後生成完整專案——`evaluate.py` 裡會自動嵌入**架構約束**，防止 agent 繞過你指定的方法（例如用手寫規則取代神經網路）。
+
 **從零開始：**
 
 ```bash
@@ -197,6 +207,18 @@ crucible run --tag run1
 - **Agent**：使用 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)，搭配工具白名單（Read、Edit、Write、Glob、Grep）。Agent 可以讀取檔案、精準編輯和搜尋程式碼——但不能執行任意指令。
 - **執行環境**：如果專案有 `.venv/`，crucible 會自動啟用它來執行實驗指令，確保 `python3 evaluate.py` 使用正確的直譯器和套件。
 - **Git**：每次嘗試都會 commit。改善就推進 branch；失敗則打 tag 後 reset，保留 diff 供事後分析。
+
+### 實驗事後分析
+
+實驗結束（或中斷）後，分析發生了什麼：
+
+```bash
+crucible postmortem                   # 文字報告，含趨勢圖
+crucible postmortem --json            # 機器可讀輸出
+crucible postmortem --ai              # 含 AI 生成的洞察
+```
+
+Postmortem 顯示指標趨勢、連續失敗區段和最佳結果。加上 `--ai` 時，Claude 會分析迭代歷史，提供關於轉折點、瓶頸期和建議方向的可執行洞察。
 
 ### 執行前驗證
 
