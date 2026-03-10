@@ -536,6 +536,57 @@ def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
 
 
 @main.command()
+@click.argument("dest", type=click.Path())
+@click.option("--describe", default=None, help="Experiment description (skip interactive prompt).")
+def wizard(dest: str, describe: str | None) -> None:
+    """Generate a new experiment from a natural language description."""
+    from crucible.wizard import ExperimentWizard
+
+    if describe is not None:
+        description = describe
+    else:
+        description = click.prompt("What do you want to optimize? Describe your experiment")
+
+    click.echo("Analyzing your description...")
+    wiz = ExperimentWizard()
+    try:
+        result = wiz.analyze(description)
+    except Exception as e:
+        raise click.ClickException(f"Analysis failed: {e}")
+
+    inferred = result.get("inferred", {})
+    uncertain = result.get("uncertain", [])
+
+    decisions = dict(inferred)
+    for item in uncertain:
+        choices = item.get("choices", [])
+        click.echo(f"\n{item['question']}")
+        for i, choice in enumerate(choices, 1):
+            click.echo(f"  {i}. {choice['label']} — {choice['explanation']}")
+        pick = click.prompt("Choose", type=int, default=1)
+        idx = max(0, min(pick - 1, len(choices) - 1))
+        decisions[item["param"]] = choices[idx]["label"]
+
+    click.echo("Generating experiment...")
+    dest_path = Path(dest).resolve()
+    dest_path.mkdir(parents=True, exist_ok=True)
+    try:
+        summary = wiz.generate(description, decisions, dest_path)
+    except Exception as e:
+        raise click.ClickException(f"Generation failed: {e}")
+
+    _write_pyproject(dest_path, inferred.get("name", "my-experiment"))
+
+    click.echo(f"\nCreated experiment at {dest_path}")
+    click.echo(f"Summary: {summary}")
+    click.echo("\nNext steps:")
+    click.echo(f"  cd {dest_path}")
+    click.echo("  uv sync")
+    click.echo("  crucible init --tag run1")
+    click.echo("  crucible run --tag run1")
+
+
+@main.command()
 @click.option("--tag", required=True, help="Experiment tag to analyze.")
 @click.option("--project-dir", default=".", help="Project root directory.")
 @click.option("--no-ai", is_flag=True, help="Skip AI insights (data only).")

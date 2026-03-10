@@ -1,9 +1,14 @@
 import json
 import subprocess
+from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 from pathlib import Path
 from crucible.cli import main
+
+
+MOCK_ANALYZE = '{"inferred": {"name": "test", "metric_name": "score", "metric_direction": "maximize", "editable_files": ["solution.py"], "timeout_seconds": 60}, "uncertain": []}'
+MOCK_GENERATE = '{"files": {".crucible/config.yaml": "name: test\\nfiles:\\n  editable: [solution.py]\\ncommands:\\n  run: \\"echo ok\\"\\n  eval: \\"echo score: 1\\"\\nmetric:\\n  name: score\\n  direction: maximize", ".crucible/program.md": "Optimize.", "solution.py": "x = 1"}, "summary": "Test experiment"}'
 
 
 VALID_CONFIG = """\
@@ -188,3 +193,27 @@ def test_init_missing_config(tmp_path):
     runner = CliRunner()
     result = runner.invoke(main, ["init", "--tag", "test3", "--project-dir", str(tmp_path)])
     assert result.exit_code != 0
+
+
+@patch("crucible.wizard._call_claude", side_effect=[MOCK_ANALYZE, MOCK_GENERATE])
+def test_wizard_command_with_describe(mock_claude, tmp_path):
+    runner = CliRunner()
+    dest = str(tmp_path / "my-exp")
+    result = runner.invoke(main, ["wizard", dest, "--describe", "optimize a neural network"])
+    assert result.exit_code == 0, result.output
+    dest_path = Path(dest)
+    assert (dest_path / ".crucible" / "config.yaml").exists()
+    assert (dest_path / ".crucible" / "program.md").exists()
+    assert (dest_path / "solution.py").exists()
+    assert (dest_path / "pyproject.toml").exists()
+
+
+@patch("crucible.wizard._call_claude", side_effect=[MOCK_ANALYZE, MOCK_GENERATE])
+def test_wizard_command_interactive(mock_claude, tmp_path):
+    runner = CliRunner()
+    dest = str(tmp_path / "my-exp")
+    result = runner.invoke(main, ["wizard", dest], input="optimize something\n")
+    assert result.exit_code == 0, result.output
+    dest_path = Path(dest)
+    assert (dest_path / ".crucible" / "config.yaml").exists()
+    assert (dest_path / "solution.py").exists()
