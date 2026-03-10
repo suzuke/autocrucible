@@ -230,6 +230,7 @@ You are optimizing <what>.
 These constraints are verified in code by the evaluation harness.
 Violating them will result in metric = 0.0.
 
+- **DO NOT attempt to run or execute any scripts.** You can only READ and EDIT files. The platform handles execution automatically after your edits.
 - Edit only `<editable_file>`
 - <Interface contract: function signature, input/output format>
 - <Correctness requirement: eval harness verifies this>
