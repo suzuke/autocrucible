@@ -51,6 +51,11 @@ Return ONLY valid JSON with two keys:
 - "summary": a one-line summary of the generated experiment.
 Do not include any text outside the JSON object.
 
+CRITICAL: Every file value MUST contain the COMPLETE, REAL source code — not placeholders,
+not abbreviations, not "<written>" or "..." or "# see above". Each file must be fully
+functional as-is. If the JSON is too large, reduce the code complexity rather than
+truncating file contents.
+
 ## Architecture Guards (CRITICAL)
 
 The evaluate.py you generate MUST include code-enforced architecture constraints.
@@ -251,6 +256,17 @@ class ExperimentWizard:
         })
         raw = _call_claude(prompt, system_prompt=GENERATE_SYSTEM_PROMPT)
         result = json.loads(raw)
+
+        # Validate that files contain real content, not placeholders
+        placeholder_patterns = ["<written>", "<content>", "<code>", "..."]
+        for rel_path, content in result["files"].items():
+            stripped = content.strip()
+            if stripped in placeholder_patterns or len(stripped) < 20:
+                raise ValueError(
+                    f"Generated file '{rel_path}' contains placeholder content "
+                    f"({stripped[:50]!r}). Claude failed to produce real code. "
+                    f"Try running the wizard again."
+                )
 
         # Write each file
         for rel_path, content in result["files"].items():
