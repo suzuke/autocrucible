@@ -1,4 +1,5 @@
 import subprocess
+import unittest.mock
 import pytest
 from pathlib import Path
 from crucible.postmortem import PostmortemAnalyzer, PostmortemReport, render_text
@@ -128,3 +129,46 @@ def test_render_text_empty_results():
     report = PostmortemReport()
     text = render_text(report)
     assert text == "No iterations recorded."
+
+
+def test_ai_insights_called_with_data(tmp_path):
+    """Mock _call_claude_for_insights, verify report.ai_insights is set."""
+    _setup_repo(tmp_path)
+    _make_results_tsv(tmp_path / "results.tsv", [
+        ("aaa0001", 1.0, "keep", "baseline"),
+        ("aaa0002", 0.8, "keep", "improved lr"),
+        ("aaa0003", 0.0, "crash", "oom"),
+    ])
+    analyzer = PostmortemAnalyzer(tmp_path, direction="minimize")
+    report = analyzer.analyze()
+
+    with unittest.mock.patch(
+        "crucible.postmortem._call_claude_for_insights",
+        return_value="1. The learning rate change was the key turning point.",
+    ) as mock_claude:
+        analyzer.add_ai_insights(report)
+        mock_claude.assert_called_once()
+        assert report.ai_insights == "1. The learning rate change was the key turning point."
+
+
+def test_ai_insights_prompt_contains_data(tmp_path):
+    """Capture prompt passed to Claude, verify it contains metric values and descriptions."""
+    _setup_repo(tmp_path)
+    _make_results_tsv(tmp_path / "results.tsv", [
+        ("aaa0001", 1.0, "keep", "baseline"),
+        ("aaa0002", 0.5, "keep", "better model"),
+    ])
+    analyzer = PostmortemAnalyzer(tmp_path, direction="minimize")
+    report = analyzer.analyze()
+
+    with unittest.mock.patch(
+        "crucible.postmortem._call_claude_for_insights",
+        return_value="insights here",
+    ) as mock_claude:
+        analyzer.add_ai_insights(report)
+        prompt = mock_claude.call_args[0][0]
+        assert "1.0" in prompt
+        assert "0.5" in prompt
+        assert "baseline" in prompt
+        assert "better model" in prompt
+        assert "minimize" in prompt

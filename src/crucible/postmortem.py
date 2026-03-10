@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from crucible.results import ResultsLog
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -61,6 +66,43 @@ class PostmortemAnalyzer:
 
         return report
 
+    def add_ai_insights(self, report: PostmortemReport) -> None:
+        """Call Claude to generate AI insights and set report.ai_insights."""
+        prompt = self._build_insights_prompt(report)
+        report.ai_insights = _call_claude_for_insights(prompt)
+
+    def _build_insights_prompt(self, report: PostmortemReport) -> str:
+        """Assemble a prompt from report data for Claude analysis."""
+        lines: list[str] = []
+        lines.append("Analyze this optimization experiment run:")
+        lines.append("")
+        lines.append(f"Direction: {self.direction}")
+        lines.append(f"Total iterations: {report.total}")
+        lines.append(f"Kept: {report.kept}, Discarded: {report.discarded}, Crashed: {report.crashed}")
+        if report.best_metric is not None:
+            lines.append(f"Best metric: {report.best_metric} (commit {report.best_commit})")
+        lines.append("")
+
+        lines.append("Iteration history:")
+        for t in report.trend:
+            metric = t["metric"] if t["metric"] is not None else "N/A"
+            desc = t.get("description", "") or ""
+            lines.append(f"  iter {t['iteration']}: {metric} ({t['status']}) — {desc}")
+        lines.append("")
+
+        if report.failure_streaks:
+            lines.append("Failure streaks:")
+            for s in report.failure_streaks:
+                end = s["start"] + s["length"] - 1
+                lines.append(f"  iter {s['start']}-{end}: {s['length']} consecutive failures")
+            lines.append("")
+
+        lines.append(
+            "Provide 3-5 numbered insights about: turning points, failure patterns, "
+            "plateaus, and suggested next directions."
+        )
+        return "\n".join(lines)
+
     @staticmethod
     def _find_failure_streaks(records) -> list[dict]:
         streaks: list[dict] = []
@@ -79,6 +121,41 @@ class PostmortemAnalyzer:
         if streak_len >= 2:
             streaks.append({"start": streak_start, "length": streak_len})
         return streaks
+
+
+async def _call_claude_async(prompt: str) -> str:
+    from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
+
+    saved = os.environ.pop("CLAUDECODE", None)
+    try:
+        options = ClaudeAgentOptions(
+            system_prompt=(
+                "You are an experiment analyst. Provide concise, actionable "
+                "insights about optimization experiment results."
+            ),
+            permission_mode="bypassPermissions",
+            allowed_tools=[],
+            cwd=Path.cwd(),
+        )
+        last_text = ""
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock) and block.text.strip():
+                        last_text = block.text.strip()
+        return last_text or "(no insights generated)"
+    finally:
+        if saved is not None:
+            os.environ["CLAUDECODE"] = saved
+
+
+def _call_claude_for_insights(prompt: str) -> str:
+    """Call Claude Agent SDK to get AI insights. Returns text."""
+    try:
+        return asyncio.run(_call_claude_async(prompt))
+    except Exception as e:
+        logger.warning(f"AI insights failed: {e}")
+        return f"(AI analysis unavailable: {e})"
 
 
 def render_text(report: PostmortemReport) -> str:
