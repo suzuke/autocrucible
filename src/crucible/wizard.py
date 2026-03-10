@@ -42,47 +42,84 @@ Do not include any text outside the JSON object.
 """
 
 GENERATE_SYSTEM_PROMPT = """\
-You are an experiment scaffold generator. The user will provide a description, resolved decisions,
-and a detected runtime environment. Use the environment to generate hardware-appropriate code
-(e.g. MPS device for Apple Silicon, CUDA for NVIDIA GPUs, CPU fallback otherwise).
+You are an experiment scaffold generator for the Crucible platform.
+The user will provide a description, resolved decisions, and a detected runtime environment.
+
 Return ONLY valid JSON with two keys:
-- "files": a dict mapping relative file paths to their string contents. Must include:
-  .crucible/config.yaml, .crucible/program.md, and any source files needed.
+- "files": a dict mapping relative file paths to their string contents.
 - "summary": a one-line summary of the generated experiment.
 Do not include any text outside the JSON object.
 
-CRITICAL: Every file value MUST contain the COMPLETE, REAL source code — not placeholders,
-not abbreviations, not "<written>" or "..." or "# see above". Each file must be fully
-functional as-is. If the JSON is too large, reduce the code complexity rather than
-truncating file contents.
-
-## Architecture Guards (CRITICAL)
-
-The evaluate.py you generate MUST include code-enforced architecture constraints.
-The agent will try to maximize the metric by any means — if you only state constraints
-in program.md, the agent WILL bypass them. Constraints must be checked in evaluate.py
-(which is readonly) and violations must result in metric penalties.
-
-Include these guards in evaluate.py as appropriate:
-
-1. **Code complexity cap**: Use `ast` or line counting on the editable file(s).
-   If LOC exceeds a threshold (e.g. 2x the initial size), apply a penalty multiplier.
-
-2. **Required module usage**: If the experiment specifies an approach (e.g. neural network,
-   genetic algorithm), verify at runtime that the core module is actually used in
-   decision-making — not bypassed by hand-coded rules. For example, instrument the
-   model's forward() call and check it was invoked during evaluation.
-
-3. **Banned patterns**: If the approach should learn behavior (not hard-code it),
-   use `ast.parse` on the editable file to detect excessive hand-written heuristic
-   functions (e.g. more than N function definitions beyond the expected API).
-
-4. **Decision attribution**: Where possible, have the agent's interface return metadata
-   about how the decision was made, and verify the stated approach was actually used.
-
-Apply penalties as a multiplier on the primary metric (e.g. `metric *= 0.3` for
-violations) rather than zeroing it out, so the agent still gets gradient signal.
+CRITICAL RULES:
+1. Every file value MUST contain COMPLETE, REAL, FUNCTIONAL source code.
+   NOT placeholders, NOT abbreviations, NOT "[description]", NOT "<written>",
+   NOT "..." or "# see above". If the JSON is too large, reduce code complexity
+   rather than truncating file contents.
+2. Follow the Crucible Reference below EXACTLY for config.yaml schema,
+   evaluate.py output format, and program.md structure.
+3. Use the detected environment for hardware-appropriate code
+   (MPS for Apple Silicon, CUDA for NVIDIA, CPU fallback).
 """
+
+
+def _load_scaffold_reference() -> str:
+    """Load and trim the crucible scaffold reference for the generate prompt.
+
+    Only extracts format-critical sections (config.yaml schema, evaluate.py
+    template, program.md structure, common mistakes) to keep the system
+    prompt small enough for large code generation responses.
+    """
+    full_text = ""
+    try:
+        from importlib.resources import files
+        full_text = files("crucible").joinpath("data/scaffold_reference.md").read_text()
+    except Exception:
+        repo_skill = Path(__file__).resolve().parents[2] / ".claude/skills/crucible-setup/SKILL.md"
+        if repo_skill.exists():
+            full_text = repo_skill.read_text()
+
+    if not full_text:
+        logger.warning("Could not load scaffold reference — wizard may produce incorrect formats")
+        return ""
+
+    # Extract only the sections the wizard needs
+    return _extract_sections(full_text, [
+        "### Step 2:",   # evaluate.py template + output format
+        "### Step 4:",   # program.md structure
+        "### Step 5:",   # config.yaml schema
+        "## Common Mistakes",
+    ])
+
+
+def _extract_sections(text: str, headers: list[str]) -> str:
+    """Extract specific markdown sections from text by header prefix."""
+    lines = text.split("\n")
+    result: list[str] = []
+    capturing = False
+
+    for line in lines:
+        # Check if this line starts a section we want
+        if any(line.startswith(h) for h in headers):
+            capturing = True
+            result.append(line)
+            continue
+
+        # Stop capturing at next section of same or higher level
+        if capturing and line.startswith("#"):
+            header_level = len(line) - len(line.lstrip("#"))
+            current_level = min(
+                len(h) - len(h.lstrip("#"))
+                for h in headers
+                if any(r.startswith(h) for r in result)
+            ) if result else 3
+            if header_level <= current_level and not any(line.startswith(h) for h in headers):
+                capturing = False
+                continue
+
+        if capturing:
+            result.append(line)
+
+    return "\n".join(result)
 
 def _detect_environment() -> dict:
     """Detect the runtime environment for hardware-aware scaffold generation."""
@@ -248,20 +285,34 @@ class ExperimentWizard:
 
     def generate(self, description: str, decisions: dict, dest: Path) -> str:
         """Phase 2: send decisions to Claude, write files, return summary."""
+        import re
+
         env = _detect_environment()
         prompt = json.dumps({
             "description": description,
             "decisions": decisions,
             "environment": env,
         })
-        raw = _call_claude(prompt, system_prompt=GENERATE_SYSTEM_PROMPT)
+
+        # Build system prompt with scaffold reference
+        scaffold_ref = _load_scaffold_reference()
+        system = GENERATE_SYSTEM_PROMPT
+        if scaffold_ref:
+            system += "\n\n## Crucible Reference\n\n" + scaffold_ref
+
+        raw = _call_claude(prompt, system_prompt=system)
         result = json.loads(raw)
 
         # Validate that files contain real content, not placeholders
-        placeholder_patterns = ["<written>", "<content>", "<code>", "..."]
+        placeholder_re = re.compile(
+            r"^\[.*\]$"          # [description in brackets]
+            r"|^<\w+>$"         # <written>, <content>, <code>
+            r"|^\.\.\.$"        # ...
+            r"|^#\s*see above$" # # see above
+        , re.IGNORECASE)
         for rel_path, content in result["files"].items():
             stripped = content.strip()
-            if stripped in placeholder_patterns or len(stripped) < 20:
+            if placeholder_re.match(stripped) or len(stripped) < 20:
                 raise ValueError(
                     f"Generated file '{rel_path}' contains placeholder content "
                     f"({stripped[:50]!r}). Claude failed to produce real code. "

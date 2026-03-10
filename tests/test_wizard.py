@@ -107,11 +107,33 @@ def test_analyze_prompt_mentions_architecture_guards():
     assert "architecture_guards" in ANALYZE_SYSTEM_PROMPT
 
 
-def test_generate_prompt_mentions_architecture_guards():
-    """The generate system prompt should instruct Claude to embed guards in evaluate.py."""
+def test_generate_prompt_references_crucible_format():
+    """The generate system prompt should reference the Crucible scaffold format."""
     from crucible.wizard import GENERATE_SYSTEM_PROMPT
-    assert "Architecture Guards" in GENERATE_SYSTEM_PROMPT
-    assert "penalty" in GENERATE_SYSTEM_PROMPT.lower()
+    assert "Crucible Reference" in GENERATE_SYSTEM_PROMPT
+    assert "config.yaml" in GENERATE_SYSTEM_PROMPT
+
+
+def test_generate_loads_scaffold_reference():
+    """generate() should load scaffold reference and inject into system prompt."""
+    from crucible.wizard import _load_scaffold_reference
+    ref = _load_scaffold_reference()
+    assert "config.yaml" in ref or ref == ""
+
+
+def test_generate_rejects_bracket_placeholders(tmp_path: Path):
+    """generate() should reject files with [description] placeholder content."""
+    bad_response = json.dumps({
+        "files": {
+            "train.py": "[baseline 4-layer GPT, 256 dim]",
+            ".crucible/config.yaml": "name: test\n" + "x" * 30,
+        },
+        "summary": "test",
+    })
+    wizard = ExperimentWizard()
+    with patch("crucible.wizard._call_claude", return_value=bad_response):
+        with pytest.raises(ValueError, match="placeholder content"):
+            wizard.generate(description="test", decisions={}, dest=tmp_path)
 
 
 def test_detect_environment_returns_basic_info():
@@ -146,3 +168,19 @@ def test_analyze_appends_environment():
 
     assert len(captured_prompts) == 1
     assert "[Detected Runtime Environment]" in captured_prompts[0]
+
+
+def test_generate_injects_scaffold_reference(tmp_path: Path):
+    """generate() should inject scaffold reference into the system prompt sent to Claude."""
+    wizard = ExperimentWizard()
+    captured_system = []
+
+    def mock_call(prompt, system_prompt=""):
+        captured_system.append(system_prompt)
+        return MOCK_GENERATE_RESPONSE
+
+    with patch("crucible.wizard._call_claude", side_effect=mock_call):
+        wizard.generate(description="test", decisions={}, dest=tmp_path)
+
+    assert len(captured_system) == 1
+    assert "Crucible" in captured_system[0]

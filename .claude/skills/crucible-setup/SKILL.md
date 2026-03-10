@@ -289,6 +289,12 @@ commands:
   eval: "grep '^<metric_name>:' run.log"
   # setup: "pip install -r requirements.txt"  # optional
 
+# If training and evaluation are separate scripts, chain them and
+# redirect ALL output to run.log so the eval grep can find the metric:
+#   run: "(python3 train.py && python3 evaluate.py) > run.log 2>&1"
+# Do NOT redirect only the last command — train.py debug output is useful
+# and the metric line from evaluate.py must end up in run.log.
+
 metric:
   name: "<metric_name>"
   direction: "<minimize|maximize>"

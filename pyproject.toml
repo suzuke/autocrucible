@@ -19,6 +19,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/crucible"]
 
+[tool.hatch.build.targets.wheel.force-include]
+".claude/skills/crucible-setup/SKILL.md" = "crucible/data/scaffold_reference.md"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
