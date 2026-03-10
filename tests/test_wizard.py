@@ -112,3 +112,37 @@ def test_generate_prompt_mentions_architecture_guards():
     from crucible.wizard import GENERATE_SYSTEM_PROMPT
     assert "Architecture Guards" in GENERATE_SYSTEM_PROMPT
     assert "penalty" in GENERATE_SYSTEM_PROMPT.lower()
+
+
+def test_detect_environment_returns_basic_info():
+    """_detect_environment() should return OS, arch, and Python version."""
+    from crucible.wizard import _detect_environment
+    env = _detect_environment()
+    assert "os" in env
+    assert "arch" in env
+    assert "python" in env
+
+
+def test_format_environment_readable():
+    """_format_environment() should produce a human-readable string."""
+    from crucible.wizard import _format_environment
+    env = {"os": "Darwin", "arch": "arm64", "python": "3.12.0", "apple_silicon": True}
+    text = _format_environment(env)
+    assert "Darwin" in text
+    assert "Apple Silicon" in text
+
+
+def test_analyze_appends_environment():
+    """analyze() should append detected environment to the prompt sent to Claude."""
+    wizard = ExperimentWizard()
+    captured_prompts = []
+
+    def mock_call(prompt, system_prompt=""):
+        captured_prompts.append(prompt)
+        return MOCK_ANALYZE_RESPONSE
+
+    with patch("crucible.wizard._call_claude", side_effect=mock_call):
+        wizard.analyze("Optimize sorting")
+
+    assert len(captured_prompts) == 1
+    assert "[Detected Runtime Environment]" in captured_prompts[0]
