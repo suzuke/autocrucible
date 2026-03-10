@@ -533,3 +533,49 @@ def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
         vb = comparison[tag_b].get(key, "N/A")
         label = key.replace("_", " ").title()
         click.echo(f"{label:>16} {str(va):>{col_w}} {str(vb):>{col_w}}")
+
+
+@main.command()
+@click.option("--tag", required=True, help="Experiment tag to analyze.")
+@click.option("--project-dir", default=".", help="Project root directory.")
+@click.option("--no-ai", is_flag=True, help="Skip AI insights (data only).")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool) -> None:
+    """Analyze a completed experiment run."""
+    try:
+        project = Path(project_dir).resolve()
+        config = load_config(project)
+    except ConfigError as e:
+        raise click.ClickException(str(e))
+
+    results_path = project / "results.tsv"
+    if not results_path.exists():
+        raise click.ClickException("No results.tsv found. Run 'init' first.")
+
+    from crucible.postmortem import PostmortemAnalyzer, render_text
+
+    analyzer = PostmortemAnalyzer(workspace=project, direction=config.metric.direction)
+    report = analyzer.analyze()
+
+    if report.total == 0:
+        raise click.ClickException("No iterations recorded for this experiment.")
+
+    if not no_ai:
+        click.echo("Generating AI insights...")
+        analyzer.add_ai_insights(report)
+
+    if as_json:
+        data = {
+            "total": report.total,
+            "kept": report.kept,
+            "discarded": report.discarded,
+            "crashed": report.crashed,
+            "best_metric": report.best_metric,
+            "best_commit": report.best_commit,
+            "trend": report.trend,
+            "failure_streaks": report.failure_streaks,
+            "ai_insights": report.ai_insights,
+        }
+        click.echo(json_module.dumps(data))
+    else:
+        click.echo(render_text(report))

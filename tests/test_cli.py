@@ -143,6 +143,46 @@ def test_compare_json_output(tmp_path):
     assert "y" in data
 
 
+def test_postmortem_no_ai(tmp_path):
+    setup_project(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--tag", "pm1", "--project-dir", str(tmp_path)])
+    # Add some results
+    results_path = tmp_path / "results.tsv"
+    with results_path.open("a") as f:
+        f.write("abc1234\t0.5\tkeep\tfirst improvement\n")
+        f.write("def5678\t0.6\tdiscard\tworse attempt\n")
+        f.write("ghi9012\t0.3\tkeep\tbig improvement\n")
+    result = runner.invoke(main, ["postmortem", "--tag", "pm1", "--no-ai", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "Summary" in result.output
+    assert "\u2588" in result.output
+
+
+def test_postmortem_json(tmp_path):
+    setup_project(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--tag", "pm2", "--project-dir", str(tmp_path)])
+    # Add some results
+    results_path = tmp_path / "results.tsv"
+    with results_path.open("a") as f:
+        f.write("abc1234\t0.5\tkeep\tfirst improvement\n")
+        f.write("def5678\t0.3\tkeep\tsecond improvement\n")
+    result = runner.invoke(main, ["postmortem", "--tag", "pm2", "--no-ai", "--json", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert "total" in data
+    assert "kept" in data
+
+
+def test_postmortem_no_results(tmp_path):
+    setup_project(tmp_path)
+    runner = CliRunner()
+    # Don't init — no results.tsv
+    result = runner.invoke(main, ["postmortem", "--tag", "pm3", "--no-ai", "--project-dir", str(tmp_path)])
+    assert result.exit_code != 0
+
+
 def test_init_missing_config(tmp_path):
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
     runner = CliRunner()
