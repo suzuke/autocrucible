@@ -5,10 +5,11 @@ import pytest
 from click.testing import CliRunner
 from pathlib import Path
 from crucible.cli import main
+from crucible.results import results_filename
 
 
 MOCK_ANALYZE = '{"inferred": {"name": "test", "metric_name": "score", "metric_direction": "maximize", "editable_files": ["solution.py"], "timeout_seconds": 60}, "uncertain": []}'
-MOCK_GENERATE = '{"files": {".crucible/config.yaml": "name: test\\nfiles:\\n  editable: [solution.py]\\ncommands:\\n  run: \\"echo ok\\"\\n  eval: \\"echo score: 1\\"\\nmetric:\\n  name: score\\n  direction: maximize", ".crucible/program.md": "Optimize.", "solution.py": "x = 1"}, "summary": "Test experiment"}'
+MOCK_GENERATE = '{"files": {".crucible/config.yaml": "name: test\\nfiles:\\n  editable: [solution.py]\\ncommands:\\n  run: \\"echo ok\\"\\n  eval: \\"echo score: 1\\"\\nmetric:\\n  name: score\\n  direction: maximize", ".crucible/program.md": "Optimize the score metric by modifying solution.py to maximize output.", "solution.py": "# Solution file for optimization\\nx = 1\\nprint(x)"}, "summary": "Test experiment"}'
 
 
 VALID_CONFIG = """\
@@ -42,14 +43,14 @@ def test_init_command(tmp_path):
     runner = CliRunner()
     result = runner.invoke(main, ["init", "--tag", "test1", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0
-    assert (tmp_path / "results.tsv").exists()
+    assert (tmp_path / results_filename("test1")).exists()
 
 
 def test_status_command(tmp_path):
     setup_project(tmp_path)
     runner = CliRunner()
     runner.invoke(main, ["init", "--tag", "test2", "--project-dir", str(tmp_path)])
-    result = runner.invoke(main, ["status", "--project-dir", str(tmp_path)])
+    result = runner.invoke(main, ["status", "--tag", "test2", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0
     assert "0" in result.output
 
@@ -59,7 +60,7 @@ def test_verbose_flag(tmp_path):
     setup_project(tmp_path)
     runner = CliRunner()
     runner.invoke(main, ["init", "--tag", "vtest", "--project-dir", str(tmp_path)])
-    result = runner.invoke(main, ["--verbose", "status", "--project-dir", str(tmp_path)])
+    result = runner.invoke(main, ["--verbose", "status", "--tag", "vtest", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0
 
 
@@ -69,14 +70,14 @@ def test_run_resumes_existing_branch(tmp_path):
     runner.invoke(main, ["init", "--tag", "test1", "--project-dir", str(tmp_path)])
     subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
     result = runner.invoke(main, ["run", "--tag", "test1", "--project-dir", str(tmp_path)])
-    assert "No results.tsv found" not in (result.output or "")
+    assert "not found" not in (result.output or "").lower()
 
 
 def test_status_json_output(tmp_path):
     setup_project(tmp_path)
     runner = CliRunner()
     runner.invoke(main, ["init", "--tag", "json1", "--project-dir", str(tmp_path)])
-    result = runner.invoke(main, ["status", "--json", "--project-dir", str(tmp_path)])
+    result = runner.invoke(main, ["status", "--tag", "json1", "--json", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert "total" in data
@@ -88,7 +89,7 @@ def test_history_json_output(tmp_path):
     setup_project(tmp_path)
     runner = CliRunner()
     runner.invoke(main, ["init", "--tag", "json2", "--project-dir", str(tmp_path)])
-    result = runner.invoke(main, ["history", "--json", "--project-dir", str(tmp_path)])
+    result = runner.invoke(main, ["history", "--tag", "json2", "--json", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert isinstance(data, list)
@@ -111,18 +112,15 @@ def test_compare_command(tmp_path):
     runner = CliRunner()
     # Create branch a with a result
     runner.invoke(main, ["init", "--tag", "a", "--project-dir", str(tmp_path)])
-    results_path = tmp_path / "results.tsv"
+    results_path = tmp_path / results_filename("a")
     with results_path.open("a") as f:
         f.write("abc1234\t0.5\tkeep\tfirst improvement\n")
-    subprocess.run(["git", "add", "-f", "results.tsv"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "result"], cwd=tmp_path, check=True, capture_output=True)
     # Go back to main and create branch b
     subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
     runner.invoke(main, ["init", "--tag", "b", "--project-dir", str(tmp_path)])
-    with results_path.open("a") as f:
+    results_path_b = tmp_path / results_filename("b")
+    with results_path_b.open("a") as f:
         f.write("def5678\t0.3\tkeep\tsecond improvement\n")
-    subprocess.run(["git", "add", "-f", "results.tsv"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "result"], cwd=tmp_path, check=True, capture_output=True)
 
     result = runner.invoke(main, ["compare", "a", "b", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0
@@ -134,12 +132,8 @@ def test_compare_json_output(tmp_path):
     setup_project(tmp_path)
     runner = CliRunner()
     runner.invoke(main, ["init", "--tag", "x", "--project-dir", str(tmp_path)])
-    subprocess.run(["git", "add", "-f", "results.tsv"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "result"], cwd=tmp_path, check=True, capture_output=True)
     subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
     runner.invoke(main, ["init", "--tag", "y", "--project-dir", str(tmp_path)])
-    subprocess.run(["git", "add", "-f", "results.tsv"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "result"], cwd=tmp_path, check=True, capture_output=True)
 
     result = runner.invoke(main, ["compare", "x", "y", "--json", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0
@@ -153,7 +147,7 @@ def test_postmortem_no_ai(tmp_path):
     runner = CliRunner()
     runner.invoke(main, ["init", "--tag", "pm1", "--project-dir", str(tmp_path)])
     # Add some results
-    results_path = tmp_path / "results.tsv"
+    results_path = tmp_path / results_filename("pm1")
     with results_path.open("a") as f:
         f.write("abc1234\t0.5\tkeep\tfirst improvement\n")
         f.write("def5678\t0.6\tdiscard\tworse attempt\n")
@@ -169,7 +163,7 @@ def test_postmortem_json(tmp_path):
     runner = CliRunner()
     runner.invoke(main, ["init", "--tag", "pm2", "--project-dir", str(tmp_path)])
     # Add some results
-    results_path = tmp_path / "results.tsv"
+    results_path = tmp_path / results_filename("pm2")
     with results_path.open("a") as f:
         f.write("abc1234\t0.5\tkeep\tfirst improvement\n")
         f.write("def5678\t0.3\tkeep\tsecond improvement\n")
@@ -183,7 +177,7 @@ def test_postmortem_json(tmp_path):
 def test_postmortem_no_results(tmp_path):
     setup_project(tmp_path)
     runner = CliRunner()
-    # Don't init — no results.tsv
+    # Don't init — no results file
     result = runner.invoke(main, ["postmortem", "--tag", "pm3", "--no-ai", "--project-dir", str(tmp_path)])
     assert result.exit_code != 0
 
@@ -232,3 +226,22 @@ def test_postmortem_help():
     assert result.exit_code == 0
     assert "--no-ai" in result.output
     assert "--json" in result.output
+
+
+def test_init_separate_tags_have_separate_results(tmp_path):
+    """Each tag gets its own results file — no overwriting."""
+    setup_project(tmp_path)
+    runner = CliRunner()
+    runner.invoke(main, ["init", "--tag", "run1", "--project-dir", str(tmp_path)])
+    # Add a result to run1
+    with (tmp_path / results_filename("run1")).open("a") as f:
+        f.write("abc1234\t0.5\tkeep\tfirst\n")
+    # Go back to main and init run2
+    subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
+    runner.invoke(main, ["init", "--tag", "run2", "--project-dir", str(tmp_path)])
+    # run1's results should still exist
+    assert (tmp_path / results_filename("run1")).exists()
+    run1_content = (tmp_path / results_filename("run1")).read_text()
+    assert "abc1234" in run1_content
+    # run2 should have its own empty results
+    assert (tmp_path / results_filename("run2")).exists()

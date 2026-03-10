@@ -31,13 +31,25 @@ class PostmortemReport:
 class PostmortemAnalyzer:
     """Analyzes experiment results from a workspace."""
 
-    def __init__(self, workspace: Path, direction: str) -> None:
-        self.workspace = Path(workspace)
+    def __init__(self, results_path: Path, direction: str) -> None:
         self.direction = direction
-        self.log = ResultsLog(self.workspace / "results.tsv")
+        self.log = ResultsLog(results_path)
+
+    @classmethod
+    def from_path(cls, results_path: Path, direction: str) -> "PostmortemAnalyzer":
+        """Create analyzer pointing to a specific results file."""
+        return cls(results_path=results_path, direction=direction)
 
     def analyze(self) -> PostmortemReport:
         records = self.log.read_all()
+        return self._build_report(records)
+
+    def analyze_from_string(self, tsv_content: str) -> PostmortemReport:
+        """Analyze from raw TSV content (e.g., read from a specific branch)."""
+        records = ResultsLog.read_from_string(tsv_content)
+        return self._build_report(records)
+
+    def _build_report(self, records: list) -> PostmortemReport:
         report = PostmortemReport()
 
         report.total = len(records)
@@ -45,8 +57,12 @@ class PostmortemAnalyzer:
         report.discarded = sum(1 for r in records if r.status == "discard")
         report.crashed = sum(1 for r in records if r.status == "crash")
 
-        best = self.log.best(self.direction)
-        if best:
+        kept = [r for r in records if r.status == "keep"]
+        if kept:
+            if self.direction == "minimize":
+                best = min(kept, key=lambda r: r.metric_value)
+            else:
+                best = max(kept, key=lambda r: r.metric_value)
             report.best_metric = best.metric_value
             report.best_commit = best.commit
             report.best_description = best.description

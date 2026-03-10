@@ -46,20 +46,16 @@ class ContextAssembler:
             return f"## Instructions\n\n{text}"
         return ""
 
-    def _section_state(self, log: ResultsLog) -> str:
+    def _section_state(self, records: list, best, summary: dict) -> str:
         """Section 2: Current state — branch, best metric, summary, editable files."""
         lines = ["## Current State"]
         lines.append(f"\nBranch: {self.branch_name}")
 
-        # Best metric
-        best = log.best(self.config.metric.direction)
         if best is not None:
             lines.append(
                 f"Best {self.config.metric.name} so far: {best.metric_value}"
             )
 
-        # Summary
-        summary = log.summary()
         if summary["total"] > 0:
             lines.append(
                 f"Experiments: {summary['total']} total, "
@@ -68,36 +64,33 @@ class ContextAssembler:
                 f"{summary['crashed']} crashed"
             )
 
-        # Editable files
         editable = ", ".join(self.config.files.editable)
         lines.append(f"Editable files: {editable}")
 
         return "\n".join(lines)
 
-    def _section_history(self, log: ResultsLog) -> str:
+    def _section_history(self, records: list) -> str:
         """Section 3: Experiment history table and patterns observed."""
         cw = self.config.agent.context_window
         if not cw.include_history:
             return ""
 
-        records = log.read_last(cw.history_limit)
-        if not records:
+        recent = records[-cw.history_limit:]
+        if not recent:
             return ""
 
         lines = ["## Experiment History"]
         lines.append("")
         lines.append("| Commit | Metric | Status | Description |")
         lines.append("|--------|--------|--------|-------------|")
-        for r in records:
+        for r in recent:
             lines.append(
                 f"| {r.commit} | {r.metric_value} | {r.status} | {r.description} |"
             )
 
-        # Patterns observed: group kept/discarded/crashed descriptions, last 5 each
-        all_records = log.read_all()
-        kept = [r.description for r in all_records if r.status == "keep"][-5:]
-        discarded = [r.description for r in all_records if r.status == "discard"][-5:]
-        crashed = [r.description for r in all_records if r.status == "crash"][-5:]
+        kept = [r.description for r in records if r.status == "keep"][-5:]
+        discarded = [r.description for r in records if r.status == "discard"][-5:]
+        crashed = [r.description for r in records if r.status == "crash"][-5:]
 
         if kept or discarded or crashed:
             lines.append("")
@@ -140,10 +133,25 @@ class ContextAssembler:
 
     def assemble(self, log: ResultsLog) -> str:
         """Assemble all sections into a complete prompt."""
+        # Read records once, derive best/summary from them
+        records = log.read_all()
+        direction = self.config.metric.direction
+        kept = [r for r in records if r.status == "keep"]
+        if kept:
+            best = min(kept, key=lambda r: r.metric_value) if direction == "minimize" else max(kept, key=lambda r: r.metric_value)
+        else:
+            best = None
+        summary = {
+            "total": len(records),
+            "kept": len(kept),
+            "discarded": sum(1 for r in records if r.status == "discard"),
+            "crashed": sum(1 for r in records if r.status == "crash"),
+        }
+
         sections = [
             self._section_instructions(),
-            self._section_state(log),
-            self._section_history(log),
+            self._section_state(records, best, summary),
+            self._section_history(records),
             self._section_errors(),
             self._section_directive(),
         ]

@@ -60,8 +60,12 @@ class ExperimentRunner:
                 stderr_tail=stderr_tail,
             )
         except subprocess.TimeoutExpired:
-            proc.kill()
-            _, stderr = proc.communicate()
+            proc.terminate()
+            try:
+                _, stderr = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                _, stderr = proc.communicate()
             return RunResult(
                 exit_code=-1,
                 timed_out=True,

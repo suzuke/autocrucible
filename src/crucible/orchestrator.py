@@ -13,7 +13,7 @@ from crucible.config import Config
 from crucible.context import ContextAssembler
 from crucible.git_manager import GitManager
 from crucible.guardrails import GuardRails
-from crucible.results import ResultsLog
+from crucible.results import ResultsLog, results_filename
 from crucible.runner import ExperimentRunner
 
 
@@ -43,7 +43,7 @@ class Orchestrator:
             editable=config.files.editable,
             readonly=config.files.readonly,
         )
-        self.results = ResultsLog(self.workspace / "results.tsv")
+        self.results = ResultsLog(self.workspace / results_filename(tag))
         self.runner = ExperimentRunner(workspace=self.workspace)
         self.context = ContextAssembler(
             config=config,
@@ -56,17 +56,16 @@ class Orchestrator:
         self._stop = False
 
     def init(self) -> None:
-        """Create the experiment branch and initialise results.tsv."""
+        """Create the experiment branch and initialise results-{tag}.tsv."""
         self.git.create_branch(self.tag)
         self.results.init()
-        # Ensure results.tsv is gitignored so reset doesn't revert it
+        # Ensure results TSV files are gitignored so reset doesn't revert them
         gitignore = self.workspace / ".gitignore"
         lines = gitignore.read_text().splitlines() if gitignore.exists() else []
-        if "results.tsv" not in lines:
-            lines.append("results.tsv")
+        if "results-*.tsv" not in lines:
+            lines.append("results-*.tsv")
             gitignore.write_text("\n".join(lines) + "\n")
-            # Commit .gitignore so it's clean before the experiment loop
-            self.git.commit("chore: update .gitignore with results.tsv")
+            self.git.commit("chore: gitignore results-*.tsv")
 
     def resume(self) -> None:
         """Resume an existing experiment branch."""

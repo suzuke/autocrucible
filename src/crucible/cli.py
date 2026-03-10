@@ -14,7 +14,7 @@ import json as json_module
 import click
 
 from crucible.config import ConfigError, load_config
-from crucible.results import ResultsLog
+from crucible.results import ResultsLog, results_filename
 
 
 def _examples_dir() -> Path:
@@ -250,7 +250,7 @@ def evaluate():
 if __name__ == "__main__":
     evaluate()
 """)
-        (dest_path / ".gitignore").write_text("results.tsv\nrun.log\n__pycache__/\n*.pyc\n.venv/\nuv.lock\n")
+        (dest_path / ".gitignore").write_text("results-*.tsv\nrun.log\n__pycache__/\n*.pyc\n.venv/\nuv.lock\n")
         _write_pyproject(dest_path, "my-experiment")
         click.echo(f"Created empty project at {dest_path}")
         click.echo("Edit .crucible/config.yaml and program.md, then run:")
@@ -371,10 +371,9 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int) -> None:
         existing = orch.results.read_all()
         click.echo(f"Resuming experiment '{tag}' ({len(existing)} previous iterations)")
     else:
-        results_path = project / "results.tsv"
-        if not results_path.exists():
+        if not orch.results.path.exists():
             raise click.ClickException(
-                f"No results.tsv found. Run 'crucible init --tag {tag}' first."
+                f"No {results_filename(tag)} found. Run 'crucible init --tag {tag}' first."
             )
 
     click.echo("Press Ctrl+C to stop gracefully.")
@@ -383,9 +382,10 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int) -> None:
 
 
 @main.command()
+@click.option("--tag", required=True, help="Experiment tag.")
 @click.option("--project-dir", default=".", help="Project root directory.")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-def status(project_dir: str, as_json: bool) -> None:
+def status(tag: str, project_dir: str, as_json: bool) -> None:
     """Show summary of experiment results."""
     try:
         project = Path(project_dir).resolve()
@@ -393,9 +393,9 @@ def status(project_dir: str, as_json: bool) -> None:
     except ConfigError as e:
         raise click.ClickException(str(e))
 
-    results = ResultsLog(project / "results.tsv")
+    results = ResultsLog(project / results_filename(tag))
     if not results.path.exists():
-        raise click.ClickException("No results.tsv found. Run 'init' first.")
+        raise click.ClickException(f"No {results_filename(tag)} found. Run 'init --tag {tag}' first.")
 
     summary = results.summary()
     best = results.best(config.metric.direction)
@@ -441,15 +441,16 @@ def validate(project_dir: str) -> None:
 
 
 @main.command()
+@click.option("--tag", required=True, help="Experiment tag.")
 @click.option("--last", default=10, help="Number of recent results to show.")
 @click.option("--project-dir", default=".", help="Project root directory.")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-def history(last: int, project_dir: str, as_json: bool) -> None:
+def history(tag: str, last: int, project_dir: str, as_json: bool) -> None:
     """Show recent experiment results."""
     project = Path(project_dir).resolve()
-    results = ResultsLog(project / "results.tsv")
+    results = ResultsLog(project / results_filename(tag))
     if not results.path.exists():
-        raise click.ClickException("No results.tsv found. Run 'init' first.")
+        raise click.ClickException(f"No {results_filename(tag)} found. Run 'init --tag {tag}' first.")
 
     records = results.read_last(last)
 
@@ -494,17 +495,14 @@ def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
     except ConfigError as e:
         raise click.ClickException(str(e))
 
-    from crucible.git_manager import GitManager
-
-    git = GitManager(workspace=project, branch_prefix=config.git.branch_prefix)
     comparison = {}
 
     for tag in tags:
-        try:
-            content = git.show_file(tag, "results.tsv")
-        except subprocess.CalledProcessError:
-            raise click.ClickException(f"Cannot read results.tsv from branch {config.git.branch_prefix}/{tag}")
-        records = ResultsLog.read_from_string(content)
+        results_path = project / results_filename(tag)
+        if not results_path.exists():
+            raise click.ClickException(f"No {results_filename(tag)} found for tag '{tag}'.")
+        results = ResultsLog(results_path)
+        records = results.read_all()
         kept = [r for r in records if r.status == "keep"]
         best = None
         if kept:
@@ -599,13 +597,13 @@ def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool) -> None:
     except ConfigError as e:
         raise click.ClickException(str(e))
 
-    results_path = project / "results.tsv"
-    if not results_path.exists():
-        raise click.ClickException("No results.tsv found. Run 'init' first.")
-
     from crucible.postmortem import PostmortemAnalyzer, render_text
 
-    analyzer = PostmortemAnalyzer(workspace=project, direction=config.metric.direction)
+    results_path = project / results_filename(tag)
+    if not results_path.exists():
+        raise click.ClickException(f"No {results_filename(tag)} found. Run 'init --tag {tag}' first.")
+
+    analyzer = PostmortemAnalyzer.from_path(results_path, direction=config.metric.direction)
     report = analyzer.analyze()
 
     if report.total == 0:

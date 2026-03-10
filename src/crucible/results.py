@@ -10,12 +10,41 @@ from typing import Optional
 HEADER = "commit\tmetric_value\tstatus\tdescription"
 
 
+def results_filename(tag: str) -> str:
+    """Return the results TSV filename for a given experiment tag."""
+    return f"results-{tag}.tsv"
+
+
 @dataclass
 class ExperimentRecord:
     commit: str
     metric_value: float
     status: str
     description: str
+
+
+def _parse_records(content: str) -> list[ExperimentRecord]:
+    """Parse TSV content into experiment records (skips header)."""
+    records: list[ExperimentRecord] = []
+    for line in content.splitlines()[1:]:
+        if not line.strip():
+            continue
+        parts = line.split("\t", maxsplit=3)
+        if len(parts) < 4:
+            continue
+        try:
+            metric = float(parts[1])
+        except ValueError:
+            continue
+        records.append(
+            ExperimentRecord(
+                commit=parts[0],
+                metric_value=metric,
+                status=parts[2],
+                description=parts[3],
+            )
+        )
+    return records
 
 
 class ResultsLog:
@@ -44,23 +73,7 @@ class ResultsLog:
         """Read every record from the log (excluding the header)."""
         if not self.path.exists():
             return []
-        lines = self.path.read_text().splitlines()
-        records: list[ExperimentRecord] = []
-        for line in lines[1:]:  # skip header
-            if not line.strip():
-                continue
-            parts = line.split("\t", maxsplit=3)
-            if len(parts) < 4:
-                continue
-            records.append(
-                ExperimentRecord(
-                    commit=parts[0],
-                    metric_value=float(parts[1]),
-                    status=parts[2],
-                    description=parts[3],
-                )
-            )
-        return records
+        return _parse_records(self.path.read_text())
 
     def read_last(self, n: int) -> list[ExperimentRecord]:
         """Return the last *n* records."""
@@ -94,23 +107,7 @@ class ResultsLog:
     @staticmethod
     def read_from_string(content: str) -> list[ExperimentRecord]:
         """Parse records from TSV string content (e.g., from git show)."""
-        records: list[ExperimentRecord] = []
-        lines = content.splitlines()
-        for line in lines[1:]:  # skip header
-            if not line.strip():
-                continue
-            parts = line.split("\t", maxsplit=3)
-            if len(parts) < 4:
-                continue
-            records.append(
-                ExperimentRecord(
-                    commit=parts[0],
-                    metric_value=float(parts[1]),
-                    status=parts[2],
-                    description=parts[3],
-                )
-            )
-        return records
+        return _parse_records(content)
 
     def summary(self) -> dict[str, int]:
         """Return counts by status category."""

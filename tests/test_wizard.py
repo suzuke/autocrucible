@@ -65,7 +65,7 @@ def test_wizard_generate_writes_files(tmp_path: Path):
 
 
 def test_wizard_generate_creates_gitignore(tmp_path: Path):
-    """generate() should create a .gitignore with results.tsv."""
+    """generate() should create a .gitignore with results-*.tsv."""
     wizard = ExperimentWizard()
     with patch("crucible.wizard._call_claude", return_value=MOCK_GENERATE_RESPONSE):
         wizard.generate(
@@ -74,7 +74,7 @@ def test_wizard_generate_creates_gitignore(tmp_path: Path):
             dest=tmp_path,
         )
     gitignore = (tmp_path / ".gitignore").read_text()
-    assert "results.tsv" in gitignore
+    assert "results-*.tsv" in gitignore
 
 
 def test_wizard_analyze_includes_architecture_guards():

@@ -67,7 +67,12 @@ class ClaudeCodeAgent(AgentInterface):
         # CLAUDECODE=1 blocks nested sessions, so we must remove it.
         saved = os.environ.pop("CLAUDECODE", None)
         try:
-            return await self._run_query(prompt, workspace)
+            return await asyncio.wait_for(
+                self._run_query(prompt, workspace),
+                timeout=self.timeout,
+            )
+        except asyncio.TimeoutError:
+            return AgentResult(modified_files=[], description="claude agent timed out")
         finally:
             if saved is not None:
                 os.environ["CLAUDECODE"] = saved
@@ -119,7 +124,7 @@ class ClaudeCodeAgent(AgentInterface):
 def _detect_modified_files(workspace: Path) -> list[Path]:
     """Use git to find changed and untracked files."""
     diff_result = subprocess.run(
-        ["git", "diff", "--name-only"],
+        ["git", "diff", "--name-only", "HEAD"],
         cwd=workspace, capture_output=True, text=True,
     )
     untracked_result = subprocess.run(
