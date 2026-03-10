@@ -22,7 +22,7 @@ crucible new . --list                          # see available examples
 crucible new ~/my-project -e optimize-sorting  # create from example
 ```
 
-Examples: `optimize-sorting`, `optimize-regression`, `optimize-classifier`, `optimize-gomoku`
+Examples: `optimize-sorting`, `optimize-regression`, `optimize-classifier`, `optimize-gomoku`, `optimize-compress`, `optimize-lm`
 
 If no example fits, proceed with the full 6-step workflow below to build from scratch.
 
@@ -400,6 +400,43 @@ crucible run --tag <name>
 | Inference speed | `latency_ms` | minimize | model/inference | timing harness |
 | Score/reward | `score` | maximize | agent/strategy | game/env runner |
 | Memory usage | `peak_mb` | minimize | implementation | profiling harness |
+
+## Baseline Seeding (Critical for First Run)
+
+Crucible's `is_improvement()` returns `True` when no previous records exist, so the **first iteration always becomes "best" regardless of quality**. If the agent's first change makes things worse (common), that bad result becomes the new baseline.
+
+**Fix: Seed results-{tag}.tsv with a baseline run before starting `crucible run`:**
+
+```bash
+# 1. Run baseline manually
+python3 evaluate.py > run.log 2>&1
+grep '^<metric_name>:' run.log  # e.g., val_bpb: 2.528460
+
+# 2. Init experiment
+crucible init --tag run1
+
+# 3. Seed baseline into results-run1.tsv
+COMMIT=$(git rev-parse HEAD)
+echo -e "${COMMIT}\t<metric_value>\tkeep\tbaseline: <description>" >> results-run1.tsv
+
+# 4. Now run — agent must beat the real baseline
+crucible run --tag run1
+```
+
+## Agent Behavior Tuning (program.md Best Practices)
+
+**Problem:** LLM agents tend to make too many changes at once, especially for ML experiments. A model scaled from 64-dim to 192-dim with a new optimizer, LR schedule, and context length will almost certainly perform worse because the bigger model needs proportionally more training steps.
+
+**Guidelines for program.md:**
+- **Explicitly state** the baseline's performance and training time
+- **Guide incremental changes**: "Make focused, coherent changes — 2-3 related things together, not a full rewrite"
+- **State compute budget**: "Baseline runs in ~10s. You have 300s budget."
+- **Warn about scaling traps**: "If you increase model size, you MUST increase training steps proportionally"
+- **Include framework-specific API notes** (e.g., MLX's `optim.cosine_decay` for LR schedules, not manual `optimizer.learning_rate` mutation)
+
+**Baseline strength:** Intentionally weak baselines (fewer training steps, simpler optimizer) give the agent more room to improve. A baseline that's already near-optimal leaves no margin for the agent's early noisy iterations.
+
+**max_retries:** Set to at least 5-10, not 3. LLM agents need multiple attempts to learn from failures. 3 retries often isn't enough for non-trivial tasks.
 
 ## Common Mistakes
 
