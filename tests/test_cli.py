@@ -217,3 +217,18 @@ def test_wizard_command_interactive(mock_claude, tmp_path):
     dest_path = Path(dest)
     assert (dest_path / ".crucible" / "config.yaml").exists()
     assert (dest_path / "solution.py").exists()
+
+
+def test_wizard_help():
+    runner = CliRunner()
+    result = runner.invoke(main, ["wizard", "--help"])
+    assert result.exit_code == 0
+    assert "description" in result.output.lower() or "natural language" in result.output.lower()
+
+
+def test_postmortem_help():
+    runner = CliRunner()
+    result = runner.invoke(main, ["postmortem", "--help"])
+    assert result.exit_code == 0
+    assert "--no-ai" in result.output
+    assert "--json" in result.output
