@@ -1,4 +1,7 @@
-# crucible
+# autocrucible
+
+[![PyPI](https://img.shields.io/pypi/v/autocrucible)](https://pypi.org/project/autocrucible/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 繁體中文 | [English](README.md)
 
@@ -32,7 +35,7 @@
 uv tool install autocrucible
 
 # 或從本地 clone 安裝
-git clone https://github.com/suzuke/crucible.git
+git clone https://github.com/suzuke/autocrucible.git
 uv tool install ./crucible
 ```
 
@@ -55,7 +58,7 @@ uv tool install ./crucible --force
 ### 開發模式
 
 ```bash
-git clone https://github.com/suzuke/crucible.git
+git clone https://github.com/suzuke/autocrucible.git
 cd crucible
 uv sync                 # 安裝到本地 .venv
 uv run crucible --help  # 從原始碼執行

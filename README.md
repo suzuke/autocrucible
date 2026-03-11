@@ -1,4 +1,7 @@
-# crucible
+# autocrucible
+
+[![PyPI](https://img.shields.io/pypi/v/autocrucible)](https://pypi.org/project/autocrucible/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [繁體中文](README.zh-TW.md) | English
 
@@ -32,7 +35,7 @@ A general-purpose autonomous experiment platform. Define what to edit, how to ru
 uv tool install autocrucible
 
 # Or install from a local clone
-git clone https://github.com/suzuke/crucible.git
+git clone https://github.com/suzuke/autocrucible.git
 uv tool install ./crucible
 ```
 
@@ -55,7 +58,7 @@ uv tool install ./crucible --force
 ### For development
 
 ```bash
-git clone https://github.com/suzuke/crucible.git
+git clone https://github.com/suzuke/autocrucible.git
 cd crucible
 uv sync                 # install in local .venv
 uv run crucible --help  # run from source
