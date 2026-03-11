@@ -32,7 +32,7 @@ A general-purpose autonomous experiment platform. Define what to edit, how to ru
 uv tool install crucible
 
 # Or install from a local clone
-git clone https://github.com/user/crucible.git
+git clone https://github.com/suzuke/crucible.git
 uv tool install ./crucible
 ```
 
@@ -55,7 +55,7 @@ uv tool install ./crucible --force
 ### For development
 
 ```bash
-git clone https://github.com/user/crucible.git
+git clone https://github.com/suzuke/crucible.git
 cd crucible
 uv sync                 # install in local .venv
 uv run crucible --help  # run from source
