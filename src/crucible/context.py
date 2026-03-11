@@ -21,8 +21,8 @@ _CRASH_PATTERNS: list[tuple[str, str, str]] = [
     # (regex_pattern, diagnosis, advice)
     (r"SyntaxError|IndentationError|NameError", "Typo",
      "Fix the typo — do NOT abandon this direction."),
-    (r"ImportError|ModuleNotFoundError", "Import",
-     "Fix the import path. Do NOT add new dependencies."),
+    (r"ImportError|ModuleNotFoundError", "Missing module",
+     "This module is NOT available. ABANDON this approach and use only stdlib/built-in modules."),
     (r"TypeError|ValueError", "Logic bug",
      "Fix the bug. If this keeps recurring, rewrite the function."),
     (r"MemoryError|OOM|out of memory|Killed", "Resource limit",

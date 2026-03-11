@@ -148,8 +148,9 @@ def test_classify_crash_syntax():
 
 
 def test_classify_crash_import():
-    diag, _ = _classify_crash("ModuleNotFoundError: No module named 'foo'")
-    assert diag == "Import"
+    diag, advice = _classify_crash("ModuleNotFoundError: No module named 'foo'")
+    assert diag == "Missing module"
+    assert "ABANDON" in advice
 
 
 def test_classify_crash_oom():
