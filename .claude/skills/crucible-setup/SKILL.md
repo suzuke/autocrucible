@@ -205,10 +205,23 @@ Guidelines for program.md:
 - Warn about scaling traps: "If you increase model size, increase training steps proportionally"
 - Include framework-specific API notes when relevant
 
+## Consistency Check (Before Finalizing)
+
+After creating all files, verify these all match:
+1. The metric name in evaluate.py's print statement
+2. The metric name in config.yaml under `metric.name`
+3. The metric name in config.yaml under `commands.eval` grep pattern
+4. The metric name in program.md
+5. The direction in config.yaml matches the task (maximize vs minimize)
+6. The function imported in evaluate.py matches what's defined in the editable file
+7. evaluate.py only imports packages listed in requirements.txt (or stdlib only)
+
 ## Common Mistakes
 
+- **Inconsistent metric names**: `ops_per_sec` in evaluate.py but `ops_per_second` in config.yaml — the grep will find nothing
 - **`commands.run` points to wrong file**: should run the evaluation harness (which imports editable), not the editable file directly
 - **program.md not in readonly list**: agent will edit its own instructions to remove constraints
 - **Timeout too short**: agent tries complex approaches that need more time — start generous
 - **max_retries too low**: 3 isn't enough for non-trivial tasks, use 5-10
 - **Missing .gitignore**: training artifacts trigger guardrail violations when crucible runs `git ls-files --others`
+- **Hiding crashes with try/except in evaluate.py**: don't wrap the entire harness in try/except — let errors crash so crucible captures the traceback and the agent can learn from the actual error message

@@ -49,7 +49,8 @@ class GitManager:
         """Tag the current HEAD as failed, then reset to the parent commit."""
         if self.tag_failed:
             tag_name = f"failed/{tag}/{seq}"
-            self._run("tag", tag_name)
+            # Use -f to overwrite if tag already exists (can happen on resume)
+            self._run("tag", "-f", tag_name)
         self._run("reset", "--hard", "HEAD~1")
 
     def modified_files(self) -> List[str]:
