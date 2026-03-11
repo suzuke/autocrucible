@@ -1,11 +1,11 @@
 import pytest
 from pathlib import Path
-from crucible.context import ContextAssembler
+from crucible.context import ContextAssembler, _strategy_hint, _classify_crash
 from crucible.config import (
     Config, FilesConfig, CommandsConfig, MetricConfig,
     ConstraintsConfig, AgentConfig, ContextWindowConfig, GitConfig,
 )
-from crucible.results import ResultsLog
+from crucible.results import ExperimentRecord, ResultsLog
 
 
 def make_config(tmp_path, include_history=True, history_limit=20):
@@ -95,3 +95,88 @@ def test_assemble_with_crash_info(tmp_path):
     ctx.add_crash_info("RuntimeError: CUDA out of memory")
     prompt = ctx.assemble(log)
     assert "CUDA out of memory" in prompt
+
+
+# -- Strategy tier tests -------------------------------------------------------
+
+def _make_record(status):
+    return ExperimentRecord(
+        commit="abc1234", metric_value=1.0, status=status, description="test"
+    )
+
+
+def test_strategy_hint_no_records():
+    hint = _strategy_hint([])
+    assert "Tier 1" in hint
+    assert "EXPLORE" in hint
+
+
+def test_strategy_hint_last_kept():
+    records = [_make_record("keep")]
+    hint = _strategy_hint(records)
+    assert "Tier 1" in hint
+    assert "EXPLOIT" in hint
+
+
+def test_strategy_hint_tier2():
+    records = [_make_record("keep"), _make_record("discard"), _make_record("crash")]
+    hint = _strategy_hint(records)
+    assert "Tier 2" in hint
+    assert "RE-READ" in hint
+
+
+def test_strategy_hint_tier3():
+    records = [_make_record("keep")] + [_make_record("discard")] * 4
+    hint = _strategy_hint(records)
+    assert "Tier 3" in hint
+    assert "COMBINE" in hint
+
+
+def test_strategy_hint_tier4():
+    records = [_make_record("keep")] + [_make_record("discard")] * 7
+    hint = _strategy_hint(records)
+    assert "Tier 4" in hint
+    assert "RADICAL" in hint
+
+
+# -- Crash classification tests -----------------------------------------------
+
+def test_classify_crash_syntax():
+    diag, advice = _classify_crash("  File 'x.py', line 5\nSyntaxError: invalid syntax")
+    assert diag == "Typo"
+    assert "ABANDON" not in advice
+
+
+def test_classify_crash_import():
+    diag, _ = _classify_crash("ModuleNotFoundError: No module named 'foo'")
+    assert diag == "Import"
+
+
+def test_classify_crash_oom():
+    diag, advice = _classify_crash("torch.cuda.OutOfMemoryError: CUDA out of memory")
+    assert diag == "Resource limit"
+    assert "ABANDON" in advice
+
+
+def test_classify_crash_timeout():
+    diag, advice = _classify_crash("TIMED OUT after 300s")
+    assert diag == "Too slow"
+    assert "ABANDON" in advice
+
+
+def test_classify_crash_unknown():
+    diag, _ = _classify_crash("some weird error nobody expected")
+    assert diag == "Unknown"
+
+
+def test_crash_classification_in_assembled_output(tmp_path):
+    cfg = make_config(tmp_path)
+    (tmp_path / "program.md").write_text("Instructions.")
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    ctx.add_crash_info("NameError: name 'xyz' is not defined")
+    prompt = ctx.assemble(log)
+    assert "Diagnosis: Typo" in prompt
+    assert "NameError" in prompt

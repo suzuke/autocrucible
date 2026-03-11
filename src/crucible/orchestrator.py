@@ -175,7 +175,14 @@ class Orchestrator:
                 status="crash",
                 description=agent_result.description,
             )
-            self.context.add_crash_info(run_result.stderr_tail)
+            crash_msg = run_result.stderr_tail
+            if run_result.timed_out:
+                crash_msg = (
+                    f"TIMED OUT after {self.config.constraints.timeout_seconds}s. "
+                    "Your changes made the code too slow. Reduce model size, "
+                    "training epochs, or MCTS simulations.\n" + crash_msg
+                )
+            self.context.add_crash_info(crash_msg)
             self._consecutive_failures += 1
             return "crash"
 

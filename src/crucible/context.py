@@ -15,6 +15,73 @@ PREAMBLE = (
 
 _STATUS_LABELS = {"keep": "✓ KEPT", "discard": "✗ WORSE", "crash": "💥 CRASH"}
 
+# -- Crash classification patterns (order matters: first match wins) ----------
+
+_CRASH_PATTERNS: list[tuple[str, str, str]] = [
+    # (regex_pattern, diagnosis, advice)
+    (r"SyntaxError|IndentationError|NameError", "Typo",
+     "Fix the typo — do NOT abandon this direction."),
+    (r"ImportError|ModuleNotFoundError", "Import",
+     "Fix the import path. Do NOT add new dependencies."),
+    (r"TypeError|ValueError", "Logic bug",
+     "Fix the bug. If this keeps recurring, rewrite the function."),
+    (r"MemoryError|OOM|out of memory|Killed", "Resource limit",
+     "ABANDON this direction — it exceeds available resources."),
+    (r"Timed out|timed out|TIMED OUT", "Too slow",
+     "ABANDON this approach — use a faster algorithm instead."),
+]
+
+
+def _classify_crash(stderr: str) -> tuple[str, str]:
+    """Classify crash stderr into (diagnosis, advice)."""
+    import re
+    for pattern, diagnosis, advice in _CRASH_PATTERNS:
+        if re.search(pattern, stderr, re.IGNORECASE):
+            return diagnosis, advice
+    return "Unknown", "Read the traceback carefully and determine the root cause."
+
+
+def _strategy_hint(records: list) -> str:
+    """Return a tiered strategy hint based on consecutive failures."""
+    if not records:
+        return (
+            "Tier 1 — EXPLORE: Read ALL source code carefully. "
+            "Identify the #1 performance bottleneck before making any change."
+        )
+
+    # Count consecutive non-keep records from the end
+    consecutive_failures = 0
+    for r in reversed(records):
+        if r.status == "keep":
+            break
+        consecutive_failures += 1
+
+    if consecutive_failures == 0:
+        return (
+            "Tier 1 — EXPLOIT: Your last change worked! "
+            "Push further in the same direction — deepen the improvement."
+        )
+    if consecutive_failures <= 1:
+        return (
+            "Tier 1 — EXPLOIT: Build on what worked. "
+            "Make a different but related improvement in the same direction."
+        )
+    if consecutive_failures <= 3:
+        return (
+            "Tier 2 — RE-READ: Multiple failures in a row. "
+            "Stop and re-read ALL code from scratch. You may be missing something."
+        )
+    if consecutive_failures <= 5:
+        return (
+            "Tier 3 — COMBINE: Try combining two previously successful ideas "
+            "into one change, or revisit a worked direction with a new twist."
+        )
+    return (
+        "Tier 4 — RADICAL: Many consecutive failures. "
+        "Make a drastically different change — completely new algorithm, "
+        "different data structure, or opposite approach from everything tried."
+    )
+
 
 class ContextAssembler:
     """Assembles prompt sections into a complete context for the agent."""
@@ -141,17 +208,10 @@ class ContextAssembler:
                 lines.append(
                     f"**💥 CRASHED — avoid entirely:** {'; '.join(crashed)}"
                 )
-            lines.append("")
-            if len(records) <= 1:
-                lines.append(
-                    "**Strategy:** Early in optimization. Focus on understanding "
-                    "the code deeply and finding the biggest performance bottleneck."
-                )
-            else:
-                lines.append(
-                    "**Strategy:** Build on what worked. Make a different but "
-                    "related improvement in the same direction as successful changes."
-                )
+
+        # Tiered strategy based on consecutive failures
+        lines.append("")
+        lines.append(f"**Strategy:** {_strategy_hint(records)}")
 
         return "\n".join(lines)
 
@@ -171,10 +231,11 @@ class ContextAssembler:
                 "\n## Crash Info (CRITICAL — your last change broke the code)\n"
             )
             for info in self._crash_info:
+                diagnosis, advice = _classify_crash(info)
+                parts.append(f"**Diagnosis: {diagnosis}** — {advice}\n")
                 parts.append(f"```\n{info}\n```")
             parts.append(
-                "\n**Your previous edit caused a crash. You MUST revert your "
-                "approach and try something completely different. Read the file "
+                "\n**Your previous edit caused a crash. Read the file "
                 "first to understand the current state.**"
             )
         return "\n".join(parts) if parts else ""
@@ -196,6 +257,9 @@ class ContextAssembler:
             "- NEVER repeat a failed/crashed approach, even with small variations\n"
             "- ONE change per iteration — don't combine multiple ideas\n"
             "- A crash scores zero — correctness first\n"
+            "- Simplicity test: if a change adds >50 lines of complexity "
+            "for <1% expected improvement, it is NOT worth it. "
+            "Prefer clean, targeted changes.\n"
             "- Do NOT output full file contents. Use targeted edits."
         )
 
