@@ -41,9 +41,10 @@ project-root/
   README.md          # Setup, metric, files, how to run
 ```
 
-**Two roles, strict separation:**
+**Three file categories:**
 - **Editable files** = what the agent changes (algorithms, models, configs)
-- **Readonly files** = how we measure (benchmarks, eval harnesses, data) + program.md
+- **Readonly files** = agent can read but not modify (benchmarks, eval harnesses, data) + program.md
+- **Hidden files** = invisible to agent, available to evaluation subprocess (opponent implementations, reference solutions, test data the agent should not see)
 
 ## Setup Workflow
 
@@ -108,6 +109,8 @@ files:
   readonly:
     - "<evaluation_file.py>"
     - "program.md"              # IMPORTANT: prevent agent from editing its own instructions
+  # hidden:                     # Optional: files invisible to agent but available to eval subprocess
+  #   - "opponent.py"           # e.g., opponent implementation agent shouldn't reverse-engineer
 
 commands:
   run: "python3 <evaluation_file>.py > run.log 2>&1"
@@ -193,6 +196,27 @@ If the user cares about HOW something is done (not just the result), enforce the
 Real example: user asked for AlphaZero MCTS+NN, agent replaced it with minimax to maximize win_rate.
 
 Enforcement approaches: AST inspection, hook counters, import checking, attribute verification. The evaluate.py should zero the metric if the required method isn't used.
+
+### Information Isolation with Hidden Files
+
+A second Goodhart vector: the agent reads readonly files (like evaluate.py) and reverse-engineers implementation details. Example: agent reads the heuristic opponent's scoring function and hardcodes optimal counter-moves instead of learning genuine strategy.
+
+Use `files.hidden` in config.yaml to make files completely invisible to the agent while keeping them available to the evaluation subprocess:
+
+```yaml
+files:
+  editable: ["agent.py"]
+  readonly: ["evaluate.py"]
+  hidden: ["opponent.py"]     # agent can't see this; evaluate.py imports it normally
+```
+
+How it works: hidden files are moved to a temp directory before the agent runs, then restored before the experiment subprocess executes. The agent sees "file not found" — like a closed-source API.
+
+When to use hidden files:
+- Opponent/adversary implementations the agent should not reverse-engineer
+- Reference solutions used for scoring
+- Test data that would leak the answer
+- Any implementation detail that creates a shortcut around genuine optimization
 
 ## Agent Behavior Tuning
 

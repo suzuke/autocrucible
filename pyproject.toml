@@ -18,15 +18,16 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 
-[project.urls]
-Homepage = "https://github.com/suzuke/autocrucible"
-Repository = "https://github.com/suzuke/autocrucible"
-Issues = "https://github.com/suzuke/autocrucible/issues"
 dependencies = [
     "click>=8.1",
     "pyyaml>=6.0",
     "claude-agent-sdk>=0.1.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/suzuke/autocrucible"
+Repository = "https://github.com/suzuke/autocrucible"
+Issues = "https://github.com/suzuke/autocrucible/issues"
 
 [project.scripts]
 crucible = "crucible.cli:main"

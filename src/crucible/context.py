@@ -81,6 +81,12 @@ class ContextAssembler:
         editable = ", ".join(self.config.files.editable)
         lines.append(f"Editable files: {editable}")
 
+        if self.config.files.hidden:
+            hidden = ", ".join(self.config.files.hidden)
+            lines.append(
+                f"Hidden files (exist but you CANNOT read, create, or modify them): {hidden}"
+            )
+
         return "\n".join(lines)
 
     def _section_history(self, records: list[ExperimentRecord]) -> str:

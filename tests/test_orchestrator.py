@@ -125,3 +125,181 @@ def test_resume_existing_branch(tmp_path):
     records = orch2.results.read_all()
     assert len(records) == 1
     assert records[0].metric_value == 0.5
+
+
+def test_hidden_files_invisible_during_agent_call(tmp_path):
+    """Hidden files are moved away before the agent runs and restored after."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.files.hidden = ["secret.py"]
+
+    # Create the hidden file
+    (tmp_path / "secret.py").write_text("SECRET = 42")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add secret"], cwd=tmp_path, check=True, capture_output=True)
+
+    mock_agent = MagicMock()
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    seen_during_agent = {}
+
+    def agent_check_files(*args, **kwargs):
+        seen_during_agent["secret_exists"] = (tmp_path / "secret.py").exists()
+        (tmp_path / "train.py").write_text("x = 2")
+        return AgentResult(modified_files=[Path("train.py")], description="edit")
+    mock_agent.generate_edit.side_effect = agent_check_files
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        mock_parse.return_value = 0.95
+        result = orch.run_one_iteration()
+
+    assert result == "keep"
+    assert seen_during_agent["secret_exists"] is False, "hidden file should not be visible during agent call"
+    assert (tmp_path / "secret.py").exists(), "hidden file should be restored after iteration"
+
+
+def test_hidden_files_restored_on_violation(tmp_path):
+    """Hidden files are restored even when the agent triggers a violation."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.files.hidden = ["secret.py"]
+
+    (tmp_path / "secret.py").write_text("SECRET = 42")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add secret"], cwd=tmp_path, check=True, capture_output=True)
+
+    mock_agent = MagicMock()
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    def modify_readonly(*args, **kwargs):
+        (tmp_path / "prepare.py").write_text("# hacked")
+        return AgentResult(modified_files=[Path("prepare.py")], description="bad edit")
+    mock_agent.generate_edit.side_effect = modify_readonly
+
+    result = orch.run_one_iteration()
+    assert result == "violation"
+    assert (tmp_path / "secret.py").exists(), "hidden file should be restored after violation"
+
+
+def test_hidden_files_restored_on_agent_exception(tmp_path):
+    """Hidden files are restored even when the agent raises an exception."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.files.hidden = ["secret.py"]
+
+    (tmp_path / "secret.py").write_text("SECRET = 42")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add secret"], cwd=tmp_path, check=True, capture_output=True)
+
+    mock_agent = MagicMock()
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    mock_agent.generate_edit.side_effect = RuntimeError("agent crashed")
+
+    with pytest.raises(RuntimeError):
+        orch.run_one_iteration()
+
+    assert (tmp_path / "secret.py").exists(), "hidden file should be restored after exception"
+
+
+def test_hidden_files_in_subdirectory(tmp_path):
+    """Hidden files in subdirectories are correctly moved and restored."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.files.hidden = ["lib/opponent.py"]
+
+    lib_dir = tmp_path / "lib"
+    lib_dir.mkdir()
+    (lib_dir / "opponent.py").write_text("def heuristic(): pass")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add lib"], cwd=tmp_path, check=True, capture_output=True)
+
+    mock_agent = MagicMock()
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    def agent_fn(*args, **kwargs):
+        (tmp_path / "train.py").write_text("x = 3")
+        return AgentResult(modified_files=[Path("train.py")], description="edit")
+    mock_agent.generate_edit.side_effect = agent_fn
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        mock_parse.return_value = 0.8
+        orch.run_one_iteration()
+
+    assert (lib_dir / "opponent.py").exists()
+    assert (lib_dir / "opponent.py").read_text() == "def heuristic(): pass"
+
+
+def test_hidden_file_created_by_agent_is_silently_stripped(tmp_path):
+    """If agent creates a hidden file, it's stripped from modified list (not a violation)."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.files.hidden = ["secret.py"]
+
+    (tmp_path / "secret.py").write_text("SECRET = 42")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add secret"], cwd=tmp_path, check=True, capture_output=True)
+
+    mock_agent = MagicMock()
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    def agent_creates_hidden(*args, **kwargs):
+        # Agent creates both a hidden file and an editable file
+        (tmp_path / "secret.py").write_text("SECRET = 99")  # agent's fake version
+        (tmp_path / "train.py").write_text("x = 5")
+        return AgentResult(
+            modified_files=[Path("secret.py"), Path("train.py")],
+            description="edit with hidden file",
+        )
+    mock_agent.generate_edit.side_effect = agent_creates_hidden
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        mock_parse.return_value = 0.95
+        result = orch.run_one_iteration()
+
+    assert result == "keep", "should proceed normally, hidden file stripped from modified list"
+    # Original secret.py should be restored, not agent's version
+    assert (tmp_path / "secret.py").read_text() == "SECRET = 42"
+
+
+def test_hidden_file_only_edit_becomes_skip(tmp_path):
+    """If agent only modifies hidden files (no editable changes), result is 'skip'."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.files.hidden = ["secret.py"]
+
+    (tmp_path / "secret.py").write_text("SECRET = 42")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "add secret"], cwd=tmp_path, check=True, capture_output=True)
+
+    mock_agent = MagicMock()
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    def agent_only_hidden(*args, **kwargs):
+        (tmp_path / "secret.py").write_text("SECRET = 99")
+        return AgentResult(
+            modified_files=[Path("secret.py")],
+            description="only hidden file",
+        )
+    mock_agent.generate_edit.side_effect = agent_only_hidden
+
+    result = orch.run_one_iteration()
+    assert result == "skip", "only hidden file edits should become skip (no real edits)"

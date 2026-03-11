@@ -51,6 +51,10 @@ def validate_project(project_root: Path) -> List[CheckResult]:
         if not (project_root / f).exists():
             results.append(CheckResult("Readonly files", False, f"Missing: {f}"))
             all_ok = False
+    for f in config.files.hidden:
+        if not (project_root / f).exists():
+            results.append(CheckResult("Hidden files", False, f"Missing: {f}"))
+            all_ok = False
     if all_ok:
         results.append(CheckResult("Editable files", True, "All files exist"))
 
