@@ -92,6 +92,7 @@ class ContextAssembler:
         self.branch_name = branch_name
         self._errors: List[str] = []
         self._crash_info: List[str] = []
+        self._last_crash_info: List[str] = []
 
     def add_error(self, message: str) -> None:
         """Queue an error message for the next assembled prompt."""
@@ -100,6 +101,10 @@ class ContextAssembler:
     def add_crash_info(self, stderr_tail: str) -> None:
         """Queue crash information for the next assembled prompt."""
         self._crash_info.append(stderr_tail)
+
+    def requeue_crash_info(self) -> None:
+        """Re-queue crash info from last assemble (for skip iterations)."""
+        self._crash_info.extend(self._last_crash_info)
 
     def _read_instructions(self) -> str:
         """Read static instructions from program.md."""
@@ -252,7 +257,7 @@ class ContextAssembler:
             "✓ means push further, ✗/💥 means NEVER retry that direction.\n"
             "3. **EDIT** — Make ONE bold, high-impact change to: " + editable + ". "
             "Ensure syntactic correctness and preserve the interface.\n"
-            "4. **EXPLAIN** — One line: what you changed and expected improvement.\n\n"
+            "4. **EXPLAIN** — One short line (<120 chars, no markdown): what you changed and why.\n\n"
             "**Rules:**\n"
             "- NEVER repeat a failed/crashed approach, even with small variations\n"
             "- ONE change per iteration — don't combine multiple ideas\n"
@@ -288,6 +293,8 @@ class ContextAssembler:
         ]
         prompt = "\n\n---\n\n".join(s for s in sections if s)
 
+        # Save crash info before clearing (for requeue on skip iterations)
+        self._last_crash_info = list(self._crash_info)
         # Clear transient context after assembly
         self._errors.clear()
         self._crash_info.clear()

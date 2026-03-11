@@ -139,6 +139,7 @@ class Orchestrator:
         if violation is not None:
             self._restore_files()
             if violation.kind == "no_edits":
+                self.context.requeue_crash_info()
                 return "skip"
             self.git.revert_changes()
             self.context.add_error(violation.message)

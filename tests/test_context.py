@@ -181,3 +181,50 @@ def test_crash_classification_in_assembled_output(tmp_path):
     prompt = ctx.assemble(log)
     assert "Diagnosis: Typo" in prompt
     assert "NameError" in prompt
+
+
+# -- Crash info requeue tests ------------------------------------------------
+
+def test_crash_info_cleared_after_assemble(tmp_path):
+    """Crash info is cleared after assemble (existing behavior)."""
+    cfg = make_config(tmp_path)
+    (tmp_path / "program.md").write_text("Instructions.")
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    ctx.add_crash_info("SyntaxError: invalid syntax")
+    prompt1 = ctx.assemble(log)
+    assert "SyntaxError" in prompt1
+    prompt2 = ctx.assemble(log)
+    assert "SyntaxError" not in prompt2
+
+
+def test_crash_info_requeued_survives_assemble(tmp_path):
+    """Requeued crash info appears in the next assemble."""
+    cfg = make_config(tmp_path)
+    (tmp_path / "program.md").write_text("Instructions.")
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    ctx.add_crash_info("SyntaxError: invalid syntax")
+    ctx.assemble(log)  # clears crash info, saves to _last_crash_info
+    ctx.requeue_crash_info()  # re-queue from last
+    prompt = ctx.assemble(log)
+    assert "SyntaxError" in prompt
+
+
+def test_crash_info_not_requeued_without_call(tmp_path):
+    """Without requeue_crash_info(), crash info stays cleared."""
+    cfg = make_config(tmp_path)
+    (tmp_path / "program.md").write_text("Instructions.")
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    ctx.add_crash_info("SyntaxError: invalid syntax")
+    ctx.assemble(log)
+    # No requeue call
+    prompt = ctx.assemble(log)
+    assert "SyntaxError" not in prompt

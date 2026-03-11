@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -121,7 +122,7 @@ class ClaudeCodeAgent(AgentInterface):
             return AgentResult(modified_files=[], description="claude agent timed out")
 
         if last_text:
-            description = last_text.split("\n")[0][:200]
+            description = _clean_description(last_text)
 
         # Detect modified files via git
         all_files = _detect_modified_files(workspace)
@@ -131,6 +132,14 @@ class ClaudeCodeAgent(AgentInterface):
         else:
             logger.info(f"[agent] modified: {[str(f) for f in all_files]}")
         return AgentResult(modified_files=all_files, description=description)
+
+
+def _clean_description(text: str) -> str:
+    """Extract clean description from agent output."""
+    line = text.split("\n")[0]
+    line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)  # strip **bold**
+    line = re.sub(r"^(Change|Summary|Description|Edit)\s*:\s*", "", line, flags=re.IGNORECASE)
+    return line.strip()[:200]
 
 
 def _detect_modified_files(workspace: Path) -> list[Path]:

@@ -116,3 +116,24 @@ def test_claude_code_agent_no_edits(tmp_path):
 
     assert result.modified_files == []
     assert "No changes needed" in result.description
+
+
+# -- _clean_description tests -------------------------------------------------
+
+from crucible.agents.claude_code import _clean_description
+
+
+def test_clean_description_strips_markdown():
+    assert _clean_description("**Change:** foo bar") == "foo bar"
+    assert _clean_description("**Summary:** hello") == "hello"
+    assert _clean_description("**bold text** rest") == "bold text rest"
+
+
+def test_clean_description_preserves_plain():
+    assert _clean_description("simple description") == "simple description"
+
+
+def test_clean_description_truncates():
+    long_text = "a" * 300
+    result = _clean_description(long_text)
+    assert len(result) == 200
