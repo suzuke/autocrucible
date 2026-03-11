@@ -91,13 +91,14 @@ class Orchestrator:
         violation = self.guardrails.check_edits(modified)
 
         # 4. Handle violation
+        #    Violations and skips don't count toward consecutive failures —
+        #    no real experiment ran, so the agent just needs better guidance.
+        #    Only crash and discard (real failed experiments) trigger stopping.
         if violation is not None:
             if violation.kind == "no_edits":
-                self._consecutive_failures += 1
                 return "skip"
             self.git.revert_changes()
             self.context.add_error(violation.message)
-            self._consecutive_failures += 1
             return "violation"
 
         # 5. Git commit
