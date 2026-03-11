@@ -1,8 +1,22 @@
 [project]
-name = "crucible"
+name = "autocrucible"
 version = "0.2.0"
-description = "General-purpose autonomous experiment platform"
+description = "Autonomous experiment platform for iterative LLM agent optimization"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
+authors = [
+    { name = "suzuke" },
+]
+keywords = ["llm", "agent", "optimization", "experiment", "autonomous"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+]
 dependencies = [
     "click>=8.1",
     "pyyaml>=6.0",

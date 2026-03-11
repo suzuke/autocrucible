@@ -29,7 +29,7 @@ A general-purpose autonomous experiment platform. Define what to edit, how to ru
 
 ```bash
 # Install as a global CLI tool
-uv tool install crucible
+uv tool install autocrucible
 
 # Or install from a local clone
 git clone https://github.com/suzuke/crucible.git
@@ -46,7 +46,7 @@ crucible --help
 
 ```bash
 # From PyPI
-uv tool install crucible --force
+uv tool install autocrucible --force
 
 # From local source (after pulling changes)
 uv tool install ./crucible --force

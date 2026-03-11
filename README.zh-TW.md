@@ -29,7 +29,7 @@
 
 ```bash
 # 安裝為全域 CLI 工具
-uv tool install crucible
+uv tool install autocrucible
 
 # 或從本地 clone 安裝
 git clone https://github.com/suzuke/crucible.git
@@ -46,7 +46,7 @@ crucible --help
 
 ```bash
 # 從 PyPI
-uv tool install crucible --force
+uv tool install autocrucible --force
 
 # 從本地原始碼（pull 最新後）
 uv tool install ./crucible --force
