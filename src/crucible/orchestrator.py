@@ -59,13 +59,15 @@ class Orchestrator:
         """Create the experiment branch and initialise results-{tag}.tsv."""
         self.git.create_branch(self.tag)
         self.results.init()
-        # Ensure results TSV files are gitignored so reset doesn't revert them
+        # Ensure generated files are gitignored so reset doesn't revert them
+        # and agents don't trigger violations by accidentally touching them
         gitignore = self.workspace / ".gitignore"
         lines = gitignore.read_text().splitlines() if gitignore.exists() else []
-        if "results-*.tsv" not in lines:
-            lines.append("results-*.tsv")
+        needed = [p for p in ("results-*.tsv", "run.log") if p not in lines]
+        if needed:
+            lines.extend(needed)
             gitignore.write_text("\n".join(lines) + "\n")
-            self.git.commit("chore: gitignore results-*.tsv")
+            self.git.commit("chore: gitignore generated files")
 
     def resume(self) -> None:
         """Resume an existing experiment branch."""

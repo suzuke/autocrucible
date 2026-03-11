@@ -61,8 +61,13 @@ class ContextAssembler:
         lines.append(f"\nBranch: {self.branch_name}")
 
         if best is not None:
+            direction_hint = (
+                "lower is better" if self.config.metric.direction == "minimize"
+                else "higher is better"
+            )
             lines.append(
-                f"Best {self.config.metric.name} so far: {best.metric_value}"
+                f"**Best {self.config.metric.name} so far: {best.metric_value}** "
+                f"(Goal: {self.config.metric.direction} — {direction_hint})"
             )
 
         if summary["total"] > 0:
@@ -72,6 +77,9 @@ class ContextAssembler:
                 f"{summary['discarded']} discarded, "
                 f"{summary['crashed']} crashed"
             )
+
+        if summary["total"] > 0 and summary["kept"] == 0:
+            lines.append("⚠ No improvements yet — try a fundamentally different approach")
 
         editable = ", ".join(self.config.files.editable)
         lines.append(f"Editable files: {editable}")
@@ -86,7 +94,11 @@ class ContextAssembler:
 
         recent = records[-cw.history_limit:]
         if not recent:
-            return ""
+            return (
+                "## Experiment History\n\n"
+                "No experiments yet. Read ALL the code carefully, then make "
+                "ONE high-impact improvement targeting the main bottleneck."
+            )
 
         lines = ["## Experiment History"]
         lines.append("")
