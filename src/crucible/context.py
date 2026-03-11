@@ -9,11 +9,8 @@ from crucible.config import Config
 from crucible.results import ExperimentRecord, ResultsLog
 
 PREAMBLE = (
-    "You are an expert performance optimizer. Your ONLY goal: improve the target metric.\n"
-    "Strategy: Read the code thoroughly, understand what limits performance, "
-    "then make ONE surgical edit that addresses the biggest bottleneck.\n"
-    "Learn from history — if a direction worked, push further in that direction. "
-    "If it failed, try something fundamentally different.\n"
+    "Learn from history — if a direction worked (✓), push further. "
+    "If it failed (✗) or crashed (💥), try something fundamentally different.\n"
 )
 
 _STATUS_LABELS = {"keep": "✓ KEPT", "discard": "✗ WORSE", "crash": "💥 CRASH"}
@@ -181,24 +178,19 @@ class ContextAssembler:
         editable = ", ".join(self.config.files.editable)
         return (
             "## Your Task\n\n"
-            "You MUST use the Edit or Write tool to modify the editable files directly. "
-            "Do NOT just describe changes — actually edit the code.\n\n"
-            "**Mandatory workflow:**\n\n"
-            "1. **Read ALL editable files FIRST** using the Read tool — "
-            "understand the full code before any edit\n"
-            "2. **Study the history** — identify what direction of change "
-            "improved the metric, and NEVER repeat failed approaches\n"
-            "3. **Make exactly ONE targeted edit** that you believe will "
-            "improve the metric — to: " + editable + "\n"
-            "4. After editing, state what you changed and your reasoning "
-            "(one line)\n\n"
+            "**Workflow (STRICT ORDER):**\n\n"
+            "1. **READ** — Use Glob to find files, then Read ALL relevant code. "
+            "NEVER edit without reading first.\n"
+            "2. **THINK** — What is the #1 bottleneck? Study experiment history: "
+            "✓ means push further, ✗/💥 means NEVER retry that direction.\n"
+            "3. **EDIT** — Make ONE bold, high-impact change to: " + editable + ". "
+            "Ensure syntactic correctness and preserve the interface.\n"
+            "4. **EXPLAIN** — One line: what you changed and expected improvement.\n\n"
             "**Rules:**\n"
-            "- NEVER edit without reading the file first\n"
-            "- NEVER repeat a failed/crashed approach — try something "
-            "genuinely different\n"
-            "- ONE change per iteration. Small, precise edits beat rewrites.\n"
-            "- Ensure your edit does not break correctness — a crash scores zero\n"
-            "- Do NOT output full file contents. Just make targeted edits."
+            "- NEVER repeat a failed/crashed approach, even with small variations\n"
+            "- ONE change per iteration — don't combine multiple ideas\n"
+            "- A crash scores zero — correctness first\n"
+            "- Do NOT output full file contents. Use targeted edits."
         )
 
     def assemble(self, log: ResultsLog) -> str:
