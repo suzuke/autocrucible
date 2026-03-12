@@ -1,17 +1,18 @@
 name: "optimize-compress"
-description: "Minimize compressed size of a 10KB text corpus using a custom compression algorithm (no zlib/gzip allowed)"
 
 files:
   editable:
     - "compress.py"
   readonly:
-    - "evaluate.py"
     - "generate_corpus.py"
     - "corpus.txt"
+    - ".crucible/program.md"
+  hidden:
+    - "evaluate.py"
 
 commands:
-  run: "python3 evaluate.py > run.log 2>&1"
-  eval: "grep '^compression_ratio:' run.log"
+  run: "python3 -u evaluate.py 2>&1 | tee run.log"
+  eval: "cat run.log"
 
 metric:
   name: "compression_ratio"
@@ -22,13 +23,7 @@ constraints:
   max_retries: 5
 
 agent:
-  type: "claude-code"
   instructions: "program.md"
-  context_window:
-    include_history: true
-    history_limit: 20
-    include_best: true
 
 git:
   branch_prefix: "crucible"
-  tag_failed: true

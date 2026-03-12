@@ -1,16 +1,17 @@
 name: "optimize-lm"
-description: "Minimize validation bits-per-byte on a character-level GPT trained with MLX on Apple Silicon — autoresearch-style"
 
 files:
   editable:
     - "train.py"
   readonly:
-    - "evaluate.py"
     - "data.py"
+    - ".crucible/program.md"
+  hidden:
+    - "evaluate.py"
 
 commands:
-  run: "uv run python evaluate.py > run.log 2>&1"
-  eval: "grep '^val_bpb:' run.log"
+  run: "uv run python -u evaluate.py 2>&1 | tee run.log"
+  eval: "cat run.log"
 
 metric:
   name: "val_bpb"
@@ -21,13 +22,7 @@ constraints:
   max_retries: 10
 
 agent:
-  type: "claude-code"
   instructions: "program.md"
-  context_window:
-    include_history: true
-    history_limit: 20
-    include_best: true
 
 git:
   branch_prefix: "crucible"
-  tag_failed: true

@@ -1,15 +1,16 @@
 name: "optimize-sorting"
-description: "Find the fastest sorting implementation for 100k integers"
 
 files:
   editable:
     - "sort.py"
   readonly:
+    - ".crucible/program.md"
+  hidden:
     - "benchmark.py"
 
 commands:
-  run: "python3 benchmark.py > run.log 2>&1"
-  eval: "grep '^ops_per_sec:' run.log"
+  run: "python3 -u benchmark.py 2>&1 | tee run.log"
+  eval: "cat run.log"
 
 metric:
   name: "ops_per_sec"
@@ -20,13 +21,7 @@ constraints:
   max_retries: 3
 
 agent:
-  type: "claude-code"
   instructions: "program.md"
-  context_window:
-    include_history: true
-    history_limit: 15
-    include_best: true
 
 git:
   branch_prefix: "crucible"
-  tag_failed: true

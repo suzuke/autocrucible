@@ -78,7 +78,7 @@ crucible new . --list
 # Create from example
 crucible new ~/my-experiment -e optimize-sorting
 cd ~/my-experiment
-crucible init --tag run1   # auto git-init if needed
+crucible run --tag run1    # auto-inits git repo, branch, and results
 ```
 
 **Using the wizard (AI-generated scaffold):**
@@ -86,7 +86,7 @@ crucible init --tag run1   # auto git-init if needed
 ```bash
 crucible wizard ~/my-experiment --describe "Train an AlphaZero Gomoku agent using NN and MCTS"
 cd ~/my-experiment
-crucible init --tag run1
+crucible run --tag run1    # auto-inits if needed
 ```
 
 The wizard analyzes your description, asks clarifying questions, and generates a complete project with **architecture guards** baked into `evaluate.py` — preventing the agent from bypassing your intended approach.
@@ -97,7 +97,7 @@ The wizard analyzes your description, asks clarifying questions, and generates a
 crucible new ~/my-experiment
 cd ~/my-experiment
 # Edit .crucible/config.yaml and program.md
-crucible init --tag run1   # auto git-init if needed
+crucible run --tag run1    # auto-inits if needed
 ```
 
 If your experiment needs third-party packages (numpy, torch, etc.), they are listed in the generated `pyproject.toml`. Install them:
@@ -135,15 +135,7 @@ Edit sort.py to improve throughput measured by ops_per_sec.
 Try different algorithms, data structures, and optimizations.
 ```
 
-### 2. Initialize
-
-```bash
-crucible init --tag run1
-```
-
-This creates a git branch `crucible/run1` and initializes `results.tsv`. If the project isn't a git repo yet, `init` automatically runs `git init`, stages all files, and creates an initial commit.
-
-### 3. Run
+### 2. Run
 
 ```bash
 crucible run --tag run1
@@ -249,7 +241,8 @@ crucible -v run --tag run1   # debug-level output
 name: "experiment-name"                    # Experiment identifier
 files:
   editable: ["train.py"]                   # Files the agent can modify
-  readonly: ["eval.py"]                    # Files the agent must not touch (optional)
+  readonly: ["data.py"]                    # Agent can read but not modify (optional)
+  hidden: ["evaluate.py"]                  # Invisible to agent; available to subprocess
 commands:
   run: "python train.py > run.log 2>&1"    # How to run one experiment
   eval: "grep '^metric:' run.log"          # How to extract the metric
@@ -357,7 +350,6 @@ A showcase example where the agent builds a lossless text compressor from scratc
 ```bash
 crucible new ~/compress -e optimize-compress
 cd ~/compress
-crucible init --tag run1
 crucible run --tag run1
 ```
 
@@ -374,7 +366,7 @@ my-experiment/
 │   ├── config.yaml     # What to optimize, how to run, what to measure
 │   └── program.md      # Instructions for the LLM agent
 ├── solution.py          # Code the agent modifies (editable)
-├── evaluate.py          # Fixed harness that measures the metric (readonly)
+├── evaluate.py          # Fixed harness that measures the metric (hidden)
 ├── pyproject.toml       # Experiment dependencies (NOT crucible itself)
 ├── results.tsv          # Auto-generated experiment log
 └── run.log              # Latest experiment output
@@ -414,7 +406,7 @@ Claude Code will automatically activate the `crucible-setup` skill and walk you 
 
 1. **Define the metric** — what to measure, direction (min/max), dependencies
 2. **Architecture constraints** — if you require a specific approach, the skill enforces it in `evaluate.py` (not just prompts) to prevent [Goodhart's Law](https://en.wikipedia.org/wiki/Goodhart%27s_law) violations
-3. **Create evaluation harness** — readonly `evaluate.py` with correctness gating and method verification
+3. **Create evaluation harness** — hidden `evaluate.py` with correctness gating and method verification
 4. **Create baseline** — simple, correct starting implementation
 5. **Write agent instructions** — `program.md` with hard rules (code-enforced) vs soft rules (guidelines)
 6. **Write config.yaml** — metric, commands, timeout, guard rails
@@ -443,8 +435,6 @@ That said, local optima is a real risk for long runs. The built-in escape hatch 
 
 ```bash
 # Explore different directions from the same baseline
-crucible init --tag approach-a
-crucible init --tag approach-b
 crucible run --tag approach-a    # e.g. "focus on algorithmic improvements"
 crucible run --tag approach-b    # e.g. "focus on low-level optimizations"
 crucible compare approach-a approach-b
@@ -455,7 +445,7 @@ You can also backtrack to an earlier commit and branch from there:
 ```bash
 git log crucible/run1              # find a promising commit
 git checkout <commit>
-crucible init --tag run1-variant   # new branch from that point
+crucible run --tag run1-variant    # auto-inits new branch from that point
 crucible run --tag run1-variant
 ```
 
@@ -492,7 +482,7 @@ The agent cannot run arbitrary commands — it only has access to Read, Edit, Wr
 **Mitigations:**
 
 - **Scope the editable files narrowly.** If `sort.py` only contains a sort function, the blast radius is limited even if the agent writes bad code.
-- **Make the evaluation harness (readonly) import and call the editable code in a controlled way.** The agent can't modify `evaluate.py`.
+- **Always set the evaluation harness as `hidden`, not `readonly`.** Readonly files are readable — the agent **will** study them and exploit implementation details (fixed seeds, scoring formulas, test data) to game the metric. In the `optimize-regression` example, the agent read `evaluate.py`, found `seed=42`, reconstructed the exact noise vector, and achieved MSE=0.0 in 3 iterations by memorizing the test set instead of learning regression. Hidden files are moved out of reach during agent execution but restored for the experiment subprocess.
 - **Use `constraints.timeout_seconds`** to kill runaway experiments.
 - **Run in a container or VM** for untrusted workloads. Crucible doesn't require root or network access.
 - **Review the git log.** Every change is committed — you can audit exactly what the agent did.

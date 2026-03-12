@@ -43,8 +43,8 @@ project-root/
 
 **Three file categories:**
 - **Editable files** = what the agent changes (algorithms, models, configs)
-- **Readonly files** = agent can read but not modify (benchmarks, eval harnesses, data) + program.md
-- **Hidden files** = invisible to agent, available to evaluation subprocess (opponent implementations, reference solutions, test data the agent should not see)
+- **Readonly files** = agent can read but not modify (data files, shared interfaces, game rules) + program.md
+- **Hidden files** = invisible to agent, available to evaluation subprocess. **Evaluation harnesses (evaluate.py / benchmark.py) should always be hidden** — they contain seeds, scoring formulas, and test data that agents will exploit to game the metric instead of genuinely optimizing
 
 ## Setup Workflow
 
@@ -71,7 +71,7 @@ Ask the user:
 
 If the user specifies architecture constraints, these MUST be code-enforced in evaluate.py (not just in program.md). See "Goodhart's Law" section below.
 
-### Step 2: Create the Evaluation Harness (Readonly)
+### Step 2: Create the Evaluation Harness (Hidden)
 
 The evaluation file must:
 - Print the primary metric as `<metric_name>: <float_value>` (one per line, grep-parseable)
@@ -107,10 +107,10 @@ files:
   editable:
     - "<editable_file.py>"
   readonly:
-    - "<evaluation_file.py>"
     - "program.md"              # IMPORTANT: prevent agent from editing its own instructions
-  # hidden:                     # Optional: files invisible to agent but available to eval subprocess
-  #   - "opponent.py"           # e.g., opponent implementation agent shouldn't reverse-engineer
+    # - "data.py"               # data files / shared interfaces the agent needs to read
+  hidden:
+    - "<evaluation_file.py>"    # ALWAYS hide eval harness — agents exploit seeds, formulas, scoring logic
 
 commands:
   run: "python3 <evaluation_file>.py > run.log 2>&1"
@@ -199,24 +199,31 @@ Enforcement approaches: AST inspection, hook counters, import checking, attribut
 
 ### Information Isolation with Hidden Files
 
-A second Goodhart vector: the agent reads readonly files (like evaluate.py) and reverse-engineers implementation details. Example: agent reads the heuristic opponent's scoring function and hardcodes optimal counter-moves instead of learning genuine strategy.
+A second Goodhart vector: the agent reads readonly files and reverse-engineers implementation details. Example: agent reads evaluate.py, finds `seed=42`, reconstructs the exact test data, and hardcodes predictions for MSE=0 — without learning anything.
 
-Use `files.hidden` in config.yaml to make files completely invisible to the agent while keeping them available to the evaluation subprocess:
+**Rule: evaluation harnesses (evaluate.py / benchmark.py) should ALWAYS be hidden.** They invariably contain fixed seeds, scoring formulas, dataset generation logic, or opponent strategies that agents will exploit.
 
 ```yaml
 files:
   editable: ["agent.py"]
-  readonly: ["evaluate.py"]
-  hidden: ["opponent.py"]     # agent can't see this; evaluate.py imports it normally
+  readonly: ["game.py"]       # shared interfaces the agent needs to read
+  hidden: ["evaluate.py"]     # scoring harness — agent must not see this
 ```
 
 How it works: hidden files are moved to a temp directory before the agent runs, then restored before the experiment subprocess executes. The agent sees "file not found" — like a closed-source API.
 
-When to use hidden files:
-- Opponent/adversary implementations the agent should not reverse-engineer
+What to hide:
+- **Evaluation harnesses** (evaluate.py, benchmark.py) — always hide these
+- Opponent/adversary implementations
 - Reference solutions used for scoring
 - Test data that would leak the answer
-- Any implementation detail that creates a shortcut around genuine optimization
+
+What to keep as readonly (not hidden):
+- Data files the agent needs to understand input format
+- Shared interfaces/game rules the agent's code must conform to
+- Helper modules the editable code imports
+
+**Case study — optimize-regression:** The evaluation harness generates data with `np.random.seed(42)` and a known true function `3.0*X[0] + 1.5*X[1]² - 2.0*X[2]*X[3] + 0.5*sin(X[4]*π) + 0.8*|X[5]| + noise(0.5)`. When evaluate.py was readonly, the agent read it, found the fixed seed, reconstructed the exact noise vector, and achieved MSE=0.0 in 3 iterations — by memorizing the test set, not by learning regression. After changing evaluate.py to hidden, the agent must genuinely optimize the model through metric feedback alone.
 
 ## Agent Behavior Tuning
 
