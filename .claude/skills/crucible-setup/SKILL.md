@@ -22,7 +22,7 @@ crucible new . --list                          # see available examples
 crucible new ~/my-project -e optimize-sorting  # create from example
 ```
 
-Examples: `optimize-sorting`, `optimize-regression`, `optimize-classifier`, `optimize-gomoku`, `optimize-compress`, `optimize-lm`
+Examples: `optimize-sorting`, `optimize-regression`, `optimize-classifier`, `optimize-gomoku`, `optimize-compress`, `optimize-lm`, `optimize-snake`
 
 If no example fits, proceed with the workflow below to build from scratch.
 

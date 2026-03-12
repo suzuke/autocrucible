@@ -342,6 +342,7 @@ crucible new ~/my-project -e <example-name>
 | `optimize-classifier` | `val_accuracy` | maximize | Numpy-only neural network on 8-class dataset |
 | `optimize-compress` | `compression_ratio` | maximize | Lossless text compression (no zlib/gzip allowed) |
 | `optimize-gomoku` | `win_rate` | maximize | AlphaZero-style Gomoku agent training |
+| `optimize-snake` | `avg_score` | maximize | Snake AI heuristic search (no dependencies) |
 
 ### Demo: optimize-compress
 

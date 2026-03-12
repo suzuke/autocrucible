@@ -349,6 +349,7 @@ crucible new ~/my-project -e <範例名稱>
 | `optimize-classifier` | `val_accuracy` | maximize | Numpy 手寫神經網路，8 類別分類 |
 | `optimize-compress` | `compression_ratio` | maximize | 無損文字壓縮（禁用 zlib/gzip） |
 | `optimize-gomoku` | `win_rate` | maximize | AlphaZero 風格五子棋 agent 訓練 |
+| `optimize-snake` | `avg_score` | maximize | 貪食蛇 AI 啟發式搜尋（無外部依賴） |
 
 ### 範例展示：optimize-compress
 
