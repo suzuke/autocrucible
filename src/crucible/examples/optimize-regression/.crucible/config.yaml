@@ -3,9 +3,7 @@ name: "optimize-regression"
 files:
   editable:
     - "model.py"
-  readonly:
-    - ".crucible/config.yaml"
-    - ".crucible/program.md"
+  readonly: []
   hidden:
     - "evaluate.py"
 

@@ -3,9 +3,7 @@ name: "optimize-sorting"
 files:
   editable:
     - "sort.py"
-  readonly:
-    - ".crucible/config.yaml"
-    - ".crucible/program.md"
+  readonly: []
   hidden:
     - "benchmark.py"
 

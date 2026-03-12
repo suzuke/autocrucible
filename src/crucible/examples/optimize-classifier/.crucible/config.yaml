@@ -3,9 +3,7 @@ name: "optimize-classifier"
 files:
   editable:
     - "classifier.py"
-  readonly:
-    - ".crucible/config.yaml"
-    - ".crucible/program.md"
+  readonly: []
   hidden:
     - "evaluate.py"
 

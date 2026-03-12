@@ -106,9 +106,7 @@ description: "<one-line description>"
 files:
   editable:
     - "<editable_file.py>"
-  readonly:
-    - ".crucible/config.yaml"   # prevent agent from changing experiment settings
-    - "program.md"              # prevent agent from editing its own instructions
+  readonly:                              # .crucible/ is auto-protected by the platform
     # - "data.py"               # data files / shared interfaces the agent needs to read
   hidden:
     - "<evaluation_file.py>"    # ALWAYS hide eval harness — agents exploit seeds, formulas, scoring logic

@@ -4,9 +4,7 @@ files:
   editable:
     - "train.py"
   readonly:
-    - ".crucible/config.yaml"
     - "data.py"
-    - ".crucible/program.md"
   hidden:
     - "evaluate.py"
 
