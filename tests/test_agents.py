@@ -137,3 +137,82 @@ def test_clean_description_truncates():
     long_text = "a" * 300
     result = _clean_description(long_text)
     assert len(result) == 200
+
+
+# -- hidden file hook tests ----------------------------------------------------
+
+from crucible.agents.claude_code import _make_hidden_file_hooks, _resolve_rel_path
+
+
+def test_resolve_rel_path_absolute():
+    assert _resolve_rel_path("/project/secret.py", Path("/project")) == "secret.py"
+
+
+def test_resolve_rel_path_relative():
+    assert _resolve_rel_path("secret.py", Path("/project")) == "secret.py"
+
+
+def test_resolve_rel_path_dotslash():
+    assert _resolve_rel_path("./secret.py", Path("/project")) == "secret.py"
+
+
+def test_resolve_rel_path_subdir():
+    assert _resolve_rel_path("/project/lib/opponent.py", Path("/project")) == "lib/opponent.py"
+
+
+def test_resolve_rel_path_outside_workspace():
+    assert _resolve_rel_path("/other/file.py", Path("/project")) is None
+
+
+def test_resolve_rel_path_empty():
+    assert _resolve_rel_path("", Path("/project")) is None
+
+
+@pytest.mark.asyncio
+async def test_hook_denies_hidden_read():
+    workspace = Path("/project")
+    hooks = _make_hidden_file_hooks({"secret.py"}, workspace)
+    hook_fn = hooks["PreToolUse"][0].hooks[0]
+    result = await hook_fn(
+        {"tool_name": "Read", "tool_input": {"file_path": "/project/secret.py"}},
+        None, None,
+    )
+    output = result["hookSpecificOutput"]
+    assert output["permissionDecision"] == "deny"
+    assert "secret.py" in output["permissionDecisionReason"]
+
+
+@pytest.mark.asyncio
+async def test_hook_allows_non_hidden():
+    workspace = Path("/project")
+    hooks = _make_hidden_file_hooks({"secret.py"}, workspace)
+    hook_fn = hooks["PreToolUse"][0].hooks[0]
+    result = await hook_fn(
+        {"tool_name": "Read", "tool_input": {"file_path": "train.py"}},
+        None, None,
+    )
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_hook_allows_no_path():
+    workspace = Path("/project")
+    hooks = _make_hidden_file_hooks({"secret.py"}, workspace)
+    hook_fn = hooks["PreToolUse"][0].hooks[0]
+    result = await hook_fn(
+        {"tool_name": "Grep", "tool_input": {"pattern": "SECRET"}},
+        None, None,
+    )
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_hook_denies_hidden_subdir():
+    workspace = Path("/project")
+    hooks = _make_hidden_file_hooks({"lib/opponent.py"}, workspace)
+    hook_fn = hooks["PreToolUse"][0].hooks[0]
+    result = await hook_fn(
+        {"tool_name": "Read", "tool_input": {"file_path": "/project/lib/opponent.py"}},
+        None, None,
+    )
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"

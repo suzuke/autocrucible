@@ -8,10 +8,12 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
+    HookMatcher,
     ResultMessage,
     TextBlock,
     query,
@@ -43,16 +45,70 @@ SYSTEM_PROMPT = (
 )
 
 
+def _resolve_rel_path(raw: str, workspace: Path) -> str | None:
+    """Resolve a tool input path to a relative path within the workspace.
+
+    Returns the normalized relative path, or None if outside workspace.
+    """
+    if not raw:
+        return None
+    p = Path(raw)
+    if p.is_absolute():
+        try:
+            rel = str(p.relative_to(workspace))
+        except ValueError:
+            return None
+    else:
+        rel = str(p)
+    return rel.lstrip("./")
+
+
+def _make_hidden_file_hooks(
+    hidden: set[str], workspace: Path
+) -> dict[str, list[HookMatcher]]:
+    """Create PreToolUse hooks that deny access to hidden files.
+
+    Uses the hooks API (not can_use_tool) to avoid the AsyncIterable prompt
+    requirement that breaks the claude CLI subprocess transport.
+    """
+
+    async def pre_tool_use_hook(hook_input: dict, match: str | None, context: Any) -> dict:
+        tool_input = hook_input.get("tool_input", {})
+        raw = tool_input.get("file_path") or tool_input.get("path") or ""
+        rel = _resolve_rel_path(raw, workspace)
+
+        if rel and rel in hidden:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        f"Access denied: {rel} is a hidden platform-managed file. "
+                        "Do NOT attempt to read, write, or create this file."
+                    ),
+                }
+            }
+        return {}
+
+    return {
+        "PreToolUse": [
+            HookMatcher(hooks=[pre_tool_use_hook]),
+        ],
+    }
+
+
 class ClaudeCodeAgent(AgentInterface):
     def __init__(
         self,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
         model: str | None = None,
         system_prompt_file: str | None = None,
+        hidden_files: set[str] | None = None,
     ):
         self.timeout = timeout
         self.model = model
         self.system_prompt_file = system_prompt_file
+        self.hidden_files: set[str] = hidden_files or set()
 
     def get_system_prompt(self, workspace: Path) -> str:
         """Return system prompt: custom file content or default."""
@@ -91,12 +147,18 @@ class ClaudeCodeAgent(AgentInterface):
                 os.environ["CLAUDECODE"] = saved
 
     async def _run_query(self, prompt: str, workspace: Path) -> AgentResult:
+        hooks = (
+            _make_hidden_file_hooks(self.hidden_files, workspace)
+            if self.hidden_files
+            else None
+        )
         options = ClaudeAgentOptions(
             system_prompt=self.get_system_prompt(workspace),
             permission_mode="bypassPermissions",
             allowed_tools=["Read", "Edit", "Write", "Glob", "Grep"],
             model=self.model,
             cwd=workspace,
+            hooks=hooks,
         )
 
         description = "no description"

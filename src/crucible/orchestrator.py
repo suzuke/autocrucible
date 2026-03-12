@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
-import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -55,8 +53,8 @@ class Orchestrator:
 
         self._fail_seq = 0
         self._consecutive_failures = 0
+        self._consecutive_skips = 0
         self._stop = False
-        self._hidden_dir: Optional[Path] = None
 
     def init(self) -> None:
         """Create the experiment branch and initialise results-{tag}.tsv."""
@@ -78,54 +76,18 @@ class Orchestrator:
         existing = self.results.read_all()
         self._fail_seq = sum(1 for r in existing if r.status in ("crash", "discard"))
 
-    def _hide_files(self) -> None:
-        """Move hidden files to a temp directory so the agent cannot see them."""
-        if not self.config.files.hidden:
-            return
-        tmpdir = Path(tempfile.mkdtemp(prefix="crucible_hidden_"))
-        for rel in self.config.files.hidden:
-            src = self.workspace / rel
-            if not src.exists():
-                continue
-            dst = tmpdir / rel
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dst))
-        self._hidden_dir = tmpdir
-
-    def _restore_files(self) -> None:
-        """Move hidden files back from the temp directory."""
-        if self._hidden_dir is None:
-            return
-        for rel in self.config.files.hidden:
-            src = self._hidden_dir / rel
-            if not src.exists():
-                continue
-            dst = self.workspace / rel
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dst))
-        shutil.rmtree(self._hidden_dir, ignore_errors=True)
-        self._hidden_dir = None
-
     def run_one_iteration(self) -> str:
         """Execute one full experiment cycle.
 
         Returns a status string: "keep", "discard", "crash", "violation", or "skip".
         """
-        # 0. Hide files from agent
-        self._hide_files()
-
         # 1. Assemble prompt
         prompt = self.context.assemble(self.results)
 
-        # 2. Call agent
-        try:
-            agent_result = self.agent.generate_edit(prompt, self.workspace)
-        except Exception:
-            self._restore_files()
-            raise
+        # 2. Call agent (hidden files are protected via SDK can_use_tool callback)
+        agent_result = self.agent.generate_edit(prompt, self.workspace)
 
-        # 3. Strip hidden files from modified list — agent may have created
-        #    them after seeing broken imports, but they'll be restored anyway.
+        # 3. Strip hidden files from modified list (agent may have created them on disk)
         hidden_set = set(self.config.files.hidden)
         modified = [str(p) for p in agent_result.modified_files if str(p) not in hidden_set]
 
@@ -137,16 +99,12 @@ class Orchestrator:
         #    no real experiment ran, so the agent just needs better guidance.
         #    Only crash and discard (real failed experiments) trigger stopping.
         if violation is not None:
-            self._restore_files()
             if violation.kind == "no_edits":
                 self.context.requeue_crash_info()
                 return "skip"
             self.git.revert_changes()
             self.context.add_error(violation.message)
             return "violation"
-
-        # 6. Restore hidden files before committing and running
-        self._restore_files()
 
         # 7. Git commit
         self.git.commit(agent_result.description)
@@ -224,9 +182,16 @@ class Orchestrator:
                 best_str = f"{best.metric_value}" if best else "N/A"
                 logger.info(f"[iter {iteration}] {status} | best {self.config.metric.name}: {best_str}")
 
+                if status in ("skip", "violation"):
+                    self._consecutive_skips += 1
+                else:
+                    self._consecutive_skips = 0
+
                 if self._consecutive_failures >= max_retries:
                     logger.warning(f"[iter {iteration}] {max_retries} consecutive failures, stopping.")
                     break
+                if self._consecutive_skips >= max_retries:
+                    logger.warning(f"[iter {iteration}] {max_retries} consecutive skips, stopping.")
+                    break
         except KeyboardInterrupt:
-            self._restore_files()
             logger.info(f"Stopped after {iteration} iterations.")
