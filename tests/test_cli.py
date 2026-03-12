@@ -245,3 +245,34 @@ def test_init_separate_tags_have_separate_results(tmp_path):
     assert "abc1234" in run1_content
     # run2 should have its own empty results
     assert (tmp_path / results_filename("run2")).exists()
+
+
+def test_run_auto_inits_when_no_branch(tmp_path):
+    """run auto-initialises when tag branch doesn't exist yet."""
+    setup_project(tmp_path)
+    runner = CliRunner()
+    # run without init — should auto-init and create results file
+    with patch("crucible.orchestrator.Orchestrator.run_loop"):
+        result = runner.invoke(main, ["run", "--tag", "auto1", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert "Initialised experiment" in result.output
+    assert (tmp_path / results_filename("auto1")).exists()
+
+
+def test_run_auto_inits_git_repo(tmp_path):
+    """run auto-initialises git repo when .git is missing."""
+    # Create project without git
+    cfg_dir = tmp_path / ".crucible"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(VALID_CONFIG)
+    (cfg_dir / "program.md").write_text("You are a researcher.")
+    (tmp_path / "train.py").write_text("x = 1")
+
+    runner = CliRunner()
+    with patch("crucible.orchestrator.Orchestrator.run_loop"):
+        result = runner.invoke(main, ["run", "--tag", "auto2", "--project-dir", str(tmp_path)])
+    assert result.exit_code == 0, result.output
+    assert "No git repo found" in result.output
+    assert "Git repo initialized" in result.output
+    assert (tmp_path / ".git").exists()
+    assert (tmp_path / results_filename("auto2")).exists()

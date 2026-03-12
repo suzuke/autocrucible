@@ -299,8 +299,7 @@ if __name__ == "__main__":
     click.echo(f"  cd {dest_path}")
     if extra_deps:
         click.echo("  uv sync          # install experiment dependencies")
-    click.echo("  crucible init --tag run1   # auto git-init if needed")
-    click.echo("  crucible run --tag run1")
+    click.echo("  crucible run --tag run1    # auto-inits if needed")
 
 
 @main.command()
@@ -365,16 +364,31 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int) -> None:
     agent = ClaudeCodeAgent(timeout=timeout, model=model, system_prompt_file=config.agent.system_prompt)
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
 
-    # Resume if branch exists, otherwise require init
+    # Resume if branch exists, otherwise auto-init
     if orch.git.branch_exists(tag):
         orch.resume()
         existing = orch.results.read_all()
         click.echo(f"Resuming experiment '{tag}' ({len(existing)} previous iterations)")
     else:
-        if not orch.results.path.exists():
-            raise click.ClickException(
-                f"No {results_filename(tag)} found. Run 'crucible init --tag {tag}' first."
+        # Auto-init: git repo + branch + results + setup
+        if not (project / ".git").exists():
+            click.echo("No git repo found — initializing...")
+            subprocess.run(["git", "init"], cwd=project, check=True,
+                           capture_output=True)
+            subprocess.run(["git", "add", "-A"], cwd=project, check=True,
+                           capture_output=True)
+            subprocess.run(
+                ["git", "commit", "-m", "initial"],
+                cwd=project, check=True, capture_output=True,
             )
+            click.echo("Git repo initialized with initial commit.")
+        orch.init()
+        if config.commands.setup:
+            click.echo(f"Running setup: {config.commands.setup}")
+            result = subprocess.run(config.commands.setup, shell=True, cwd=project)
+            if result.returncode != 0:
+                raise click.ClickException(f"Setup command failed with exit code {result.returncode}")
+        click.echo(f"Initialised experiment '{tag}' in {project}")
 
     click.echo("Press Ctrl+C to stop gracefully.")
     orch.run_loop()
