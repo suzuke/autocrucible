@@ -1,5 +1,6 @@
 import sys
-sys.path.insert(0, "src/crucible/examples/optimize-snake")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent / "src/crucible/examples/optimize-snake"))
 from game import SnakeGame
 
 
@@ -80,4 +81,18 @@ def test_step_limit():
             g.step(moves[0])
         else:
             break
-    assert g.steps <= 1000 or g.done
+    assert g.done
+    assert g.steps <= 1000
+
+
+def test_self_collision_preserves_snake_length():
+    """Snake state must be consistent (not corrupted) after self-collision."""
+    import collections
+    g = SnakeGame(seed=0)
+    g.snake = collections.deque([(5, 5), (5, 6), (5, 7)])
+    g.occupied = {(5, 5), (5, 6), (5, 7)}
+    g.food = (0, 0)
+    length_before = len(g.snake)
+    g.step('RIGHT')
+    assert g.done
+    assert len(g.snake) == length_before  # state must not be corrupted

@@ -100,6 +100,9 @@ class SnakeGame:
 
         # Self-collision check (after tail removal)
         if (nr, nc) in self.occupied:
+            # Restore tail to keep state consistent for post-game inspection
+            self.snake.append(tail)
+            self.occupied.add(tail)
             self.done = True
             return
 
