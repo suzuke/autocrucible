@@ -4,6 +4,7 @@ files:
   editable:
     - "model.py"
   readonly:
+    - ".crucible/config.yaml"
     - ".crucible/program.md"
   hidden:
     - "evaluate.py"

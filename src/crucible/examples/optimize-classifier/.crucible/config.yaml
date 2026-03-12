@@ -4,6 +4,7 @@ files:
   editable:
     - "classifier.py"
   readonly:
+    - ".crucible/config.yaml"
     - ".crucible/program.md"
   hidden:
     - "evaluate.py"

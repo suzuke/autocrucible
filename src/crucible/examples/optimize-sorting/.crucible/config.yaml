@@ -4,6 +4,7 @@ files:
   editable:
     - "sort.py"
   readonly:
+    - ".crucible/config.yaml"
     - ".crucible/program.md"
   hidden:
     - "benchmark.py"

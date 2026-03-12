@@ -4,6 +4,7 @@ files:
   editable:
     - "compress.py"
   readonly:
+    - ".crucible/config.yaml"
     - "generate_corpus.py"
     - "corpus.txt"
     - ".crucible/program.md"
