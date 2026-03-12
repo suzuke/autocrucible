@@ -30,6 +30,18 @@ def test_no_edits():
     assert result.kind == "no_edits"
 
 
+def test_crucible_dir_always_protected():
+    guard = GuardRails(editable=["train.py"], readonly=[])
+    result = guard.check_edits([".crucible/config.yaml"])
+    assert result is not None
+    assert result.kind == "readonly"
+    assert "platform-protected" in result.message
+
+    result2 = guard.check_edits([".crucible/program.md"])
+    assert result2 is not None
+    assert result2.kind == "readonly"
+
+
 def test_check_metric_nan():
     guard = GuardRails(editable=["train.py"], readonly=[])
     assert guard.check_metric(float("nan")) is False

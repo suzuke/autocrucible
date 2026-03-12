@@ -30,6 +30,11 @@ class GuardRails:
             return Violation(kind="no_edits", message="No files were edited.")
 
         for f in modified_files:
+            if f.startswith(".crucible/"):
+                return Violation(
+                    kind="readonly",
+                    message=f"File is read-only (platform-protected): {f}",
+                )
             if f in self.readonly:
                 return Violation(
                     kind="readonly",
