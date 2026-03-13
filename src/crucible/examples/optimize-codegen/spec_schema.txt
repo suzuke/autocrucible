@@ -1,0 +1,33 @@
+# Code Generator Spec Schema
+
+Your generator receives a `spec` dict describing a computational task.
+It must return a Python code string that:
+  1. Computes the answer
+  2. Assigns it to a variable named `result`
+
+Spec format:
+  {"task": "<task_name>", ...parameters...}
+
+Two example specs (the full test set has 10 different specs):
+
+Example 1:
+  spec = {"task": "sum_of_squares", "n": 1000}
+  # Compute sum of i^2 for i in 1..n
+  # Expected result: 333833500
+  # Example code: result = sum(i*i for i in range(1, n+1))
+
+Example 2:
+  spec = {"task": "count_vowels", "text": "Hello World"}
+  # Count vowels (a,e,i,o,u, case-insensitive)
+  # Expected result: 3
+  # Example code: result = sum(1 for c in text.lower() if c in 'aeiou')
+
+Your generated code runs in a restricted namespace.
+Forbidden: ctypes, subprocess, os, sys, open, socket, urllib, __import__, eval, exec (calling exec recursively).
+Allowed imports: math, itertools, collections, functools, heapq, bisect.
+
+Scoring per task:
+  - correctness: 1.0 if result == expected, else 0.0
+  - speed_ratio: min(reference_naive_time / your_time, 10.0)
+  - task_score: correctness × speed_ratio
+Final score: mean task_score across all 10 tasks.
