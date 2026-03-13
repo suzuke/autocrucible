@@ -1,0 +1,22 @@
+# CartPole Observation Space
+
+The pole-balancing environment provides 4 observations per step:
+
+  obs[0]: cart_position      — position of cart on track, range [-4.8, 4.8] meters
+  obs[1]: cart_velocity      — cart velocity (meters per second)
+  obs[2]: pole_angle         — pole angle from vertical, range [-0.418, 0.418] radians (~24 degrees)
+  obs[3]: pole_angular_vel   — pole angular velocity (radians per second)
+
+Actions:
+  0 = push cart LEFT  (force = -10 N)
+  1 = push cart RIGHT (force = +10 N)
+
+Episode ends when:
+  - |cart_position| > 2.4 meters (cart fell off track), OR
+  - |pole_angle| > 12 degrees (pole fell over), OR
+  - 500 steps reached (perfect score)
+
+Score = mean steps survived across 200 episodes.
+Baseline (random): ~20 steps.
+Simple heuristic (push in direction pole is falling): ~150 steps.
+Good policy (LQR / linear combination): ~400-500 steps.
