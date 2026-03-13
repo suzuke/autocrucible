@@ -228,3 +228,49 @@ def test_crash_info_not_requeued_without_call(tmp_path):
     # No requeue call
     prompt = ctx.assemble(log)
     assert "SyntaxError" not in prompt
+
+
+# -- Baseline-aware context tests --------------------------------------------
+
+def test_assemble_shows_baseline_info(tmp_path):
+    """Baseline record should show in state section with special label."""
+    cfg = make_config(tmp_path)
+    (tmp_path / "program.md").write_text("Instructions.")
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.seed_baseline(600.0, "abc1234", "run1")
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/run2")
+    prompt = ctx.assemble(log)
+    assert "600.0" in prompt
+    assert "baseline" in prompt.lower() or "Baseline" in prompt
+
+
+def test_assemble_baseline_only_shows_explore_strategy(tmp_path):
+    """With only a baseline record (no real experiments), strategy should be EXPLORE."""
+    cfg = make_config(tmp_path)
+    (tmp_path / "program.md").write_text("Instructions.")
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.seed_baseline(600.0, "abc1234", "run1")
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/run2")
+    prompt = ctx.assemble(log)
+    assert "EXPLORE" in prompt
+
+
+def test_assemble_baseline_not_in_history_table(tmp_path):
+    """Baseline record should not appear as a row in the experiment history table."""
+    cfg = make_config(tmp_path)
+    (tmp_path / "program.md").write_text("Instructions.")
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.seed_baseline(600.0, "abc1234", "run1")
+    log.log("def5678", 650.0, "keep", "first real improvement")
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/run2")
+    prompt = ctx.assemble(log)
+    # "Forked from" is the baseline description — should NOT be in history table
+    assert "Forked from" not in prompt
+    # But the real experiment should be there
+    assert "first real improvement" in prompt

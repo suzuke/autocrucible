@@ -134,10 +134,17 @@ class ContextAssembler:
                 "lower is better" if self.config.metric.direction == "minimize"
                 else "higher is better"
             )
-            lines.append(
-                f"**Best {self.config.metric.name} so far: {best.metric_value}** "
-                f"(Goal: {self.config.metric.direction} — {direction_hint})"
-            )
+            if best.status == "baseline":
+                lines.append(
+                    f"**Baseline from previous run: {best.metric_value}** "
+                    f"(Goal: {self.config.metric.direction} — {direction_hint}) "
+                    f"— you must beat this score."
+                )
+            else:
+                lines.append(
+                    f"**Best {self.config.metric.name} so far: {best.metric_value}** "
+                    f"(Goal: {self.config.metric.direction} — {direction_hint})"
+                )
 
         if summary["total"] > 0:
             lines.append(
@@ -172,7 +179,8 @@ class ContextAssembler:
             return (
                 "## Experiment History\n\n"
                 "No experiments yet. Read ALL the code carefully, then make "
-                "ONE high-impact improvement targeting the main bottleneck."
+                "ONE high-impact improvement targeting the main bottleneck.\n\n"
+                f"**Strategy:** {_strategy_hint([])}"
             )
 
         lines = ["## Experiment History"]
@@ -272,22 +280,24 @@ class ContextAssembler:
         """Assemble all sections into a complete prompt."""
         records = log.read_all()
         direction = self.config.metric.direction
-        kept = [r for r in records if r.status == "keep"]
-        if kept:
-            best = min(kept, key=lambda r: r.metric_value) if direction == "minimize" else max(kept, key=lambda r: r.metric_value)
+        candidates = [r for r in records if r.status in ("keep", "baseline")]
+        if candidates:
+            best = min(candidates, key=lambda r: r.metric_value) if direction == "minimize" else max(candidates, key=lambda r: r.metric_value)
         else:
             best = None
+        # Filter out baseline for summary and history
+        real_records = [r for r in records if r.status != "baseline"]
         summary = {
-            "total": len(records),
-            "kept": len(kept),
-            "discarded": sum(1 for r in records if r.status == "discard"),
-            "crashed": sum(1 for r in records if r.status == "crash"),
+            "total": len(real_records),
+            "kept": sum(1 for r in real_records if r.status == "keep"),
+            "discarded": sum(1 for r in real_records if r.status == "discard"),
+            "crashed": sum(1 for r in real_records if r.status == "crash"),
         }
 
         sections = [
             self._section_instructions(),
-            self._section_state(records, best, summary),
-            self._section_history(records),
+            self._section_state(real_records, best, summary),
+            self._section_history(real_records),
             self._section_errors(),
             self._section_directive(),
         ]
