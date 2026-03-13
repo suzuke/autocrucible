@@ -1,0 +1,14 @@
+# Sample math word problems (these are EXAMPLES ONLY — not the test set)
+# Your prompt will be tested on 10 different problems.
+
+Example 1:
+  Question: A store sells apples for $0.50 each. Maria buys 8 apples and pays with a $10 bill. How much change does she receive?
+  Answer: 6.00
+
+Example 2:
+  Question: A swimming pool is 25 meters long. Tom swims 12 laps. How many meters does he swim in total?
+  Answer: 300
+
+Example 3:
+  Question: A class has 30 students. 40% of them passed the exam. How many students passed?
+  Answer: 12
