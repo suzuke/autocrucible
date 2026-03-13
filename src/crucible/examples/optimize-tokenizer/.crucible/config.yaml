@@ -5,6 +5,7 @@ files:
     - "tokenizer.py"
   readonly:
     - "corpus.txt"
+    - ".crucible/program.md"
   hidden:
     - "evaluate.py"
 
