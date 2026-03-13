@@ -36,6 +36,11 @@ class GitManager:
         branch_name = f"{self.branch_prefix}/{tag}"
         self._run("checkout", "-b", branch_name)
 
+    def create_branch_from(self, tag: str, commit: str) -> None:
+        """Create and checkout a new branch starting from a specific commit."""
+        branch_name = f"{self.branch_prefix}/{tag}"
+        self._run("checkout", "-b", branch_name, commit)
+
     def commit(self, message: str) -> None:
         """Stage all changes and commit with the given message."""
         self._run("add", "-A")

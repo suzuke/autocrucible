@@ -86,3 +86,27 @@ def test_checkout_branch(git_repo):
     gm.checkout_branch("run1")
     result = subprocess.run(["git", "branch", "--show-current"], cwd=git_repo, capture_output=True, text=True)
     assert result.stdout.strip() == "crucible/run1"
+
+
+def test_create_branch_from_commit(git_repo):
+    """Create a branch starting from a specific commit, not HEAD."""
+    gm = GitManager(git_repo, branch_prefix="crucible", tag_failed=True)
+    # Make a second commit
+    (git_repo / "file.txt").write_text("second")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "second"], cwd=git_repo, check=True, capture_output=True)
+    # Get the first commit hash
+    first_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD~1"],
+        cwd=git_repo, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    # Create branch from first commit
+    gm.create_branch_from("forked", first_commit)
+    # Should be on the new branch
+    result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=git_repo, capture_output=True, text=True,
+    )
+    assert result.stdout.strip() == "crucible/forked"
+    # File content should match first commit (not second)
+    assert (git_repo / "file.txt").read_text() == "initial"
