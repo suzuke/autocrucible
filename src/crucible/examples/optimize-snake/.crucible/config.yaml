@@ -5,6 +5,7 @@ files:
     - "agent.py"
   readonly:
     - "game.py"
+    - "view.py"
   hidden:
     - "evaluate.py"
 
