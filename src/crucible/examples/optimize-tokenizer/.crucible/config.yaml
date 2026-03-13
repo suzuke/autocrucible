@@ -1,0 +1,27 @@
+name: "optimize-tokenizer"
+
+files:
+  editable:
+    - "tokenizer.py"
+  readonly:
+    - "corpus.txt"
+  hidden:
+    - "evaluate.py"
+
+commands:
+  run: "python3 -u evaluate.py 2>&1 | tee run.log"
+  eval: "cat run.log"
+
+metric:
+  name: "tokens_per_char"
+  direction: "minimize"
+
+constraints:
+  timeout_seconds: 30
+  max_retries: 5
+
+agent:
+  instructions: "program.md"
+
+git:
+  branch_prefix: "crucible"
