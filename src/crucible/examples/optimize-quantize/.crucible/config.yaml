@@ -1,0 +1,29 @@
+name: "optimize-quantize"
+
+files:
+  editable:
+    - "quantize.py"
+  readonly:
+    - "model.npz"
+    - "model_info.txt"
+    - ".crucible/program.md"
+  hidden:
+    - "evaluate.py"
+
+commands:
+  run: "python3 -u evaluate.py 2>&1 | tee run.log"
+  eval: "cat run.log"
+
+metric:
+  name: "score"
+  direction: "maximize"
+
+constraints:
+  timeout_seconds: 60
+  max_retries: 5
+
+agent:
+  instructions: "program.md"
+
+git:
+  branch_prefix: "crucible"

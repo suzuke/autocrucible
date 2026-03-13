@@ -1,0 +1,22 @@
+# Model Architecture
+
+A 3-layer MLP classifier trained on a 5-class synthetic dataset.
+
+Layers:
+  W1: (20, 64)  float32  — input layer weights
+  b1: (64,)     float32  — input layer biases
+  W2: (64, 32)  float32  — hidden layer weights
+  b2: (32,)     float32  — hidden layer biases
+  W3: (32, 5)   float32  — output layer weights
+  b3: (5,)      float32  — output layer biases
+
+Activation: ReLU (hidden layers), Softmax (output)
+Total weight parameters: 3,488 (W1+W2+W3, excluding biases)
+
+Quantization scoring:
+  score = accuracy × (32 / avg_bits_per_weight)
+  - 32-bit (no quantization): score = accuracy × 1.0
+  - INT8 (8-bit): score = accuracy × 4.0 (if accuracy preserved)
+  - INT4 (4-bit): score = accuracy × 8.0 (if accuracy preserved)
+
+Note: Only weight matrices (W1, W2, W3) are quantized. Biases stay at float32.
