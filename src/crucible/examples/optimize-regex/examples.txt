@@ -1,0 +1,45 @@
+# Email validation examples
+# Format: label<TAB>email
+# Labels: VALID or INVALID
+
+VALID	user@example.com
+VALID	alice.bob@domain.org
+VALID	test+tag@sub.example.co.uk
+VALID	user123@company.net
+VALID	first.last@university.edu
+VALID	me@x.io
+VALID	support@help-desk.com
+VALID	no-reply@news.example.com
+VALID	admin@192.168.0.1
+VALID	user_name@domain.info
+VALID	a@b.co
+VALID	user@domain-name.com
+VALID	hello@world.dev
+VALID	test@test.test
+VALID	u@domain.com
+VALID	name+filter@gmail.com
+VALID	123@numbers.com
+VALID	contact@shop.store
+VALID	info@company.io
+VALID	dev@api.example.com
+
+INVALID	plainaddress
+INVALID	@missinglocal.com
+INVALID	user@
+INVALID	user@.com
+INVALID	user@domain..com
+INVALID	user name@domain.com
+INVALID	user@@domain.com
+INVALID	user@domain
+INVALID	.user@domain.com
+INVALID	user.@domain.com
+INVALID	user@-domain.com
+INVALID	user@domain-.com
+INVALID	user@domain.c
+INVALID	()user@domain.com
+INVALID	user@domain@domain.com
+INVALID	user@dom ain.com
+INVALID	@
+INVALID	user@.
+INVALID	double..dot@domain.com
+INVALID	missing@tld.
