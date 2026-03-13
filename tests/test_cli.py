@@ -346,6 +346,52 @@ def test_run_no_menu_when_no_previous_runs(tmp_path):
     assert "Initialised" in result.output
 
 
+def test_fork_baseline_full_flow(tmp_path):
+    """End-to-end: run1 produces results, run2 forks from run1's best."""
+    setup_project(tmp_path)
+    runner = CliRunner()
+
+    # === Run1: init and add results ===
+    runner.invoke(main, ["init", "--tag", "run1", "--project-dir", str(tmp_path)])
+    # Simulate agent making an improvement
+    (tmp_path / "train.py").write_text("x = optimized")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "optimize"], cwd=tmp_path, check=True, capture_output=True)
+    best_commit = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=tmp_path, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    with (tmp_path / results_filename("run1")).open("a") as f:
+        f.write(f"{best_commit}\t0.3\tkeep\toptimized x\n")
+
+    # Go back to main
+    subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
+
+    # === Run2: fork from run1 ===
+    with patch("crucible.orchestrator.Orchestrator.run_loop"):
+        result = runner.invoke(
+            main,
+            ["run", "--tag", "run2", "--project-dir", str(tmp_path)],
+            input="1\n",  # Select run1
+        )
+    assert result.exit_code == 0, result.output
+
+    # Verify: run2 branch has run1's code
+    assert (tmp_path / "train.py").read_text() == "x = optimized"
+
+    # Verify: run2 results have baseline
+    from crucible.results import ResultsLog
+    log2 = ResultsLog(tmp_path / results_filename("run2"))
+    records = log2.read_all()
+    assert len(records) == 1
+    assert records[0].status == "baseline"
+    assert records[0].metric_value == 0.3
+
+    # Verify: is_improvement uses baseline as threshold
+    assert log2.is_improvement(0.29, "minimize") is True
+    assert log2.is_improvement(0.31, "minimize") is False
+
+
 def test_run_auto_inits_git_repo(tmp_path):
     """run auto-initialises git repo when .git is missing."""
     # Create project without git
