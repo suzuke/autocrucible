@@ -1,0 +1,14 @@
+# Sample logic reasoning problems (EXAMPLES ONLY — not the test set)
+# Answers are: True, False, or Cannot determine
+
+Example 1:
+  Problem: All birds have wings. Penguins are birds. Do penguins have wings?
+  Answer: True
+
+Example 2:
+  Problem: No reptile is warm-blooded. A gecko is a reptile. Is a gecko warm-blooded?
+  Answer: False
+
+Example 3:
+  Problem: Some athletes are vegetarians. Some vegetarians are doctors. Are some athletes doctors?
+  Answer: Cannot determine
