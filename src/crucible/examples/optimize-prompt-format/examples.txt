@@ -1,0 +1,14 @@
+# Sample format conversion tasks (EXAMPLES ONLY — not the test set)
+# Convert the input to the exact specified output format.
+
+Example 1:
+  Input: Convert date to ISO format (YYYY-MM-DD): "January 5, 2024"
+  Expected output: 2024-01-05
+
+Example 2:
+  Input: Convert to centimeters (2 decimal places): "6 feet 0 inches"
+  Expected output: 182.88 cm
+
+Example 3:
+  Input: Normalize phone to international format: "0922 111 222"
+  Expected output: +886-922-111-222
