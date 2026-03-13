@@ -259,6 +259,93 @@ def test_run_auto_inits_when_no_branch(tmp_path):
     assert (tmp_path / results_filename("auto1")).exists()
 
 
+def test_run_shows_fork_menu_when_previous_runs_exist(tmp_path):
+    """When previous results exist, run should show fork menu."""
+    setup_project(tmp_path)
+    runner = CliRunner()
+    # Create run1 with results
+    runner.invoke(main, ["init", "--tag", "run1", "--project-dir", str(tmp_path)])
+    with (tmp_path / results_filename("run1")).open("a") as f:
+        f.write("abc1234\t0.5\tkeep\tfirst improvement\n")
+    subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
+
+    # Run run2 — user selects "Start fresh" (option 2)
+    with patch("crucible.orchestrator.Orchestrator.run_loop"):
+        result = runner.invoke(
+            main,
+            ["run", "--tag", "run2", "--project-dir", str(tmp_path)],
+            input="2\n",  # "Start fresh"
+        )
+    assert result.exit_code == 0, result.output
+    assert "run1" in result.output
+
+
+def test_run_fork_from_previous(tmp_path):
+    """Selecting a previous run forks from its best commit."""
+    setup_project(tmp_path)
+    runner = CliRunner()
+    # Create run1 with a commit and results
+    runner.invoke(main, ["init", "--tag", "run1", "--project-dir", str(tmp_path)])
+    (tmp_path / "train.py").write_text("x = 2")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "improvement"], cwd=tmp_path, check=True, capture_output=True)
+    best_commit = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=tmp_path, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    with (tmp_path / results_filename("run1")).open("a") as f:
+        f.write(f"{best_commit}\t0.5\tkeep\timprovement\n")
+    subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
+
+    # Run run2 — user selects run1 (option 1)
+    with patch("crucible.orchestrator.Orchestrator.run_loop"):
+        result = runner.invoke(
+            main,
+            ["run", "--tag", "run2", "--project-dir", str(tmp_path)],
+            input="1\n",
+        )
+    assert result.exit_code == 0, result.output
+    assert "fork" in result.output.lower() or "Forking" in result.output
+    # Verify baseline was seeded
+    results_run2 = tmp_path / results_filename("run2")
+    assert results_run2.exists()
+    content = results_run2.read_text()
+    assert "baseline" in content
+
+
+def test_run_no_interactive_skips_menu(tmp_path):
+    """--no-interactive skips the fork menu."""
+    setup_project(tmp_path)
+    runner = CliRunner()
+    # Create run1 with results
+    runner.invoke(main, ["init", "--tag", "run1", "--project-dir", str(tmp_path)])
+    with (tmp_path / results_filename("run1")).open("a") as f:
+        f.write("abc1234\t0.5\tkeep\timprovement\n")
+    subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
+
+    with patch("crucible.orchestrator.Orchestrator.run_loop"):
+        result = runner.invoke(
+            main,
+            ["run", "--tag", "run2", "--no-interactive", "--project-dir", str(tmp_path)],
+        )
+    assert result.exit_code == 0, result.output
+    # Should not prompt — just start fresh
+    assert "Initialised" in result.output
+
+
+def test_run_no_menu_when_no_previous_runs(tmp_path):
+    """No menu when there are no previous results files."""
+    setup_project(tmp_path)
+    runner = CliRunner()
+    with patch("crucible.orchestrator.Orchestrator.run_loop"):
+        result = runner.invoke(
+            main,
+            ["run", "--tag", "run1", "--project-dir", str(tmp_path)],
+        )
+    assert result.exit_code == 0, result.output
+    assert "Initialised" in result.output
+
+
 def test_run_auto_inits_git_repo(tmp_path):
     """run auto-initialises git repo when .git is missing."""
     # Create project without git

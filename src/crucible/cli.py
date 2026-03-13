@@ -347,13 +347,45 @@ def init(tag: str, project_dir: str) -> None:
     click.echo(f"Initialised experiment '{tag}' in {project}")
 
 
+def _scan_previous_runs(project: Path, current_tag: str, direction: str) -> list[dict]:
+    """Scan for previous experiment results and return their best scores."""
+    previous = []
+    for tsv_path in sorted(project.glob("results-*.tsv")):
+        tag = tsv_path.stem.removeprefix("results-")
+        if tag == current_tag:
+            continue
+        log = ResultsLog(tsv_path)
+        records = log.read_all()
+        kept = [r for r in records if r.status == "keep"]
+        if not kept:
+            continue
+        if direction == "minimize":
+            best = min(kept, key=lambda r: r.metric_value)
+        else:
+            best = max(kept, key=lambda r: r.metric_value)
+        previous.append({
+            "tag": tag,
+            "best_metric": best.metric_value,
+            "best_commit": best.commit,
+            "iterations": len([r for r in records if r.status != "baseline"]),
+            "kept": len(kept),
+        })
+    # Sort by best metric (best first)
+    if direction == "minimize":
+        previous.sort(key=lambda x: x["best_metric"])
+    else:
+        previous.sort(key=lambda x: x["best_metric"], reverse=True)
+    return previous
+
+
 @main.command()
 @click.option("--tag", required=True, help="Experiment tag / branch suffix.")
 @click.option("--project-dir", default=".", help="Project root directory.")
 @click.option("--model", default=None, help="Claude model to use (e.g. sonnet, opus).")
 @click.option("--timeout", default=600, type=int, help="Agent timeout per iteration (seconds).")
+@click.option("--no-interactive", is_flag=True, default=False, help="Skip interactive prompts (start fresh).")
 @_verbose_option
-def run(tag: str, project_dir: str, model: str | None, timeout: int) -> None:
+def run(tag: str, project_dir: str, model: str | None, timeout: int, no_interactive: bool) -> None:
     """Run the experiment loop until interrupted."""
     try:
         project = Path(project_dir).resolve()
@@ -390,7 +422,38 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int) -> None:
                 cwd=project, check=True, capture_output=True,
             )
             click.echo("Git repo initialized with initial commit.")
-        orch.init()
+
+        # Check for previous runs to fork from
+        fork_from = None
+        if not no_interactive:
+            previous = _scan_previous_runs(project, tag, config.metric.direction)
+            if previous:
+                click.echo("\nFound previous experiments:")
+                for i, prev in enumerate(previous, 1):
+                    click.echo(
+                        f"  {i}) {prev['tag']}  — best: {prev['best_metric']} "
+                        f"(commit {prev['best_commit']}, {prev['iterations']} iters, "
+                        f"{prev['kept']} kept)"
+                    )
+                click.echo(f"  {len(previous) + 1}) Start fresh")
+                choice = click.prompt(
+                    "Fork from",
+                    type=int,
+                    default=len(previous) + 1,
+                )
+                if 1 <= choice <= len(previous):
+                    selected = previous[choice - 1]
+                    fork_from = (
+                        selected["best_commit"],
+                        selected["best_metric"],
+                        selected["tag"],
+                    )
+                    click.echo(
+                        f"Forking from {selected['tag']} best "
+                        f"({selected['best_metric']} @ {selected['best_commit']})..."
+                    )
+
+        orch.init(fork_from=fork_from)
         if config.commands.setup:
             click.echo(f"Running setup: {config.commands.setup}")
             result = subprocess.run(config.commands.setup, shell=True, cwd=project)
