@@ -56,10 +56,21 @@ class Orchestrator:
         self._consecutive_skips = 0
         self._stop = False
 
-    def init(self) -> None:
-        """Create the experiment branch and initialise results-{tag}.tsv."""
-        self.git.create_branch(self.tag)
+    def init(self, fork_from: tuple[str, float, str] | None = None) -> None:
+        """Create the experiment branch and initialise results-{tag}.tsv.
+
+        Args:
+            fork_from: Optional (commit, metric_value, source_tag) to fork from
+                       a previous run's best result.
+        """
+        if fork_from is not None:
+            commit, metric_value, source_tag = fork_from
+            self.git.create_branch_from(self.tag, commit)
+        else:
+            self.git.create_branch(self.tag)
         self.results.init()
+        if fork_from is not None:
+            self.results.seed_baseline(metric_value, commit[:7], source_tag)
         # Ensure generated files are gitignored so reset doesn't revert them
         # and agents don't trigger violations by accidentally touching them
         gitignore = self.workspace / ".gitignore"

@@ -218,3 +218,57 @@ def test_hidden_file_only_edit_becomes_skip(tmp_path):
 
     result = orch.run_one_iteration()
     assert result == "skip"
+
+
+def test_init_with_fork_from(tmp_path):
+    """init() with fork_from creates branch from specified commit and seeds baseline."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    mock_agent = MagicMock()
+
+    # Make a second commit (simulating work done in run1)
+    (tmp_path / "train.py").write_text("x = 2")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "run1 best"], cwd=tmp_path, check=True, capture_output=True)
+    best_commit_full = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+    orch = Orchestrator(cfg, tmp_path, tag="run2", agent=mock_agent)
+    orch.init(fork_from=(best_commit_full, 600.0, "run1"))
+
+    # Should be on run2 branch
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=tmp_path, capture_output=True, text=True,
+    ).stdout.strip()
+    assert branch == "crucible/run2"
+
+    # Should have baseline record
+    records = orch.results.read_all()
+    assert len(records) == 1
+    assert records[0].status == "baseline"
+    assert records[0].metric_value == 600.0
+
+    # Code state should match the forked commit
+    assert (tmp_path / "train.py").read_text() == "x = 2"
+
+
+def test_init_without_fork_from_unchanged(tmp_path):
+    """init() without fork_from works exactly as before."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    mock_agent = MagicMock()
+
+    orch = Orchestrator(cfg, tmp_path, tag="run1", agent=mock_agent)
+    orch.init()
+
+    records = orch.results.read_all()
+    assert len(records) == 0  # No baseline
+
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=tmp_path, capture_output=True, text=True,
+    ).stdout.strip()
+    assert branch == "crucible/run1"
