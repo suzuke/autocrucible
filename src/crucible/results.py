@@ -57,6 +57,15 @@ class ResultsLog:
         """Create the TSV file with its header row."""
         self.path.write_text(HEADER + "\n")
 
+    def seed_baseline(self, value: float, commit: str, source_tag: str) -> None:
+        """Write a baseline record from a previous run's best result."""
+        self.log(
+            commit=commit,
+            metric_value=value,
+            status="baseline",
+            description=f"Forked from {source_tag} best",
+        )
+
     def log(
         self,
         commit: str,
@@ -81,16 +90,16 @@ class ResultsLog:
         return records[-n:]
 
     def best(self, direction: str) -> Optional[ExperimentRecord]:
-        """Return the best record among those with status 'keep'.
+        """Return the best record among those with status 'keep' or 'baseline'.
 
         *direction* is ``"minimize"`` or ``"maximize"``.
         """
-        kept = [r for r in self.read_all() if r.status == "keep"]
-        if not kept:
+        candidates = [r for r in self.read_all() if r.status in ("keep", "baseline")]
+        if not candidates:
             return None
         if direction == "minimize":
-            return min(kept, key=lambda r: r.metric_value)
-        return max(kept, key=lambda r: r.metric_value)
+            return min(candidates, key=lambda r: r.metric_value)
+        return max(candidates, key=lambda r: r.metric_value)
 
     def is_improvement(self, value: float, direction: str) -> bool:
         """Check whether *value* improves on the current best.
@@ -110,8 +119,8 @@ class ResultsLog:
         return _parse_records(content)
 
     def summary(self) -> dict[str, int]:
-        """Return counts by status category."""
-        records = self.read_all()
+        """Return counts by status category (excludes baseline)."""
+        records = [r for r in self.read_all() if r.status != "baseline"]
         return {
             "total": len(records),
             "kept": sum(1 for r in records if r.status == "keep"),

@@ -108,3 +108,80 @@ def test_description_with_tabs(tmp_path):
     log.log("aaa0001", 1.0, "keep", "desc\twith\ttabs")
     records = log.read_all()
     assert records[0].description == "desc\twith\ttabs"
+
+
+def test_seed_baseline(tmp_path):
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.seed_baseline(600.0, "abc1234", "run1")
+    records = log.read_all()
+    assert len(records) == 1
+    assert records[0].status == "baseline"
+    assert records[0].metric_value == 600.0
+    assert records[0].commit == "abc1234"
+    assert "run1" in records[0].description
+
+
+def test_best_includes_baseline_maximize(tmp_path):
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.seed_baseline(600.0, "abc1234", "run1")
+    best = log.best("maximize")
+    assert best is not None
+    assert best.metric_value == 600.0
+    assert best.status == "baseline"
+
+
+def test_best_includes_baseline_minimize(tmp_path):
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.seed_baseline(0.3, "abc1234", "run1")
+    best = log.best("minimize")
+    assert best is not None
+    assert best.metric_value == 0.3
+
+
+def test_is_improvement_with_baseline_maximize(tmp_path):
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.seed_baseline(600.0, "abc1234", "run1")
+    assert log.is_improvement(601.0, "maximize") is True
+    assert log.is_improvement(600.0, "maximize") is False
+    assert log.is_improvement(500.0, "maximize") is False
+
+
+def test_is_improvement_with_baseline_minimize(tmp_path):
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.seed_baseline(0.5, "abc1234", "run1")
+    assert log.is_improvement(0.4, "minimize") is True
+    assert log.is_improvement(0.5, "minimize") is False
+    assert log.is_improvement(0.6, "minimize") is False
+
+
+def test_best_prefers_keep_over_baseline_when_better(tmp_path):
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.seed_baseline(600.0, "abc1234", "run1")
+    log.log("def5678", 700.0, "keep", "improvement")
+    best = log.best("maximize")
+    assert best.metric_value == 700.0
+    assert best.status == "keep"
+
+
+def test_summary_excludes_baseline(tmp_path):
+    """Baseline records should not be counted in summary totals."""
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.seed_baseline(600.0, "abc1234", "run1")
+    log.log("def5678", 700.0, "keep", "improvement")
+    s = log.summary()
+    assert s["total"] == 1  # baseline not counted
+    assert s["kept"] == 1
