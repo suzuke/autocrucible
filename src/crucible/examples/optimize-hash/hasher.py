@@ -4,7 +4,8 @@ Interface:
   hash_fn(key: str, table_size: int) -> int
       Returns an integer. Will be taken mod table_size internally.
 
-Baseline: polynomial hash with small prime — gets moderate uniformity.
+Baseline: weak polynomial hash with multiplier 3 — moderate uniformity but
+          misses many collision patterns due to small multiplier.
 Goal: design a hash that distributes 50,000 keys uniformly across table_size buckets.
 
 Constraints:
@@ -15,8 +16,8 @@ Constraints:
 
 
 def hash_fn(key: str, table_size: int) -> int:
-    """Hash a string key. Baseline: polynomial rolling hash."""
+    """Hash a string key. Baseline: weak polynomial with multiplier 3 (poor uniformity)."""
     h = 0
     for ch in key:
-        h = h * 31 + ord(ch)
+        h = h * 3 + ord(ch)
     return h % table_size
