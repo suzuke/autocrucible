@@ -350,6 +350,7 @@ def init(tag: str, project_dir: str) -> None:
         config.agent,
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
+        editable_files=set(config.files.editable),
     )
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
     orch.init()
@@ -421,6 +422,7 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, no_interact
         model=model,
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
+        editable_files=set(config.files.editable),
     )
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
 

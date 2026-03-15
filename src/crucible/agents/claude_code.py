@@ -64,21 +64,28 @@ def _resolve_rel_path(raw: str, workspace: Path) -> str | None:
     return rel.lstrip("./")
 
 
-def _make_hidden_file_hooks(
-    hidden: set[str], workspace: Path
+def _make_file_hooks(
+    hidden: set[str], editable: set[str], workspace: Path
 ) -> dict[str, list[HookMatcher]]:
-    """Create PreToolUse hooks that deny access to hidden files.
+    """Create PreToolUse hooks that enforce file access policy.
 
-    Uses the hooks API (not can_use_tool) to avoid the AsyncIterable prompt
-    requirement that breaks the claude CLI subprocess transport.
+    - Hidden files: deny all access (read + write)
+    - Write tools (Edit/Write): only allow editable files (whitelist)
+    - Read tools (Read/Glob/Grep): allow all non-hidden files
     """
+    _write_tools = {"Edit", "Write"}
 
     async def pre_tool_use_hook(hook_input: dict, match: str | None, context: Any) -> dict:
+        tool_name = hook_input.get("tool_name", "")
         tool_input = hook_input.get("tool_input", {})
         raw = tool_input.get("file_path") or tool_input.get("path") or ""
         rel = _resolve_rel_path(raw, workspace)
 
-        if rel and rel in hidden:
+        if not rel:
+            return {}
+
+        # Deny all access to hidden files
+        if rel in hidden:
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
@@ -89,6 +96,20 @@ def _make_hidden_file_hooks(
                     ),
                 }
             }
+
+        # For write tools, only allow editable files
+        if tool_name in _write_tools and rel not in editable:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        f"Write denied: {rel} is not in the editable files list. "
+                        "You can only modify files listed as editable."
+                    ),
+                }
+            }
+
         return {}
 
     return {
@@ -105,11 +126,13 @@ class ClaudeCodeAgent(AgentInterface):
         model: str | None = None,
         system_prompt_file: str | None = None,
         hidden_files: set[str] | None = None,
+        editable_files: set[str] | None = None,
     ):
         self.timeout = timeout
         self.model = model
         self.system_prompt_file = system_prompt_file
         self.hidden_files: set[str] = hidden_files or set()
+        self.editable_files: set[str] = editable_files or set()
 
     def get_system_prompt(self, workspace: Path) -> str:
         """Return system prompt: custom file content or default."""
@@ -151,8 +174,8 @@ class ClaudeCodeAgent(AgentInterface):
         start = time.monotonic()
 
         hooks = (
-            _make_hidden_file_hooks(self.hidden_files, workspace)
-            if self.hidden_files
+            _make_file_hooks(self.hidden_files, self.editable_files, workspace)
+            if self.hidden_files or self.editable_files
             else None
         )
         options = ClaudeAgentOptions(

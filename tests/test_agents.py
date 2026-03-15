@@ -141,7 +141,7 @@ def test_clean_description_truncates():
 
 # -- hidden file hook tests ----------------------------------------------------
 
-from crucible.agents.claude_code import _make_hidden_file_hooks, _resolve_rel_path
+from crucible.agents.claude_code import _make_file_hooks, _resolve_rel_path
 
 
 def test_resolve_rel_path_absolute():
@@ -171,7 +171,7 @@ def test_resolve_rel_path_empty():
 @pytest.mark.asyncio
 async def test_hook_denies_hidden_read():
     workspace = Path("/project")
-    hooks = _make_hidden_file_hooks({"secret.py"}, workspace)
+    hooks = _make_file_hooks({"secret.py"}, {"train.py"}, workspace)
     hook_fn = hooks["PreToolUse"][0].hooks[0]
     result = await hook_fn(
         {"tool_name": "Read", "tool_input": {"file_path": "/project/secret.py"}},
@@ -179,13 +179,13 @@ async def test_hook_denies_hidden_read():
     )
     output = result["hookSpecificOutput"]
     assert output["permissionDecision"] == "deny"
-    assert "secret.py" in output["permissionDecisionReason"]
+    assert "hidden" in output["permissionDecisionReason"]
 
 
 @pytest.mark.asyncio
-async def test_hook_allows_non_hidden():
+async def test_hook_allows_read_non_hidden():
     workspace = Path("/project")
-    hooks = _make_hidden_file_hooks({"secret.py"}, workspace)
+    hooks = _make_file_hooks({"secret.py"}, {"train.py"}, workspace)
     hook_fn = hooks["PreToolUse"][0].hooks[0]
     result = await hook_fn(
         {"tool_name": "Read", "tool_input": {"file_path": "train.py"}},
@@ -195,9 +195,50 @@ async def test_hook_allows_non_hidden():
 
 
 @pytest.mark.asyncio
+async def test_hook_allows_read_non_editable():
+    """Read tools can access non-editable, non-hidden files (e.g. readonly)."""
+    workspace = Path("/project")
+    hooks = _make_file_hooks(set(), {"train.py"}, workspace)
+    hook_fn = hooks["PreToolUse"][0].hooks[0]
+    result = await hook_fn(
+        {"tool_name": "Read", "tool_input": {"file_path": "results.jsonl"}},
+        None, None,
+    )
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_hook_denies_write_non_editable():
+    """Write tools are denied for files not in editable list."""
+    workspace = Path("/project")
+    hooks = _make_file_hooks(set(), {"train.py"}, workspace)
+    hook_fn = hooks["PreToolUse"][0].hooks[0]
+    result = await hook_fn(
+        {"tool_name": "Edit", "tool_input": {"file_path": "results.jsonl"}},
+        None, None,
+    )
+    output = result["hookSpecificOutput"]
+    assert output["permissionDecision"] == "deny"
+    assert "not in the editable" in output["permissionDecisionReason"]
+
+
+@pytest.mark.asyncio
+async def test_hook_allows_write_editable():
+    """Write tools are allowed for editable files."""
+    workspace = Path("/project")
+    hooks = _make_file_hooks(set(), {"train.py"}, workspace)
+    hook_fn = hooks["PreToolUse"][0].hooks[0]
+    result = await hook_fn(
+        {"tool_name": "Edit", "tool_input": {"file_path": "train.py"}},
+        None, None,
+    )
+    assert result == {}
+
+
+@pytest.mark.asyncio
 async def test_hook_allows_no_path():
     workspace = Path("/project")
-    hooks = _make_hidden_file_hooks({"secret.py"}, workspace)
+    hooks = _make_file_hooks({"secret.py"}, {"train.py"}, workspace)
     hook_fn = hooks["PreToolUse"][0].hooks[0]
     result = await hook_fn(
         {"tool_name": "Grep", "tool_input": {"pattern": "SECRET"}},
@@ -209,7 +250,7 @@ async def test_hook_allows_no_path():
 @pytest.mark.asyncio
 async def test_hook_denies_hidden_subdir():
     workspace = Path("/project")
-    hooks = _make_hidden_file_hooks({"lib/opponent.py"}, workspace)
+    hooks = _make_file_hooks({"lib/opponent.py"}, {"train.py"}, workspace)
     hook_fn = hooks["PreToolUse"][0].hooks[0]
     result = await hook_fn(
         {"tool_name": "Read", "tool_input": {"file_path": "/project/lib/opponent.py"}},
