@@ -41,6 +41,16 @@ def validate_project(project_root: Path) -> List[CheckResult]:
         results.append(CheckResult("Config", False, str(e)))
         return results  # can't continue without config
 
+    # Check Docker availability if sandbox configured
+    if config.sandbox and config.sandbox.backend == "docker":
+        from crucible.sandbox import check_docker_available
+        if check_docker_available():
+            results.append(CheckResult("Docker", True, "Docker daemon is available"))
+        else:
+            results.append(CheckResult("Docker", False,
+                "Docker not available but sandbox.backend is 'docker'. "
+                "Install Docker or set sandbox.backend to 'none'"))
+
     # 2. Instructions file exists
     instructions_name = config.agent.instructions or "program.md"
     crucible_path = project_root / ".crucible" / instructions_name

@@ -49,6 +49,17 @@ class Orchestrator:
         )
         self.results = ResultsLog(self.workspace / results_filename(tag))
         self.runner = ExperimentRunner(workspace=self.workspace)
+
+        # Use sandbox runner if configured
+        if config.sandbox and config.sandbox.backend != "none":
+            from crucible.sandbox import SandboxRunner
+            self.runner = SandboxRunner(
+                config=config.sandbox,
+                workspace=self.workspace,
+                readonly_files=config.files.readonly,
+                hidden_files=config.files.hidden,
+            )
+
         self.context = ContextAssembler(
             config=config,
             project_root=self.workspace,

@@ -362,3 +362,27 @@ def test_no_budget_config_runs_normally(tmp_path):
         result = orch.run_one_iteration()
 
     assert result == "keep"
+
+
+def test_sandbox_runner_used_when_configured(tmp_path):
+    """Orchestrator uses SandboxRunner when sandbox config has a non-'none' backend."""
+    from crucible.config import SandboxConfig
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.sandbox = SandboxConfig(backend="docker", base_image="python:3.12-slim")
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+    from crucible.sandbox import SandboxRunner
+    assert isinstance(orch.runner, SandboxRunner)
+
+
+def test_no_sandbox_uses_native_runner(tmp_path):
+    """Without sandbox config, orchestrator uses the native ExperimentRunner."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+    from crucible.runner import ExperimentRunner
+    assert isinstance(orch.runner, ExperimentRunner)
