@@ -250,7 +250,7 @@ def evaluate():
 if __name__ == "__main__":
     evaluate()
 """)
-        (dest_path / ".gitignore").write_text("results-*.tsv\nrun.log\n__pycache__/\n*.pyc\n.venv/\nuv.lock\n")
+        (dest_path / ".gitignore").write_text("results-*.jsonl\nrun.log\n__pycache__/\n*.pyc\n.venv/\nuv.lock\n")
         _write_pyproject(dest_path, "my-experiment")
         click.echo(f"Created empty project at {dest_path}")
         click.echo("Edit .crucible/config.yaml and program.md, then run:")
@@ -530,7 +530,8 @@ def validate(project_dir: str) -> None:
 @click.option("--last", default=10, help="Number of recent results to show.")
 @click.option("--project-dir", default=".", help="Project root directory.")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-def history(tag: str, last: int, project_dir: str, as_json: bool) -> None:
+@click.option("--format", "fmt", type=click.Choice(["table", "jsonl"]), default="table", help="Output format.")
+def history(tag: str, last: int, project_dir: str, as_json: bool, fmt: str) -> None:
     """Show recent experiment results."""
     project = Path(project_dir).resolve()
     results = ResultsLog(project / results_filename(tag))
@@ -538,6 +539,12 @@ def history(tag: str, last: int, project_dir: str, as_json: bool) -> None:
         raise click.ClickException(f"No {results_filename(tag)} found. Run 'init --tag {tag}' first.")
 
     records = results.read_last(last)
+
+    if fmt == "jsonl":
+        from crucible.results import _serialize_record
+        for r in records:
+            click.echo(_serialize_record(r))
+        return
 
     if as_json:
         data = [
