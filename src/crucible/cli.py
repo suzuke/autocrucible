@@ -485,7 +485,29 @@ def status(tag: str, project_dir: str, as_json: bool) -> None:
     summary = results.summary()
     best = results.best(config.metric.direction)
 
+    # Compute cost info from usage data
+    all_records = results.read_all()
+    costs = [
+        r.usage.estimated_cost_usd
+        for r in all_records
+        if r.usage and r.usage.estimated_cost_usd is not None
+    ]
+    total_cost = sum(costs) if costs else None
+    budget_cfg = config.constraints.budget
+    budget_max = budget_cfg.max_cost_usd if budget_cfg else None
+    num_iterations = len([r for r in all_records if r.status != "baseline"])
+
     if as_json:
+        cost_data: dict = {}
+        if total_cost is not None:
+            cost_data["total_cost_usd"] = round(total_cost, 4)
+            cost_data["iterations"] = num_iterations
+            if budget_max:
+                cost_data["budget_usd"] = budget_max
+                cost_data["percent_used"] = round(total_cost / budget_max * 100, 1)
+        else:
+            cost_data["total_cost_usd"] = None
+
         data = {
             "experiment": config.name,
             **summary,
@@ -494,6 +516,7 @@ def status(tag: str, project_dir: str, as_json: bool) -> None:
                 "commit": best.commit,
                 "description": best.description,
             } if best else None,
+            "cost": cost_data,
         }
         click.echo(json_module.dumps(data))
         return
@@ -503,6 +526,16 @@ def status(tag: str, project_dir: str, as_json: bool) -> None:
                f"Discarded: {summary['discarded']}  Crashed: {summary['crashed']}")
     if best is not None:
         click.echo(f"Best {config.metric.name}: {best.metric_value} (commit {best.commit})")
+
+    # Cost line
+    if total_cost is not None:
+        if budget_max:
+            pct = total_cost / budget_max * 100
+            click.echo(f"Cost: ${total_cost:.2f} / ${budget_max:.2f} ({pct:.0f}%) — {num_iterations} iterations")
+        else:
+            click.echo(f"Cost: ${total_cost:.2f} — {num_iterations} iterations")
+    else:
+        click.echo("Cost: unknown (agent backend does not report usage)")
 
 
 @main.command()

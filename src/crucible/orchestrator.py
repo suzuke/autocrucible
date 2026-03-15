@@ -12,6 +12,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 from crucible.agents.base import AgentInterface
+from crucible.budget import BudgetGuard
 from crucible.config import Config
 from crucible.context import ContextAssembler
 from crucible.git_manager import GitManager
@@ -53,6 +54,8 @@ class Orchestrator:
             project_root=self.workspace,
             branch_name=branch_name,
         )
+
+        self.budget = BudgetGuard(config.constraints.budget)
 
         self._fail_seq = 0
         self._consecutive_failures = 0
@@ -106,6 +109,15 @@ class Orchestrator:
         t0_agent = time.monotonic()
         agent_result = self.agent.generate_edit(prompt, self.workspace)
         agent_duration = time.monotonic() - t0_agent
+
+        # Budget check
+        self.budget.accumulate(agent_result.usage)
+        verdict = self.budget.check(agent_result.usage)
+        if verdict == "exceeded":
+            logger.warning("Budget exceeded — stopping")
+            return "budget_exceeded"
+        elif verdict == "warning":
+            logger.warning(f"Budget at {self.budget.percent_used:.0f}%")
 
         # 3. Strip hidden files from modified list (agent may have created them on disk)
         hidden_set = set(self.config.files.hidden)
@@ -257,6 +269,10 @@ class Orchestrator:
                 best = self.results.best(self.config.metric.direction)
                 best_str = f"{best.metric_value}" if best else "N/A"
                 logger.info(f"[iter {iteration}] {status} | best {self.config.metric.name}: {best_str}")
+
+                if status == "budget_exceeded":
+                    logger.warning("Budget limit reached, stopping.")
+                    break
 
                 if status in ("skip", "violation"):
                     self._consecutive_skips += 1

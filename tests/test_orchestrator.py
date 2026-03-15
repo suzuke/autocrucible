@@ -273,3 +273,92 @@ def test_init_without_fork_from_unchanged(tmp_path):
         cwd=tmp_path, capture_output=True, text=True,
     ).stdout.strip()
     assert branch == "crucible/run1"
+
+
+def test_budget_exceeded_stops(tmp_path):
+    """run_one_iteration returns budget_exceeded when cost exceeds limit."""
+    from crucible.budget import BudgetConfig
+    from crucible.results import UsageInfo
+
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.constraints.budget = BudgetConfig(max_cost_usd=0.01)
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    def modify_file(*args, **kwargs):
+        (tmp_path / "train.py").write_text("x = 2")
+        return AgentResult(
+            modified_files=[Path("train.py")], description="optimize",
+            usage=UsageInfo(estimated_cost_usd=0.02),
+        )
+    mock_agent.generate_edit.side_effect = modify_file
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        mock_parse.return_value = 0.95
+        result = orch.run_one_iteration()
+
+    assert result == "budget_exceeded"
+
+
+def test_budget_warning_does_not_stop(tmp_path):
+    """run_one_iteration continues when budget is at warning level."""
+    from crucible.budget import BudgetConfig
+    from crucible.results import UsageInfo
+
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.constraints.budget = BudgetConfig(max_cost_usd=1.00, warn_at_percent=80)
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    def modify_file(*args, **kwargs):
+        (tmp_path / "train.py").write_text("x = 2")
+        return AgentResult(
+            modified_files=[Path("train.py")], description="optimize",
+            usage=UsageInfo(estimated_cost_usd=0.85),
+        )
+    mock_agent.generate_edit.side_effect = modify_file
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        mock_parse.return_value = 0.95
+        result = orch.run_one_iteration()
+
+    # Should keep the result, not stop
+    assert result == "keep"
+    # Budget should be at warning level
+    assert orch.budget.percent_used >= 80
+
+
+def test_no_budget_config_runs_normally(tmp_path):
+    """Without budget config, iterations run without budget checks."""
+    from crucible.results import UsageInfo
+
+    setup_repo(tmp_path)
+    cfg = make_config()
+    # budget defaults to None in ConstraintsConfig
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    def modify_file(*args, **kwargs):
+        (tmp_path / "train.py").write_text("x = 2")
+        return AgentResult(
+            modified_files=[Path("train.py")], description="optimize",
+            usage=UsageInfo(estimated_cost_usd=100.0),
+        )
+    mock_agent.generate_edit.side_effect = modify_file
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        mock_parse.return_value = 0.95
+        result = orch.run_one_iteration()
+
+    assert result == "keep"
