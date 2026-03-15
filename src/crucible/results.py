@@ -1,18 +1,25 @@
-"""Results module for TSV experiment logging."""
+"""Results module for JSONL experiment logging."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+import logging
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-from typing import Optional
 
-
-HEADER = "commit\tmetric_value\tstatus\tdescription"
+logger = logging.getLogger(__name__)
 
 
 def results_filename(tag: str) -> str:
-    """Return the results TSV filename for a given experiment tag."""
-    return f"results-{tag}.tsv"
+    """Return the results JSONL filename for a given experiment tag."""
+    return f"results-{tag}.jsonl"
+
+
+@dataclass
+class UsageInfo:
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    estimated_cost_usd: float | None = None
 
 
 @dataclass
@@ -21,10 +28,59 @@ class ExperimentRecord:
     metric_value: float
     status: str
     description: str
+    iteration: int | None = None
+    timestamp: str | None = None
+    delta: float | None = None
+    delta_percent: float | None = None
+    files_changed: list[str] | None = None
+    diff_stats: dict | None = None
+    duration_seconds: float | None = None
+    usage: UsageInfo | None = None
 
 
-def _parse_records(content: str) -> list[ExperimentRecord]:
-    """Parse TSV content into experiment records (skips header)."""
+def _serialize_record(record: ExperimentRecord) -> str:
+    """Serialize an ExperimentRecord to a JSON string, skipping None values."""
+    d = asdict(record)
+    def _strip_nones(obj):
+        if isinstance(obj, dict):
+            return {k: _strip_nones(v) for k, v in obj.items() if v is not None}
+        return obj
+    cleaned = _strip_nones(d)
+    return json.dumps(cleaned)
+
+
+def _deserialize_record(line: str) -> ExperimentRecord:
+    """Deserialize a JSON line into an ExperimentRecord."""
+    d = json.loads(line)
+    # Handle nested UsageInfo
+    if "usage" in d and isinstance(d["usage"], dict):
+        d["usage"] = UsageInfo(**d["usage"])
+    return ExperimentRecord(**{
+        f.name: d.get(f.name) for f in fields(ExperimentRecord)
+    })
+
+
+def _parse_jsonl(content: str) -> list[ExperimentRecord]:
+    """Parse JSONL content into experiment records."""
+    records: list[ExperimentRecord] = []
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(_deserialize_record(line))
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            logger.warning("Skipping malformed JSONL line: %s", e)
+            continue
+    return records
+
+
+# Keep TSV header constant for backward compat detection
+HEADER = "commit\tmetric_value\tstatus\tdescription"
+
+
+def _parse_tsv(content: str) -> list[ExperimentRecord]:
+    """Parse TSV content into experiment records (skips header). Backward compat."""
     records: list[ExperimentRecord] = []
     for line in content.splitlines()[1:]:
         if not line.strip():
@@ -48,48 +104,43 @@ def _parse_records(content: str) -> list[ExperimentRecord]:
 
 
 class ResultsLog:
-    """Append-only TSV log of experiment results."""
+    """Append-only JSONL log of experiment results."""
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
 
     def init(self) -> None:
-        """Create the TSV file with its header row."""
-        self.path.write_text(HEADER + "\n")
+        """Create an empty JSONL file (no header line)."""
+        self.path.write_text("")
 
     def seed_baseline(self, value: float, commit: str, source_tag: str) -> None:
         """Write a baseline record from a previous run's best result."""
-        self.log(
+        record = ExperimentRecord(
             commit=commit,
             metric_value=value,
             status="baseline",
             description=f"Forked from {source_tag} best",
         )
+        self.log(record)
 
-    def log(
-        self,
-        commit: str,
-        metric_value: float,
-        status: str,
-        description: str,
-    ) -> None:
+    def log(self, record: ExperimentRecord) -> None:
         """Append one experiment record to the log."""
-        line = f"{commit}\t{metric_value}\t{status}\t{description}\n"
+        line = _serialize_record(record) + "\n"
         with self.path.open("a") as f:
             f.write(line)
 
     def read_all(self) -> list[ExperimentRecord]:
-        """Read every record from the log (excluding the header)."""
+        """Read every record from the log."""
         if not self.path.exists():
             return []
-        return _parse_records(self.path.read_text())
+        return _parse_jsonl(self.path.read_text())
 
     def read_last(self, n: int) -> list[ExperimentRecord]:
         """Return the last *n* records."""
         records = self.read_all()
         return records[-n:]
 
-    def best(self, direction: str) -> Optional[ExperimentRecord]:
+    def best(self, direction: str) -> ExperimentRecord | None:
         """Return the best record among those with status 'keep' or 'baseline'.
 
         *direction* is ``"minimize"`` or ``"maximize"``.
@@ -115,8 +166,16 @@ class ResultsLog:
 
     @staticmethod
     def read_from_string(content: str) -> list[ExperimentRecord]:
-        """Parse records from TSV string content (e.g., from git show)."""
-        return _parse_records(content)
+        """Parse records from string content, auto-detecting JSONL vs TSV format."""
+        # Auto-detect: check if first non-empty line starts with '{'
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped:
+                if stripped.startswith("{"):
+                    return _parse_jsonl(content)
+                else:
+                    return _parse_tsv(content)
+        return []
 
     def summary(self) -> dict[str, int]:
         """Return counts by status category (excludes baseline)."""
