@@ -12,13 +12,5 @@ def create_agent(config: AgentConfig, **kwargs) -> AgentInterface:
         from crucible.agents.claude_code import ClaudeCodeAgent
 
         return ClaudeCodeAgent(**kwargs)
-    elif config.type == "ollama":
-        from crucible.agents.ollama import OllamaAgent
-
-        return OllamaAgent(
-            model=config.model or "qwen2.5-coder:32b",
-            base_url=config.base_url or "http://localhost:11434",
-            timeout=kwargs.get("timeout", 600),
-        )
     else:
         raise ValueError(f"Unknown agent type: {config.type}")
