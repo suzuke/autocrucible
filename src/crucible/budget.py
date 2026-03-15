@@ -12,7 +12,6 @@ class BudgetGuard:
     def __init__(self, config: BudgetConfig | None) -> None:
         self.config = config
         self.total_cost: float = 0.0
-        self.iteration_count: int = 0
 
     @property
     def percent_used(self) -> float:
@@ -24,7 +23,6 @@ class BudgetGuard:
         """Add cost from one iteration."""
         if usage and usage.estimated_cost_usd:
             self.total_cost += usage.estimated_cost_usd
-        self.iteration_count += 1
 
     def check(self, usage: UsageInfo | None) -> str:
         """Check budget limits. Returns 'ok', 'warning', or 'exceeded'."""

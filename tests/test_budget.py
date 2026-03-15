@@ -21,26 +21,26 @@ class TestAccumulate:
         guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
         guard.accumulate(UsageInfo(input_tokens=100, output_tokens=50, estimated_cost_usd=0.5))
         assert guard.total_cost == 0.5
-        assert guard.iteration_count == 1
+        # iteration_count removed — only total_cost is tracked
 
     def test_multiple_accumulations(self):
         guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
         guard.accumulate(UsageInfo(estimated_cost_usd=0.3))
         guard.accumulate(UsageInfo(estimated_cost_usd=0.7))
         assert guard.total_cost == 1.0
-        assert guard.iteration_count == 2
+        # iteration_count removed — only total_cost is tracked
 
     def test_with_none_usage(self):
         guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
         guard.accumulate(None)
         assert guard.total_cost == 0.0
-        assert guard.iteration_count == 1
+        # iteration_count removed — only total_cost is tracked
 
     def test_with_none_cost_field(self):
         guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
         guard.accumulate(UsageInfo(input_tokens=100, output_tokens=50, estimated_cost_usd=None))
         assert guard.total_cost == 0.0
-        assert guard.iteration_count == 1
+        # iteration_count removed — only total_cost is tracked
 
 
 class TestCheckExceeded:

@@ -34,14 +34,10 @@ class SandboxRunner:
         self,
         config: SandboxConfig | None,
         workspace: Path,
-        readonly_files: list[str] | None = None,
-        hidden_files: list[str] | None = None,
         editable_files: list[str] | None = None,
     ) -> None:
         self.config = config or SandboxConfig(backend="none")
         self.workspace = Path(workspace)
-        self.readonly_files = readonly_files or []
-        self.hidden_files = hidden_files or []
         self.editable_files = editable_files or []
         self._native = ExperimentRunner(workspace=workspace)
         self._cached_hash: str | None = None
@@ -52,7 +48,10 @@ class SandboxRunner:
         return self._native.execute(command, timeout)
 
     def parse_metric(self, eval_command: str, metric_name: str):
-        """Parse metric -- always runs natively (reads run.log from host)."""
+        """Parse metric -- always runs natively (reads run.log from host).
+
+        Note: eval command runs on host, not in Docker container.
+        """
         return self._native.parse_metric(eval_command, metric_name)
 
     def execute_with_repeat(

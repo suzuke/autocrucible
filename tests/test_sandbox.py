@@ -87,8 +87,6 @@ def test_docker_run_builds_correct_command(tmp_path):
     runner = SandboxRunner(
         config=cfg,
         workspace=tmp_path,
-        readonly_files=["eval.py"],
-        hidden_files=["secret.py"],
     )
     # Create files so readonly mount logic triggers
     (tmp_path / "eval.py").write_text("pass")

@@ -56,8 +56,6 @@ class Orchestrator:
             self.runner = SandboxRunner(
                 config=config.sandbox,
                 workspace=self.workspace,
-                readonly_files=config.files.readonly,
-                hidden_files=config.files.hidden,
                 editable_files=config.files.editable,
             )
 
@@ -158,9 +156,6 @@ class Orchestrator:
         # 7. Git commit
         self.git.commit(agent_result.description)
         commit_hash = self.git.head()
-        diff_stats = self._get_diff_stats(commit_hash)
-        files_changed = modified
-        now_ts = datetime.now(timezone.utc).isoformat()
 
         # Compute delta from current best
         current_best = self.results.best(self.config.metric.direction)
@@ -194,17 +189,9 @@ class Orchestrator:
         if metric_value is None or not self.guardrails.check_metric(metric_value):
             self._fail_seq += 1
             self.git.tag_failed_and_reset(self.tag, self._fail_seq)
-            self.results.log(ExperimentRecord(
-                commit=commit_hash,
-                metric_value=0.0,
-                status="crash",
-                description=agent_result.description,
-                iteration=self._iteration,
-                timestamp=now_ts,
-                files_changed=files_changed,
-                diff_stats=diff_stats,
-                duration_seconds=total_duration,
-                usage=agent_result.usage,
+            self.results.log(self._make_record(
+                "crash", 0.0, agent_result.description,
+                commit_hash, agent_result, total_duration,
             ))
             crash_msg = run_result.stderr_tail
             if run_result.timed_out:
@@ -225,19 +212,10 @@ class Orchestrator:
 
         # 11. Check improvement
         if self.results.is_improvement(metric_value, self.config.metric.direction):
-            self.results.log(ExperimentRecord(
-                commit=commit_hash,
-                metric_value=metric_value,
-                status="keep",
-                description=agent_result.description,
-                iteration=self._iteration,
-                timestamp=now_ts,
-                delta=delta,
-                delta_percent=delta_percent,
-                files_changed=files_changed,
-                diff_stats=diff_stats,
-                duration_seconds=total_duration,
-                usage=agent_result.usage,
+            self.results.log(self._make_record(
+                "keep", metric_value, agent_result.description,
+                commit_hash, agent_result, total_duration,
+                delta=delta, delta_percent=delta_percent,
             ))
             self._consecutive_failures = 0
             return "keep"
@@ -245,22 +223,40 @@ class Orchestrator:
         # 12. Discard
         self._fail_seq += 1
         self.git.tag_failed_and_reset(self.tag, self._fail_seq)
-        self.results.log(ExperimentRecord(
-            commit=commit_hash,
-            metric_value=metric_value,
-            status="discard",
-            description=agent_result.description,
-            iteration=self._iteration,
-            timestamp=now_ts,
-            delta=delta,
-            delta_percent=delta_percent,
-            files_changed=files_changed,
-            diff_stats=diff_stats,
-            duration_seconds=total_duration,
-            usage=agent_result.usage,
+        self.results.log(self._make_record(
+            "discard", metric_value, agent_result.description,
+            commit_hash, agent_result, total_duration,
+            delta=delta, delta_percent=delta_percent,
         ))
         self._consecutive_failures += 1
         return "discard"
+
+    def _make_record(
+        self,
+        status: str,
+        metric_value: float,
+        description: str,
+        commit: str,
+        agent_result,
+        duration_seconds: float,
+        delta: float | None = None,
+        delta_percent: float | None = None,
+    ) -> ExperimentRecord:
+        """Build an ExperimentRecord with common fields filled in."""
+        return ExperimentRecord(
+            commit=commit,
+            metric_value=metric_value,
+            status=status,
+            description=description,
+            iteration=self._iteration,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            delta=delta,
+            delta_percent=delta_percent,
+            files_changed=[str(f) for f in agent_result.modified_files],
+            diff_stats=self._get_diff_stats(commit),
+            duration_seconds=duration_seconds,
+            usage=agent_result.usage,
+        )
 
     def _get_diff_stats(self, commit: str) -> dict:
         """Get insertion/deletion counts for a commit."""
@@ -281,17 +277,15 @@ class Orchestrator:
 
     def run_loop(self) -> None:
         """Run iterations indefinitely until Ctrl+C."""
-        iteration = 0
         max_retries = self.config.constraints.max_retries
         try:
             while True:
-                iteration += 1
-                logger.info(f"--- iter {iteration} ---")
+                logger.info(f"--- iter {self._iteration + 1} ---")
                 status = self.run_one_iteration()
 
                 best = self.results.best(self.config.metric.direction)
                 best_str = f"{best.metric_value}" if best else "N/A"
-                logger.info(f"[iter {iteration}] {status} | best {self.config.metric.name}: {best_str}")
+                logger.info(f"[iter {self._iteration}] {status} | best {self.config.metric.name}: {best_str}")
 
                 if status == "budget_exceeded":
                     logger.warning("Budget limit reached, stopping.")
@@ -303,10 +297,10 @@ class Orchestrator:
                     self._consecutive_skips = 0
 
                 if self._consecutive_failures >= max_retries:
-                    logger.warning(f"[iter {iteration}] {max_retries} consecutive failures, stopping.")
+                    logger.warning(f"[iter {self._iteration}] {max_retries} consecutive failures, stopping.")
                     break
                 if self._consecutive_skips >= max_retries:
-                    logger.warning(f"[iter {iteration}] {max_retries} consecutive skips, stopping.")
+                    logger.warning(f"[iter {self._iteration}] {max_retries} consecutive skips, stopping.")
                     break
         except KeyboardInterrupt:
-            logger.info(f"Stopped after {iteration} iterations.")
+            logger.info(f"Stopped after {self._iteration} iterations.")

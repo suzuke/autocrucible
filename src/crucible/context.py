@@ -311,9 +311,11 @@ class ContextAssembler:
         parts = [base, "\n\n---\n\n## Editable File Contents\n"]
         for fname in editable_files:
             fpath = workspace / fname
-            if fpath.exists():
+            try:
                 content = fpath.read_text()
-                parts.append(f"\n### {fname}\n```\n{content}\n```\n")
+            except (FileNotFoundError, OSError):
+                continue
+            parts.append(f"\n### {fname}\n```\n{content}\n```\n")
         return "".join(parts)
 
     def assemble(self, log: ResultsLog) -> str:

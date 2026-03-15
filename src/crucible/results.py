@@ -108,6 +108,8 @@ class ResultsLog:
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
+        self._cache: list[ExperimentRecord] | None = None
+        self._cache_mtime: float | None = None
 
     def init(self) -> None:
         """Create an empty JSONL file (no header line)."""
@@ -130,10 +132,21 @@ class ResultsLog:
             f.write(line)
 
     def read_all(self) -> list[ExperimentRecord]:
-        """Read every record from the log."""
+        """Read every record from the log.
+
+        Results are cached by file mtime so that multiple calls within
+        the same iteration (between writes) avoid re-reading and
+        re-parsing the file.
+        """
         if not self.path.exists():
             return []
-        return _parse_jsonl(self.path.read_text())
+        mtime = self.path.stat().st_mtime
+        if self._cache is not None and self._cache_mtime == mtime:
+            return self._cache
+        records = _parse_jsonl(self.path.read_text())
+        self._cache = records
+        self._cache_mtime = mtime
+        return records
 
     def read_last(self, n: int) -> list[ExperimentRecord]:
         """Return the last *n* records."""

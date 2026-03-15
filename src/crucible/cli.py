@@ -370,11 +370,11 @@ def _scan_previous_runs(project: Path, current_tag: str, direction: str) -> list
     previous = []
     result_files = sorted(project.glob("results-*.jsonl"))
     result_files.extend(sorted(project.glob("results-*.tsv")))
-    for tsv_path in result_files:
-        tag = tsv_path.stem.removeprefix("results-")
+    for results_path in result_files:
+        tag = results_path.stem.removeprefix("results-")
         if tag == current_tag:
             continue
-        log = ResultsLog(tsv_path)
+        log = ResultsLog(results_path)
         records = log.read_all()
         kept = [r for r in records if r.status == "keep"]
         if not kept:
