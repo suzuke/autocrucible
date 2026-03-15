@@ -18,3 +18,7 @@ class AgentInterface(ABC):
     @abstractmethod
     def generate_edit(self, prompt: str, workspace: Path) -> AgentResult:
         ...
+
+    def capabilities(self) -> set[str]:
+        """Return capabilities this backend supports."""
+        return {"read", "edit", "write", "glob", "grep"}

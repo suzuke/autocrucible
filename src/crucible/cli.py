@@ -343,10 +343,11 @@ def init(tag: str, project_dir: str) -> None:
     except ConfigError as e:
         raise click.ClickException(str(e))
 
-    from crucible.agents.claude_code import ClaudeCodeAgent
+    from crucible.agents import create_agent
     from crucible.orchestrator import Orchestrator
 
-    agent = ClaudeCodeAgent(
+    agent = create_agent(
+        config.agent,
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
     )
@@ -409,10 +410,11 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, no_interact
     except ConfigError as e:
         raise click.ClickException(str(e))
 
-    from crucible.agents.claude_code import ClaudeCodeAgent
+    from crucible.agents import create_agent
     from crucible.orchestrator import Orchestrator
 
-    agent = ClaudeCodeAgent(
+    agent = create_agent(
+        config.agent,
         timeout=timeout,
         model=model,
         system_prompt_file=config.agent.system_prompt,

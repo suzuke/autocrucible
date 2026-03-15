@@ -216,3 +216,104 @@ async def test_hook_denies_hidden_subdir():
         None, None,
     )
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# -- capabilities tests --------------------------------------------------------
+
+
+def test_capabilities_default():
+    """Default capabilities returns all five tools."""
+    agent = ClaudeCodeAgent()
+    caps = agent.capabilities()
+    assert caps == {"read", "edit", "write", "glob", "grep"}
+
+
+# -- agent factory tests -------------------------------------------------------
+
+from crucible.agents import create_agent
+from crucible.config import AgentConfig
+
+
+def test_create_agent_claude_code():
+    """Factory creates ClaudeCodeAgent for claude-code type."""
+    config = AgentConfig(type="claude-code")
+    agent = create_agent(config, timeout=120)
+    assert isinstance(agent, ClaudeCodeAgent)
+    assert agent.timeout == 120
+
+
+def test_create_agent_unknown_raises():
+    """Factory raises ValueError for unknown agent type."""
+    config = AgentConfig(type="nonexistent")
+    with pytest.raises(ValueError, match="Unknown agent type: nonexistent"):
+        create_agent(config)
+
+
+def test_create_agent_claude_code_with_kwargs():
+    """Factory passes kwargs through to ClaudeCodeAgent."""
+    config = AgentConfig(type="claude-code", system_prompt="custom.md")
+    agent = create_agent(
+        config,
+        timeout=300,
+        model="opus",
+        system_prompt_file="custom.md",
+        hidden_files={"secret.py"},
+    )
+    assert isinstance(agent, ClaudeCodeAgent)
+    assert agent.timeout == 300
+    assert agent.model == "opus"
+    assert agent.system_prompt_file == "custom.md"
+    assert agent.hidden_files == {"secret.py"}
+
+
+# -- timing tests --------------------------------------------------------------
+
+
+def test_run_query_includes_duration(tmp_path):
+    """_run_query sets duration_seconds on the result."""
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "train.py").write_text("x = 1")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    agent = ClaudeCodeAgent()
+
+    async def mock_query(prompt, options=None):
+        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+        yield AssistantMessage(
+            content=[TextBlock(text="Added timing")],
+            model="claude-sonnet-4-20250514",
+        )
+        yield ResultMessage(
+            subtype="result",
+            duration_ms=100,
+            duration_api_ms=80,
+            is_error=False,
+            num_turns=1,
+            session_id="test-session",
+        )
+
+    with patch("crucible.agents.claude_code.query", mock_query):
+        result = agent.generate_edit("optimize x", tmp_path)
+
+    assert result.duration_seconds is not None
+    assert result.duration_seconds >= 0
+
+
+# -- AgentConfig model/base_url tests -----------------------------------------
+
+
+def test_agent_config_model_base_url():
+    """AgentConfig supports model and base_url fields."""
+    config = AgentConfig(type="ollama", model="llama3", base_url="http://localhost:11434")
+    assert config.model == "llama3"
+    assert config.base_url == "http://localhost:11434"
+
+
+def test_agent_config_defaults():
+    """AgentConfig model and base_url default to None."""
+    config = AgentConfig()
+    assert config.model is None
+    assert config.base_url is None
