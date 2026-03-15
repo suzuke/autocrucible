@@ -234,22 +234,38 @@ def solve():
 if __name__ == "__main__":
     print(solve())
 """)
-        (dest_path / "evaluate.py").write_text("""\
-\"\"\"Evaluation harness (readonly). Measures the metric for the current solution.\"\"\"
+        (dest_path / "evaluate.py").write_text('''\
+"""Evaluation harness (readonly). Measures the metric for the current solution."""
 
 from solution import solve
 
 
 def evaluate():
     result = solve()
-    # Replace this with your actual evaluation logic
+
+    # === Correctness Gate ===
+    # TODO: Add correctness checks here. If correctness fails,
+    # print a worst-case metric value and exit early.
+    # Example:
+    #   if not verify_correctness(result):
+    #       print("metric: 999999")  # worst value for minimize
+    #       return
+
+    # === Method Verification ===
+    # TODO: Verify the solution uses the required approach.
+    # Example:
+    #   if not uses_required_algorithm(result):
+    #       print("metric: 999999")
+    #       return
+
+    # === Performance Measurement ===
     metric = abs(result - 0)
     print(f"metric: {metric}")
 
 
 if __name__ == "__main__":
     evaluate()
-""")
+''')
         (dest_path / ".gitignore").write_text("results-*.jsonl\nrun.log\n__pycache__/\n*.pyc\n.venv/\nuv.lock\n")
         _write_pyproject(dest_path, "my-experiment")
         click.echo(f"Created empty project at {dest_path}")
