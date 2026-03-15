@@ -18,6 +18,22 @@ from crucible.results import UsageInfo
 
 logger = logging.getLogger(__name__)
 
+
+def _extract_json(text: str) -> str:
+    """Extract JSON from model output, stripping think tags and markdown fences."""
+    import re
+    # Strip <think>...</think> blocks (reasoning models like deepseek-r1)
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    # Strip markdown code fences
+    text = re.sub(r"^```(?:json)?\s*\n?", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\n?```\s*$", "", text, flags=re.MULTILINE)
+    # Find first { to last } as JSON
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return text[start : end + 1]
+    return text.strip()
+
 OLLAMA_SYSTEM_PROMPT = (
     "You are a code optimization agent. You receive code files and must "
     "propose edits to improve a metric.\n\n"
@@ -95,12 +111,15 @@ class OllamaAgent(AgentInterface):
         duration = data.get("total_duration", 0) / 1e9
 
         # Parse structured JSON edits
+        # Strip <think>...</think> tags from reasoning models (e.g. deepseek-r1)
+        parsed_content = _extract_json(content)
         try:
-            parsed = json.loads(content)
+            parsed = json.loads(parsed_content)
             edits = parsed.get("edits", [])
             description = parsed.get("description", "ollama edit")
         except json.JSONDecodeError:
             logger.warning("Ollama returned non-JSON output, no edits applied")
+            logger.debug("Raw output: %s", content[:500])
             return AgentResult(
                 modified_files=[],
                 description="ollama: non-JSON response",

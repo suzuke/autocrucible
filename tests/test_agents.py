@@ -443,3 +443,23 @@ def test_ollama_search_not_found(tmp_path):
     assert result.modified_files == []
     # File unchanged
     assert (tmp_path / "train.py").read_text() == "x = 1\n"
+
+
+def test_extract_json_strips_think_tags():
+    from crucible.agents.ollama import _extract_json
+    text = '<think>\nLet me think about this...\n</think>\n{"edits": [], "description": "test"}'
+    result = _extract_json(text)
+    assert result == '{"edits": [], "description": "test"}'
+
+
+def test_extract_json_strips_markdown_fences():
+    from crucible.agents.ollama import _extract_json
+    text = '```json\n{"edits": [], "description": "test"}\n```'
+    result = _extract_json(text)
+    assert result == '{"edits": [], "description": "test"}'
+
+
+def test_extract_json_plain_json():
+    from crucible.agents.ollama import _extract_json
+    text = '{"edits": [{"file": "x.py", "search": "a", "replace": "b"}], "description": "fix"}'
+    assert _extract_json(text) == text

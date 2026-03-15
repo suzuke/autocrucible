@@ -22,10 +22,8 @@ dependencies = [
     "click>=8.1",
     "pyyaml>=6.0",
     "claude-agent-sdk>=0.1.6",
+    "requests>=2.28",
 ]
-
-[project.optional-dependencies]
-ollama = ["requests>=2.28"]
 
 [project.urls]
 Homepage = "https://github.com/suzuke/autocrucible"
