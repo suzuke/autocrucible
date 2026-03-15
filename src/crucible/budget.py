@@ -2,16 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
+from crucible.config import BudgetConfig
 from crucible.results import UsageInfo
-
-
-@dataclass
-class BudgetConfig:
-    max_cost_usd: float | None = None
-    max_cost_per_iter_usd: float | None = None
-    warn_at_percent: int = 80
 
 
 class BudgetGuard:

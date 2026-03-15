@@ -87,24 +87,7 @@ class ExperimentRunner:
         timeout: int,
     ) -> tuple[RunResult, float | None]:
         """Execute experiment repeat times, return aggregated metric."""
-        values: list[float] = []
-        last_result = None
-        for _ in range(repeat):
-            result = self.execute(run_cmd, timeout)
-            last_result = result
-            if result.exit_code != 0 or result.timed_out:
-                return result, None
-            metric = self.parse_metric(eval_cmd, metric_name)
-            if metric is None:
-                return result, None
-            values.append(metric)
-
-        if not values:
-            return last_result, None
-
-        if aggregation == "mean":
-            return last_result, statistics.mean(values)
-        return last_result, statistics.median(values)
+        return run_with_repeat(self, run_cmd, eval_cmd, metric_name, repeat, aggregation, timeout)
 
     def parse_metric(self, eval_command: str, metric_name: str) -> Optional[float]:
         """Run an eval command and parse a named metric from its output.
@@ -129,6 +112,34 @@ class ExperimentRunner:
         except (subprocess.TimeoutExpired, ValueError):
             pass
         return None
+
+
+def run_with_repeat(
+    runner,
+    run_cmd: str,
+    eval_cmd: str,
+    metric_name: str,
+    repeat: int,
+    aggregation: str,
+    timeout: int,
+) -> tuple[RunResult, float | None]:
+    """Execute experiment repeat times using any runner with execute/parse_metric."""
+    values: list[float] = []
+    last_result = None
+    for _ in range(repeat):
+        result = runner.execute(run_cmd, timeout)
+        last_result = result
+        if result.exit_code != 0 or result.timed_out:
+            return result, None
+        metric = runner.parse_metric(eval_cmd, metric_name)
+        if metric is None:
+            return result, None
+        values.append(metric)
+    if not values:
+        return last_result, None
+    if aggregation == "mean":
+        return last_result, statistics.mean(values)
+    return last_result, statistics.median(values)
 
 
 def _tail(text: str, n: int) -> str:

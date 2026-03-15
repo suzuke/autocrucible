@@ -37,7 +37,7 @@ project-root/
     program.md       # Instructions for the LLM agent (MUST be readonly)
   <editable>.py      # Code the agent modifies (the "knob")
   <evaluation>.py    # Fixed harness that measures the metric (the "ruler")
-  .gitignore         # Ignore run.log, results-*.tsv, __pycache__/, training artifacts
+  .gitignore         # Ignore run.log, results-*.jsonl, __pycache__/, training artifacts
   README.md          # Setup, metric, files, how to run
 ```
 
@@ -153,7 +153,7 @@ Dependencies: add `requirements.txt` as readonly + `setup: "pip install -r requi
 **.gitignore** — always create with at least:
 ```
 run.log
-results-*.tsv
+results-*.jsonl
 __pycache__/
 ```
 Add training artifacts if applicable (e.g., `*.pt`, `*.ckpt`, `data/`, `checkpoints/`).
@@ -179,7 +179,7 @@ crucible run --tag <name>
 
 Crucible's `is_improvement()` returns `True` when no previous records exist, so the **first iteration always becomes "best" regardless of quality**. If the agent's first change makes things worse (common), that bad result becomes the new baseline.
 
-**Fix: Seed results-{tag}.tsv with a baseline run before starting `crucible run`:**
+**Fix: Seed results-{tag}.jsonl with a baseline run before starting `crucible run`:**
 
 ```bash
 python3 evaluate.py > run.log 2>&1
@@ -187,7 +187,7 @@ grep '^<metric_name>:' run.log  # note the value
 
 crucible init --tag run1
 COMMIT=$(git rev-parse HEAD)
-echo -e "${COMMIT}\t<metric_value>\tkeep\tbaseline: initial" >> results-run1.tsv
+echo '{"commit":"'$COMMIT'","metric_value":<metric_value>,"status":"keep","description":"baseline: initial"}' >> results-run1.jsonl
 
 crucible run --tag run1  # agent must now beat the real baseline
 ```

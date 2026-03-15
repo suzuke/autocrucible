@@ -58,6 +58,7 @@ class Orchestrator:
                 workspace=self.workspace,
                 readonly_files=config.files.readonly,
                 hidden_files=config.files.hidden,
+                editable_files=config.files.editable,
             )
 
         self.context = ContextAssembler(

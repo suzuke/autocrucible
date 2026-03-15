@@ -66,8 +66,9 @@ class OllamaAgent(AgentInterface):
         return "\n\n".join(parts)
 
     def _call_ollama(self, prompt: str, workspace: Path) -> AgentResult:
-        files_context = self._read_workspace_files(workspace)
-        full_prompt = f"{prompt}\n\n--- Current Files ---\n{files_context}"
+        # The prompt already contains file contents from assemble_with_files()
+        # in context.py. Do NOT re-read workspace files here — it's redundant
+        # and would leak hidden files.
 
         response = requests.post(
             f"{self.base_url}/api/chat",
@@ -75,7 +76,7 @@ class OllamaAgent(AgentInterface):
                 "model": self.model,
                 "messages": [
                     {"role": "system", "content": OLLAMA_SYSTEM_PROMPT},
-                    {"role": "user", "content": full_prompt},
+                    {"role": "user", "content": prompt},
                 ],
                 "stream": False,
                 "options": {"num_predict": 8192},

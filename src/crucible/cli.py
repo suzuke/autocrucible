@@ -367,7 +367,9 @@ def init(tag: str, project_dir: str) -> None:
 def _scan_previous_runs(project: Path, current_tag: str, direction: str) -> list[dict]:
     """Scan for previous experiment results and return their best scores."""
     previous = []
-    for tsv_path in sorted(project.glob("results-*.jsonl")):
+    result_files = sorted(project.glob("results-*.jsonl"))
+    result_files.extend(sorted(project.glob("results-*.tsv")))
+    for tsv_path in result_files:
         tag = tsv_path.stem.removeprefix("results-")
         if tag == current_tag:
             continue

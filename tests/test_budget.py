@@ -1,6 +1,7 @@
 """Tests for budget tracking and control."""
 
-from crucible.budget import BudgetConfig, BudgetGuard
+from crucible.config import BudgetConfig
+from crucible.budget import BudgetGuard
 from crucible.results import UsageInfo
 
 

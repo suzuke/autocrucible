@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import statistics
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from crucible.config import SandboxConfig
-from crucible.runner import ExperimentRunner, RunResult
+from crucible.runner import ExperimentRunner, RunResult, run_with_repeat
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +36,13 @@ class SandboxRunner:
         workspace: Path,
         readonly_files: list[str] | None = None,
         hidden_files: list[str] | None = None,
+        editable_files: list[str] | None = None,
     ) -> None:
         self.config = config or SandboxConfig(backend="none")
         self.workspace = Path(workspace)
         self.readonly_files = readonly_files or []
         self.hidden_files = hidden_files or []
+        self.editable_files = editable_files or []
         self._native = ExperimentRunner(workspace=workspace)
         self._cached_hash: str | None = None
 
@@ -63,23 +64,8 @@ class SandboxRunner:
         aggregation: str,
         timeout: int,
     ) -> tuple[RunResult, float | None]:
-        """Multi-run support delegates to native runner or docker."""
-        values: list[float] = []
-        last_result = None
-        for _ in range(repeat):
-            result = self.execute(run_cmd, timeout)
-            last_result = result
-            if result.exit_code != 0 or result.timed_out:
-                return result, None
-            metric = self.parse_metric(eval_cmd, metric_name)
-            if metric is None:
-                return result, None
-            values.append(metric)
-        if not values:
-            return last_result, None
-        if aggregation == "mean":
-            return last_result, statistics.mean(values)
-        return last_result, statistics.median(values)
+        """Multi-run support delegates to shared implementation."""
+        return run_with_repeat(self, run_cmd, eval_cmd, metric_name, repeat, aggregation, timeout)
 
     def _docker_run(self, command: str, timeout: int) -> RunResult:
         """Run command inside Docker container."""
@@ -96,14 +82,17 @@ class SandboxRunner:
         if not self.config.network:
             cmd.extend(["--network", "none"])
 
-        # Mount workspace
-        cmd.extend(["-v", f"{self.workspace}:/workspace", "-w", "/workspace"])
+        # Mount workspace as readonly
+        cmd.extend(["-v", f"{self.workspace}:/workspace:ro", "-w", "/workspace"])
 
-        # Readonly mounts for protected files
-        for f in self.readonly_files + self.hidden_files:
+        # Mount editable files as read-write (override readonly)
+        for f in self.editable_files:
             fpath = self.workspace / f
             if fpath.exists():
-                cmd.extend(["-v", f"{fpath}:/workspace/{f}:ro"])
+                cmd.extend(["-v", f"{fpath}:/workspace/{f}:rw"])
+
+        # Ensure run.log is writable
+        cmd.extend(["-v", f"{self.workspace}/run.log:/workspace/run.log:rw"])
 
         cmd.extend([image, "bash", "-c", command])
 
