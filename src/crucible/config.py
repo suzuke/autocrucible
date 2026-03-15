@@ -76,6 +76,15 @@ class EvaluationConfig:
 
 
 @dataclass
+class SandboxConfig:
+    backend: str = "none"  # docker | none
+    base_image: str = "python:3.12-slim"
+    network: bool = False
+    memory_limit: str | None = None  # e.g. "2g"
+    cpu_limit: int | None = None
+
+
+@dataclass
 class Config:
     name: str = ""
     description: str = ""
@@ -86,6 +95,7 @@ class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     git: GitConfig = field(default_factory=GitConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
+    sandbox: SandboxConfig | None = None
 
 
 def _build_context_window(data: dict) -> ContextWindowConfig:
@@ -125,6 +135,18 @@ def _build_evaluation(data: dict) -> EvaluationConfig:
     return EvaluationConfig(
         repeat=data.get("repeat", 1),
         aggregation=data.get("aggregation", "median"),
+    )
+
+
+def _build_sandbox(data: dict | None) -> SandboxConfig | None:
+    if not data:
+        return None
+    return SandboxConfig(
+        backend=data.get("backend", "none"),
+        base_image=data.get("base_image", "python:3.12-slim"),
+        network=data.get("network", False),
+        memory_limit=data.get("memory_limit"),
+        cpu_limit=data.get("cpu_limit"),
     )
 
 
@@ -202,4 +224,5 @@ def load_config(project_root: Path) -> Config:
             tag_failed=git_data.get("tag_failed", True),
         ),
         evaluation=_build_evaluation(raw.get("evaluation", {})),
+        sandbox=_build_sandbox(raw.get("sandbox")),
     )
