@@ -83,6 +83,33 @@ def _strategy_hint(records: list) -> str:
     )
 
 
+def _plateau_hint(records: list[ExperimentRecord], threshold: int) -> str | None:
+    """Generate a strong prompt when metric hasn't improved for N iterations."""
+    if not records:
+        return None
+
+    streak = 0
+    for r in reversed(records):
+        if r.status == "keep":
+            break
+        streak += 1
+
+    if streak < threshold:
+        return None
+
+    recent_failures = [r.description for r in records[-streak:] if r.description]
+
+    return (
+        f"\u26a0\ufe0f The metric has NOT improved for {streak} consecutive iterations.\n"
+        f"Recent attempts: {'; '.join(recent_failures[-5:])}\n"
+        "You MUST try a fundamentally different approach:\n"
+        "- Change the core algorithm entirely\n"
+        "- Restructure the data representation\n"
+        "- Challenge an assumption from earlier iterations\n"
+        "- Do NOT make small tweaks to previous failed approaches"
+    )
+
+
 class ContextAssembler:
     """Assembles prompt sections into a complete context for the agent."""
 
@@ -276,6 +303,19 @@ class ContextAssembler:
             "- Do NOT output full file contents. Use targeted edits."
         )
 
+    def assemble_with_files(
+        self, log: ResultsLog, workspace: Path, editable_files: list[str],
+    ) -> str:
+        """Assemble prompt with file contents inlined (for agents without read tools)."""
+        base = self.assemble(log)
+        parts = [base, "\n\n---\n\n## Editable File Contents\n"]
+        for fname in editable_files:
+            fpath = workspace / fname
+            if fpath.exists():
+                content = fpath.read_text()
+                parts.append(f"\n### {fname}\n```\n{content}\n```\n")
+        return "".join(parts)
+
     def assemble(self, log: ResultsLog) -> str:
         """Assemble all sections into a complete prompt."""
         records = log.read_all()
@@ -294,10 +334,13 @@ class ContextAssembler:
             "crashed": sum(1 for r in real_records if r.status == "crash"),
         }
 
+        plateau = _plateau_hint(real_records, self.config.constraints.plateau_threshold)
+
         sections = [
             self._section_instructions(),
             self._section_state(real_records, best, summary),
             self._section_history(real_records),
+            plateau,
             self._section_errors(),
             self._section_directive(),
         ]

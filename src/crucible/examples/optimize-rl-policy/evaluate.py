@@ -1,81 +1,88 @@
 """Evaluation harness for policy.py — DO NOT MODIFY.
 
-Implements CartPole physics from scratch (no gym dependency).
-Runs 200 episodes and computes mean steps survived.
+Implements a pendulum swing-up task from scratch (no gym dependency).
+The pendulum starts hanging downward and must be swung up and held upright.
 
-Physics parameters match OpenAI Gym CartPole-v1.
+Observation:  [theta, theta_dot]
+  theta = 0    → upright (goal)
+  theta = ±pi  → hanging (start region)
+  theta_dot    → angular velocity (rad/s)
+
+Action: 0 = apply negative torque, 1 = apply positive torque
+
+Metric: mean_reward = average of cos(theta) across all steps and all episodes.
+  cos(0)   = +1.0  (upright — best)
+  cos(±pi) = -1.0  (hanging — worst)
 
 Output format (parsed by crucible):
-    mean_steps: <float>
-    min_steps: <int>
-    max_steps: <int>
+    mean_reward: <float>
+    upright_fraction: <float>
     episodes: <int>
-    perfect_episodes: <int>
 """
 
 import math
 import random
-import sys
 import traceback
 
-# CartPole physics constants (from OpenAI Gym CartPole-v1)
-GRAVITY = 9.8
-MASS_CART = 1.0
-MASS_POLE = 0.1
-TOTAL_MASS = MASS_CART + MASS_POLE
-POLE_HALF_LENGTH = 0.5
-POLE_MASS_LENGTH = MASS_POLE * POLE_HALF_LENGTH
-FORCE_MAG = 10.0
-TAU = 0.02  # seconds per step
+# Pendulum physics constants
+G = 9.8       # gravity (m/s²)
+L = 1.0       # pole length (m)
+M = 1.0       # pole mass (kg)
+MAX_TORQUE = 2.0   # Nm
+MAX_OMEGA = 8.0    # rad/s (velocity clip)
+DT = 0.05          # seconds per step
 
-X_THRESHOLD = 2.4
-ANGLE_THRESHOLD_RAD = 12 * math.pi / 180  # 12 degrees
-
-MAX_STEPS = 500
+MAX_STEPS = 400    # steps per episode (20 seconds)
 N_EPISODES = 200
 SEED = 777
 
 
-def cartpole_step(state, action):
-    """Advance CartPole physics by one timestep. Returns (new_state, done)."""
-    x, x_dot, theta, theta_dot = state
-    force = FORCE_MAG if action == 1 else -FORCE_MAG
+def angle_wrap(theta):
+    """Wrap angle to (-pi, pi]."""
+    return ((theta + math.pi) % (2 * math.pi)) - math.pi
 
-    cos_theta = math.cos(theta)
-    sin_theta = math.sin(theta)
 
-    temp = (force + POLE_MASS_LENGTH * theta_dot ** 2 * sin_theta) / TOTAL_MASS
-    theta_acc = (GRAVITY * sin_theta - cos_theta * temp) / (
-        POLE_HALF_LENGTH * (4.0 / 3.0 - MASS_POLE * cos_theta ** 2 / TOTAL_MASS)
-    )
-    x_acc = temp - POLE_MASS_LENGTH * theta_acc * cos_theta / TOTAL_MASS
+def pendulum_step(theta, omega, action):
+    """Advance pendulum physics. Returns (new_theta, new_omega)."""
+    torque = MAX_TORQUE if action == 1 else -MAX_TORQUE
 
-    x = x + TAU * x_dot
-    x_dot = x_dot + TAU * x_acc
-    theta = theta + TAU * theta_dot
-    theta_dot = theta_dot + TAU * theta_acc
+    # theta=0 is upright (unstable); gravity destabilizes: alpha_gravity = (g/l)*sin(theta)
+    # Positive torque (action=1) applies counterclockwise angular acceleration
+    alpha = (G / L) * math.sin(theta) + torque / (M * L ** 2)
 
-    done = bool(
-        abs(x) > X_THRESHOLD
-        or abs(theta) > ANGLE_THRESHOLD_RAD
-    )
-    return [x, x_dot, theta, theta_dot], done
+    omega = max(-MAX_OMEGA, min(MAX_OMEGA, omega + DT * alpha))
+    theta = angle_wrap(theta + DT * omega)
+    return theta, omega
 
 
 def run_episode(policy_fn, episode_seed):
-    """Run one CartPole episode. Returns steps survived."""
+    """Run one pendulum episode. Returns (mean_cos_theta, upright_steps)."""
     ep_rng = random.Random(episode_seed)
-    state = [ep_rng.uniform(-0.05, 0.05) for _ in range(4)]
+
+    # Start near hanging position (theta near ±pi)
+    theta = ep_rng.uniform(math.pi - 0.3, math.pi + 0.3)
+    theta = angle_wrap(theta)
+    omega = ep_rng.uniform(-0.5, 0.5)
+
+    cos_sum = 0.0
+    upright_steps = 0
 
     for step in range(MAX_STEPS):
-        action = policy_fn(list(state))
-        if action not in (0, 1):
-            return 0  # invalid action
-        state, done = cartpole_step(state, action)
-        if done:
-            return step + 1
+        cos_theta = math.cos(theta)
+        cos_sum += cos_theta
+        if cos_theta > 0.95:  # within ~18° of upright
+            upright_steps += 1
 
-    return MAX_STEPS
+        action = policy_fn([theta, omega])
+        if action not in (0, 1):
+            # Invalid action: penalize rest of episode
+            cos_sum += -1.0 * (MAX_STEPS - step - 1)
+            break
+
+        theta, omega = pendulum_step(theta, omega, action)
+
+    mean_cos = cos_sum / MAX_STEPS
+    return mean_cos, upright_steps
 
 
 def main():
@@ -85,22 +92,24 @@ def main():
         rng = random.Random(SEED)
         episode_seeds = [rng.randint(0, 10**9) for _ in range(N_EPISODES)]
 
-        steps_list = []
+        rewards = []
+        total_upright = 0
         for seed in episode_seeds:
-            steps = run_episode(select_action, seed)
-            steps_list.append(steps)
+            r, up = run_episode(select_action, seed)
+            rewards.append(r)
+            total_upright += up
 
-        mean_steps = sum(steps_list) / len(steps_list)
-        print(f"mean_steps: {mean_steps:.2f}")
-        print(f"min_steps: {min(steps_list)}")
-        print(f"max_steps: {max(steps_list)}")
+        mean_reward = sum(rewards) / len(rewards)
+        upright_fraction = total_upright / (N_EPISODES * MAX_STEPS)
+
+        print(f"mean_reward: {mean_reward:.4f}")
+        print(f"upright_fraction: {upright_fraction:.4f}")
         print(f"episodes: {N_EPISODES}")
-        print(f"perfect_episodes: {sum(1 for s in steps_list if s >= MAX_STEPS)}")
 
     except Exception as e:
         print(f"ERROR: {e}")
         traceback.print_exc()
-        print("mean_steps: 0.0")
+        print("mean_reward: -1.0")
 
 
 if __name__ == "__main__":

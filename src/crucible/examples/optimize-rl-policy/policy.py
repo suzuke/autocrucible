@@ -1,16 +1,19 @@
-"""CartPole policy — edit this file to improve mean_steps.
+"""Pendulum swing-up policy — edit this file to improve mean_reward.
 
 Interface:
   select_action(obs: list[float]) -> int
-      obs = [cart_position, cart_velocity, pole_angle, pole_angular_vel]
-      Return 0 (push left) or 1 (push right).
+      obs = [theta, theta_dot]
+          theta:     pole angle (radians). 0 = upright, ±pi = hanging
+          theta_dot: angular velocity (radians/second)
+      Return 0 (negative/clockwise torque) or 1 (positive/counterclockwise torque)
 
-Goal: maximize mean episode length across 200 episodes.
-Baseline (random): ~20 steps. Good policy: 400-500 steps.
+Goal: maximize mean cos(theta) across 200 episodes.
+Baseline (random): ~−0.95. Target: > +0.60.
 
 Constraints:
-  - No gym, torch, or numpy imports (pure Python + math/random stdlib)
-  - Policy should be deterministic (reproducible given same obs)
+  - No gym, torch, or numpy (pure Python + math/random stdlib)
+  - Return must be 0 or 1
+  - Policy may use module-level state (e.g., prev_theta) to track history
 """
 
 import random as _random

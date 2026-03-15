@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from crucible.context import ContextAssembler, _strategy_hint, _classify_crash
+from crucible.context import ContextAssembler, _strategy_hint, _classify_crash, _plateau_hint
 from crucible.config import (
     Config, FilesConfig, CommandsConfig, MetricConfig,
     ConstraintsConfig, AgentConfig, ContextWindowConfig, GitConfig,
@@ -47,9 +47,9 @@ def test_assemble_with_history(tmp_path):
     tsv = tmp_path / "results.tsv"
     log = ResultsLog(tsv)
     log.init()
-    log.log("aaa0001", 1.0, "keep", "baseline")
-    log.log("aaa0002", 0.95, "keep", "better LR")
-    log.log("aaa0003", 1.1, "discard", "worse activation")
+    log.log(ExperimentRecord(commit="aaa0001", metric_value=1.0, status="keep", description="baseline"))
+    log.log(ExperimentRecord(commit="aaa0002", metric_value=0.95, status="keep", description="better LR"))
+    log.log(ExperimentRecord(commit="aaa0003", metric_value=1.1, status="discard", description="worse activation"))
     ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
     prompt = ctx.assemble(log)
     assert "baseline" in prompt
@@ -64,7 +64,7 @@ def test_assemble_respects_history_limit(tmp_path):
     log = ResultsLog(tsv)
     log.init()
     for i in range(10):
-        log.log(f"aaa{i:04d}", float(i), "keep", f"exp {i}")
+        log.log(ExperimentRecord(commit=f"aaa{i:04d}", metric_value=float(i), status="keep", description=f"exp {i}"))
     ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
     prompt = ctx.assemble(log)
     assert "exp 9" in prompt
@@ -267,10 +267,78 @@ def test_assemble_baseline_not_in_history_table(tmp_path):
     log = ResultsLog(tsv)
     log.init()
     log.seed_baseline(600.0, "abc1234", "run1")
-    log.log("def5678", 650.0, "keep", "first real improvement")
+    log.log(ExperimentRecord(commit="def5678", metric_value=650.0, status="keep", description="first real improvement"))
     ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/run2")
     prompt = ctx.assemble(log)
     # "Forked from" is the baseline description — should NOT be in history table
     assert "Forked from" not in prompt
     # But the real experiment should be there
     assert "first real improvement" in prompt
+
+
+# -- Plateau detection tests --------------------------------------------------
+
+def test_plateau_hint_no_records():
+    assert _plateau_hint([], 8) is None
+
+
+def test_plateau_hint_below_threshold():
+    records = [_make_record("keep")] + [_make_record("discard")] * 5
+    assert _plateau_hint(records, 8) is None
+
+
+def test_plateau_hint_triggers_at_threshold():
+    records = [_make_record("keep")] + [_make_record("discard")] * 8
+    hint = _plateau_hint(records, 8)
+    assert hint is not None
+    assert "8 consecutive iterations" in hint
+    assert "fundamentally different approach" in hint
+
+
+def test_plateau_hint_all_failures():
+    records = [_make_record("discard")] * 10
+    hint = _plateau_hint(records, 8)
+    assert hint is not None
+    assert "10 consecutive iterations" in hint
+
+
+def test_plateau_hint_in_assembled_output(tmp_path):
+    cfg = make_config(tmp_path)
+    cfg.constraints.plateau_threshold = 3
+    (tmp_path / "program.md").write_text("Instructions.")
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.log(ExperimentRecord(commit="aaa0001", metric_value=1.0, status="keep", description="initial"))
+    for i in range(4):
+        log.log(ExperimentRecord(commit=f"bbb{i:04d}", metric_value=2.0, status="discard", description=f"failed attempt {i}"))
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    prompt = ctx.assemble(log)
+    assert "NOT improved for 4 consecutive iterations" in prompt
+    assert "fundamentally different approach" in prompt
+
+
+# -- assemble_with_files tests -----------------------------------------------
+
+def test_assemble_with_files_includes_content(tmp_path):
+    cfg = make_config(tmp_path)
+    (tmp_path / "program.md").write_text("Instructions.")
+    (tmp_path / "train.py").write_text("x = 1\ny = 2\n")
+    log = ResultsLog(tmp_path / "results.jsonl")
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    prompt = ctx.assemble_with_files(log, tmp_path, ["train.py"])
+    assert "x = 1" in prompt
+    assert "train.py" in prompt
+    assert "Editable File Contents" in prompt
+
+
+def test_assemble_with_files_missing_file(tmp_path):
+    cfg = make_config(tmp_path)
+    (tmp_path / "program.md").write_text("Instructions.")
+    log = ResultsLog(tmp_path / "results.jsonl")
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    prompt = ctx.assemble_with_files(log, tmp_path, ["nonexistent.py"])
+    # Should not crash, just skip missing file
+    assert "Editable File Contents" in prompt

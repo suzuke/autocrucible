@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -147,6 +148,8 @@ class ClaudeCodeAgent(AgentInterface):
                 os.environ["CLAUDECODE"] = saved
 
     async def _run_query(self, prompt: str, workspace: Path) -> AgentResult:
+        start = time.monotonic()
+
         hooks = (
             _make_hidden_file_hooks(self.hidden_files, workspace)
             if self.hidden_files
@@ -176,12 +179,18 @@ class ClaudeCodeAgent(AgentInterface):
 
                 elif isinstance(message, ResultMessage):
                     if message.is_error:
+                        duration = time.monotonic() - start
                         return AgentResult(
                             modified_files=[],
                             description=f"agent error: {message.result or 'unknown'}",
+                            duration_seconds=duration,
                         )
         except TimeoutError:
-            return AgentResult(modified_files=[], description="claude agent timed out")
+            duration = time.monotonic() - start
+            return AgentResult(
+                modified_files=[], description="claude agent timed out",
+                duration_seconds=duration,
+            )
 
         if last_text:
             description = _clean_description(last_text)
@@ -189,11 +198,15 @@ class ClaudeCodeAgent(AgentInterface):
         # Detect modified files via git
         all_files = _detect_modified_files(workspace)
 
+        duration = time.monotonic() - start
         if not all_files:
             logger.info("[agent] no files changed")
         else:
             logger.info(f"[agent] modified: {[str(f) for f in all_files]}")
-        return AgentResult(modified_files=all_files, description=description)
+        return AgentResult(
+            modified_files=all_files, description=description,
+            duration_seconds=duration,
+        )
 
 
 def _clean_description(text: str) -> str:

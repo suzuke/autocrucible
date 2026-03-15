@@ -234,23 +234,39 @@ def solve():
 if __name__ == "__main__":
     print(solve())
 """)
-        (dest_path / "evaluate.py").write_text("""\
-\"\"\"Evaluation harness (readonly). Measures the metric for the current solution.\"\"\"
+        (dest_path / "evaluate.py").write_text('''\
+"""Evaluation harness (readonly). Measures the metric for the current solution."""
 
 from solution import solve
 
 
 def evaluate():
     result = solve()
-    # Replace this with your actual evaluation logic
+
+    # === Correctness Gate ===
+    # TODO: Add correctness checks here. If correctness fails,
+    # print a worst-case metric value and exit early.
+    # Example:
+    #   if not verify_correctness(result):
+    #       print("metric: 999999")  # worst value for minimize
+    #       return
+
+    # === Method Verification ===
+    # TODO: Verify the solution uses the required approach.
+    # Example:
+    #   if not uses_required_algorithm(result):
+    #       print("metric: 999999")
+    #       return
+
+    # === Performance Measurement ===
     metric = abs(result - 0)
     print(f"metric: {metric}")
 
 
 if __name__ == "__main__":
     evaluate()
-""")
-        (dest_path / ".gitignore").write_text("results-*.tsv\nrun.log\n__pycache__/\n*.pyc\n.venv/\nuv.lock\n")
+''')
+        (dest_path / ".gitignore").write_text("results-*.jsonl\nrun.log\n__pycache__/\n*.pyc\n.venv/\nuv.lock\n")
         _write_pyproject(dest_path, "my-experiment")
         click.echo(f"Created empty project at {dest_path}")
         click.echo("Edit .crucible/config.yaml and program.md, then run:")
@@ -327,10 +343,11 @@ def init(tag: str, project_dir: str) -> None:
     except ConfigError as e:
         raise click.ClickException(str(e))
 
-    from crucible.agents.claude_code import ClaudeCodeAgent
+    from crucible.agents import create_agent
     from crucible.orchestrator import Orchestrator
 
-    agent = ClaudeCodeAgent(
+    agent = create_agent(
+        config.agent,
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
     )
@@ -350,7 +367,9 @@ def init(tag: str, project_dir: str) -> None:
 def _scan_previous_runs(project: Path, current_tag: str, direction: str) -> list[dict]:
     """Scan for previous experiment results and return their best scores."""
     previous = []
-    for tsv_path in sorted(project.glob("results-*.tsv")):
+    result_files = sorted(project.glob("results-*.jsonl"))
+    result_files.extend(sorted(project.glob("results-*.tsv")))
+    for tsv_path in result_files:
         tag = tsv_path.stem.removeprefix("results-")
         if tag == current_tag:
             continue
@@ -393,10 +412,11 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, no_interact
     except ConfigError as e:
         raise click.ClickException(str(e))
 
-    from crucible.agents.claude_code import ClaudeCodeAgent
+    from crucible.agents import create_agent
     from crucible.orchestrator import Orchestrator
 
-    agent = ClaudeCodeAgent(
+    agent = create_agent(
+        config.agent,
         timeout=timeout,
         model=model,
         system_prompt_file=config.agent.system_prompt,
@@ -485,7 +505,29 @@ def status(tag: str, project_dir: str, as_json: bool) -> None:
     summary = results.summary()
     best = results.best(config.metric.direction)
 
+    # Compute cost info from usage data
+    all_records = results.read_all()
+    costs = [
+        r.usage.estimated_cost_usd
+        for r in all_records
+        if r.usage and r.usage.estimated_cost_usd is not None
+    ]
+    total_cost = sum(costs) if costs else None
+    budget_cfg = config.constraints.budget
+    budget_max = budget_cfg.max_cost_usd if budget_cfg else None
+    num_iterations = len([r for r in all_records if r.status != "baseline"])
+
     if as_json:
+        cost_data: dict = {}
+        if total_cost is not None:
+            cost_data["total_cost_usd"] = round(total_cost, 4)
+            cost_data["iterations"] = num_iterations
+            if budget_max:
+                cost_data["budget_usd"] = budget_max
+                cost_data["percent_used"] = round(total_cost / budget_max * 100, 1)
+        else:
+            cost_data["total_cost_usd"] = None
+
         data = {
             "experiment": config.name,
             **summary,
@@ -494,6 +536,7 @@ def status(tag: str, project_dir: str, as_json: bool) -> None:
                 "commit": best.commit,
                 "description": best.description,
             } if best else None,
+            "cost": cost_data,
         }
         click.echo(json_module.dumps(data))
         return
@@ -504,10 +547,22 @@ def status(tag: str, project_dir: str, as_json: bool) -> None:
     if best is not None:
         click.echo(f"Best {config.metric.name}: {best.metric_value} (commit {best.commit})")
 
+    # Cost line
+    if total_cost is not None:
+        if budget_max:
+            pct = total_cost / budget_max * 100
+            click.echo(f"Cost: ${total_cost:.2f} / ${budget_max:.2f} ({pct:.0f}%) — {num_iterations} iterations")
+        else:
+            click.echo(f"Cost: ${total_cost:.2f} — {num_iterations} iterations")
+    else:
+        click.echo("Cost: unknown (agent backend does not report usage)")
+
 
 @main.command()
 @click.option("--project-dir", default=".", help="Project root directory.")
-def validate(project_dir: str) -> None:
+@click.option("--stability", is_flag=True, help="Check metric stability.")
+@click.option("--runs", default=5, help="Number of runs for stability check.")
+def validate(project_dir: str, stability: bool, runs: int) -> None:
     """Validate project configuration and run a test execution."""
     from crucible.validator import validate_project
 
@@ -521,6 +576,19 @@ def validate(project_dir: str) -> None:
         if not r.passed:
             all_passed = False
 
+    if stability:
+        from crucible.validator import check_stability
+
+        config = load_config(project)
+        result = check_stability(project, config, runs=runs)
+        if result.stable:
+            click.echo(f"  [PASS] Metric stability: CV = {result.cv:.1f}% over {runs} runs")
+        else:
+            click.echo(f"  [WARN] Metric stability: CV = {result.cv:.1f}% over {runs} runs")
+            if result.values:
+                click.echo(f"         Values: {result.values}")
+            click.echo("         Consider: fix random seeds or increase sample size")
+
     if not all_passed:
         raise click.ClickException("Validation failed.")
 
@@ -530,7 +598,8 @@ def validate(project_dir: str) -> None:
 @click.option("--last", default=10, help="Number of recent results to show.")
 @click.option("--project-dir", default=".", help="Project root directory.")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-def history(tag: str, last: int, project_dir: str, as_json: bool) -> None:
+@click.option("--format", "fmt", type=click.Choice(["table", "jsonl"]), default="table", help="Output format.")
+def history(tag: str, last: int, project_dir: str, as_json: bool, fmt: str) -> None:
     """Show recent experiment results."""
     project = Path(project_dir).resolve()
     results = ResultsLog(project / results_filename(tag))
@@ -538,6 +607,12 @@ def history(tag: str, last: int, project_dir: str, as_json: bool) -> None:
         raise click.ClickException(f"No {results_filename(tag)} found. Run 'init --tag {tag}' first.")
 
     records = results.read_last(last)
+
+    if fmt == "jsonl":
+        from crucible.results import _serialize_record
+        for r in records:
+            click.echo(_serialize_record(r))
+        return
 
     if as_json:
         data = [

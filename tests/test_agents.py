@@ -216,3 +216,230 @@ async def test_hook_denies_hidden_subdir():
         None, None,
     )
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# -- capabilities tests --------------------------------------------------------
+
+
+def test_capabilities_default():
+    """Default capabilities returns all five tools."""
+    agent = ClaudeCodeAgent()
+    caps = agent.capabilities()
+    assert caps == {"read", "edit", "write", "glob", "grep"}
+
+
+# -- agent factory tests -------------------------------------------------------
+
+from crucible.agents import create_agent
+from crucible.config import AgentConfig
+
+
+def test_create_agent_claude_code():
+    """Factory creates ClaudeCodeAgent for claude-code type."""
+    config = AgentConfig(type="claude-code")
+    agent = create_agent(config, timeout=120)
+    assert isinstance(agent, ClaudeCodeAgent)
+    assert agent.timeout == 120
+
+
+def test_create_agent_unknown_raises():
+    """Factory raises ValueError for unknown agent type."""
+    config = AgentConfig(type="nonexistent")
+    with pytest.raises(ValueError, match="Unknown agent type: nonexistent"):
+        create_agent(config)
+
+
+def test_create_agent_claude_code_with_kwargs():
+    """Factory passes kwargs through to ClaudeCodeAgent."""
+    config = AgentConfig(type="claude-code", system_prompt="custom.md")
+    agent = create_agent(
+        config,
+        timeout=300,
+        model="opus",
+        system_prompt_file="custom.md",
+        hidden_files={"secret.py"},
+    )
+    assert isinstance(agent, ClaudeCodeAgent)
+    assert agent.timeout == 300
+    assert agent.model == "opus"
+    assert agent.system_prompt_file == "custom.md"
+    assert agent.hidden_files == {"secret.py"}
+
+
+# -- timing tests --------------------------------------------------------------
+
+
+def test_run_query_includes_duration(tmp_path):
+    """_run_query sets duration_seconds on the result."""
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "train.py").write_text("x = 1")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+
+    agent = ClaudeCodeAgent()
+
+    async def mock_query(prompt, options=None):
+        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+        yield AssistantMessage(
+            content=[TextBlock(text="Added timing")],
+            model="claude-sonnet-4-20250514",
+        )
+        yield ResultMessage(
+            subtype="result",
+            duration_ms=100,
+            duration_api_ms=80,
+            is_error=False,
+            num_turns=1,
+            session_id="test-session",
+        )
+
+    with patch("crucible.agents.claude_code.query", mock_query):
+        result = agent.generate_edit("optimize x", tmp_path)
+
+    assert result.duration_seconds is not None
+    assert result.duration_seconds >= 0
+
+
+# -- AgentConfig model/base_url tests -----------------------------------------
+
+
+def test_agent_config_model_base_url():
+    """AgentConfig supports model and base_url fields."""
+    config = AgentConfig(type="ollama", model="llama3", base_url="http://localhost:11434")
+    assert config.model == "llama3"
+    assert config.base_url == "http://localhost:11434"
+
+
+def test_agent_config_defaults():
+    """AgentConfig model and base_url default to None."""
+    config = AgentConfig()
+    assert config.model is None
+    assert config.base_url is None
+
+
+# -- Ollama agent tests --------------------------------------------------------
+
+from crucible.agents.ollama import OllamaAgent
+
+
+def test_ollama_capabilities():
+    """OllamaAgent.capabilities() returns only 'edit'."""
+    agent = OllamaAgent(model="llama3")
+    assert agent.capabilities() == {"edit"}
+
+
+def test_ollama_parses_json_edits(tmp_path):
+    """OllamaAgent parses structured JSON edits and applies them."""
+    (tmp_path / "train.py").write_text("x = 1\ny = 2\n")
+
+    ollama_response = {
+        "message": {
+            "content": '{"edits": [{"file": "train.py", "search": "x = 1", '
+            '"replace": "x = 42"}], "description": "set x to 42"}'
+        },
+        "prompt_eval_count": 100,
+        "eval_count": 50,
+        "total_duration": 2_000_000_000,  # 2 seconds in nanoseconds
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = ollama_response
+    mock_resp.raise_for_status = MagicMock()
+
+    agent = OllamaAgent(model="llama3")
+    with patch("crucible.agents.ollama.requests.post", return_value=mock_resp):
+        result = agent.generate_edit("optimize x", tmp_path)
+
+    assert Path("train.py") in result.modified_files
+    assert result.description == "set x to 42"
+    assert result.usage is not None
+    assert result.usage.input_tokens == 100
+    assert result.usage.output_tokens == 50
+    assert result.usage.estimated_cost_usd == 0.0
+    assert result.duration_seconds == pytest.approx(2.0)
+    # Verify file was actually modified
+    assert (tmp_path / "train.py").read_text() == "x = 42\ny = 2\n"
+
+
+def test_ollama_connection_error():
+    """OllamaAgent handles connection errors gracefully."""
+    import requests as req
+
+    agent = OllamaAgent(model="llama3")
+    with patch(
+        "crucible.agents.ollama.requests.post",
+        side_effect=req.ConnectionError("Connection refused"),
+    ):
+        result = agent.generate_edit("optimize", Path("/tmp"))
+
+    assert result.modified_files == []
+    assert "ollama error" in result.description
+
+
+def test_ollama_non_json_response(tmp_path):
+    """OllamaAgent handles non-JSON model output gracefully."""
+    ollama_response = {
+        "message": {"content": "I don't know how to respond in JSON."},
+        "prompt_eval_count": 80,
+        "eval_count": 20,
+        "total_duration": 1_000_000_000,
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = ollama_response
+    mock_resp.raise_for_status = MagicMock()
+
+    agent = OllamaAgent(model="llama3")
+    with patch("crucible.agents.ollama.requests.post", return_value=mock_resp):
+        result = agent.generate_edit("optimize", tmp_path)
+
+    assert result.modified_files == []
+    assert "non-JSON" in result.description
+    assert result.usage is not None
+    assert result.usage.input_tokens == 80
+
+
+def test_create_agent_ollama():
+    """Factory creates OllamaAgent for ollama type."""
+    config = AgentConfig(type="ollama", model="qwen2.5-coder:32b")
+    agent = create_agent(config)
+    assert isinstance(agent, OllamaAgent)
+    assert agent.model == "qwen2.5-coder:32b"
+    assert agent.base_url == "http://localhost:11434"
+
+
+def test_create_agent_ollama_defaults():
+    """Factory uses default model and base_url when not specified."""
+    config = AgentConfig(type="ollama")
+    agent = create_agent(config)
+    assert isinstance(agent, OllamaAgent)
+    assert agent.model == "qwen2.5-coder:32b"
+
+
+def test_ollama_search_not_found(tmp_path):
+    """OllamaAgent skips edits where search string is not found."""
+    (tmp_path / "train.py").write_text("x = 1\n")
+
+    ollama_response = {
+        "message": {
+            "content": '{"edits": [{"file": "train.py", "search": "y = 99", '
+            '"replace": "y = 100"}], "description": "update y"}'
+        },
+        "prompt_eval_count": 50,
+        "eval_count": 30,
+        "total_duration": 500_000_000,
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = ollama_response
+    mock_resp.raise_for_status = MagicMock()
+
+    agent = OllamaAgent(model="llama3")
+    with patch("crucible.agents.ollama.requests.post", return_value=mock_resp):
+        result = agent.generate_edit("optimize", tmp_path)
+
+    assert result.modified_files == []
+    # File unchanged
+    assert (tmp_path / "train.py").read_text() == "x = 1\n"

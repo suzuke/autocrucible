@@ -1,9 +1,10 @@
 import subprocess
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from crucible.validator import validate_project, CheckResult
+from crucible.validator import validate_project, CheckResult, check_stability, StabilityResult
 
 
 VALID_CONFIG = """\
@@ -62,3 +63,48 @@ def test_validate_run_command_fails(tmp_path):
     results = validate_project(tmp_path)
     run_check = [r for r in results if "run command" in r.name.lower()]
     assert any(not r.passed for r in run_check)
+
+
+def test_check_stability_stable(tmp_path):
+    config = MagicMock()
+    config.commands.run = "echo ok"
+    config.commands.eval = "echo 'metric: 1.0'"
+    config.metric.name = "metric"
+    config.constraints.timeout_seconds = 30
+
+    with patch("crucible.validator.ExperimentRunner") as MockRunner:
+        runner = MockRunner.return_value
+        runner.execute.return_value = MagicMock(exit_code=0, timed_out=False)
+        runner.parse_metric.return_value = 1.0
+        result = check_stability(tmp_path, config, runs=5)
+
+    assert result.stable is True
+    assert result.cv == 0.0
+
+
+def test_check_stability_unstable(tmp_path):
+    config = MagicMock()
+    config.constraints.timeout_seconds = 30
+
+    values = iter([100.0, 200.0, 150.0, 300.0, 50.0])
+    with patch("crucible.validator.ExperimentRunner") as MockRunner:
+        runner = MockRunner.return_value
+        runner.execute.return_value = MagicMock(exit_code=0, timed_out=False)
+        runner.parse_metric.side_effect = lambda *a: next(values)
+        result = check_stability(tmp_path, config, runs=5)
+
+    assert result.stable is False
+    assert result.cv > 5.0
+
+
+def test_check_stability_too_few_runs(tmp_path):
+    config = MagicMock()
+    config.constraints.timeout_seconds = 30
+
+    with patch("crucible.validator.ExperimentRunner") as MockRunner:
+        runner = MockRunner.return_value
+        runner.execute.return_value = MagicMock(exit_code=1, timed_out=False)
+        result = check_stability(tmp_path, config, runs=3)
+
+    assert result.stable is False
+    assert result.reason == "too few successful runs"

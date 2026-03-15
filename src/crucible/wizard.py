@@ -211,7 +211,7 @@ def _format_environment(env: dict) -> str:
 
 
 GITIGNORE_CONTENT = """\
-results-*.tsv
+results-*.jsonl
 run.log
 __pycache__/
 *.pyc

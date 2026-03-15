@@ -37,7 +37,7 @@ project-root/
     program.md       # Instructions for the LLM agent (MUST be readonly)
   <editable>.py      # Code the agent modifies (the "knob")
   <evaluation>.py    # Fixed harness that measures the metric (the "ruler")
-  .gitignore         # Ignore run.log, results-*.tsv, __pycache__/, training artifacts
+  .gitignore         # Ignore run.log, results-*.jsonl, __pycache__/, training artifacts
   README.md          # Setup, metric, files, how to run
 ```
 
@@ -85,6 +85,10 @@ The crucible platform extracts the metric via `grep '^<metric_name>:' run.log`, 
 ### Step 3: Create the Baseline Editable File
 
 Simple, correct implementation. Start weak intentionally — a near-optimal baseline leaves no room for the agent to improve through its early noisy iterations.
+
+**Baseline calibration target: 0.3–0.7 range.** Too high (>0.9) leaves almost no headroom; agent's early noisy iterations can't beat the baseline and iterations waste. Too low (<0.1) is demotivating and may not differentiate good vs bad approaches. Check the baseline score before committing and adjust the starter implementation accordingly.
+
+*Example*: A polynomial hash with multiplier 31 scores 0.9951 uniformity (too high). Downgrading to multiplier 3 yields 0.66 — much better headroom for the agent to find mixing improvements.
 
 ### Step 4: Write Agent Instructions (program.md)
 
@@ -149,7 +153,7 @@ Dependencies: add `requirements.txt` as readonly + `setup: "pip install -r requi
 **.gitignore** — always create with at least:
 ```
 run.log
-results-*.tsv
+results-*.jsonl
 __pycache__/
 ```
 Add training artifacts if applicable (e.g., `*.pt`, `*.ckpt`, `data/`, `checkpoints/`).
@@ -175,7 +179,7 @@ crucible run --tag <name>
 
 Crucible's `is_improvement()` returns `True` when no previous records exist, so the **first iteration always becomes "best" regardless of quality**. If the agent's first change makes things worse (common), that bad result becomes the new baseline.
 
-**Fix: Seed results-{tag}.tsv with a baseline run before starting `crucible run`:**
+**Fix: Seed results-{tag}.jsonl with a baseline run before starting `crucible run`:**
 
 ```bash
 python3 evaluate.py > run.log 2>&1
@@ -183,7 +187,7 @@ grep '^<metric_name>:' run.log  # note the value
 
 crucible init --tag run1
 COMMIT=$(git rev-parse HEAD)
-echo -e "${COMMIT}\t<metric_value>\tkeep\tbaseline: initial" >> results-run1.tsv
+echo '{"commit":"'$COMMIT'","metric_value":<metric_value>,"status":"keep","description":"baseline: initial"}' >> results-run1.jsonl
 
 crucible run --tag run1  # agent must now beat the real baseline
 ```
@@ -245,6 +249,10 @@ After creating all files, verify these all match:
 5. The direction in config.yaml matches the task (maximize vs minimize)
 6. The function imported in evaluate.py matches what's defined in the editable file
 7. evaluate.py only imports packages listed in requirements.txt (or stdlib only)
+
+## LLM-in-the-Loop Evaluation
+
+When the metric requires LLM judgment (e.g., prompt quality, format accuracy, reasoning), call the `claude` CLI as a subprocess. See the `crucible-claude-cli-eval` skill for correct invocation, flag usage, and timeout guidance.
 
 ## Common Mistakes
 

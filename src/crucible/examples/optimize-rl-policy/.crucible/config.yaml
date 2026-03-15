@@ -14,7 +14,7 @@ commands:
   eval: "cat run.log"
 
 metric:
-  name: "mean_steps"
+  name: "mean_reward"
   direction: "maximize"
 
 constraints:

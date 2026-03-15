@@ -1,22 +1,54 @@
-# CartPole Observation Space
+# Pendulum Swing-Up Observation Space
 
-The pole-balancing environment provides 4 observations per step:
+## Task
 
-  obs[0]: cart_position      — position of cart on track, range [-4.8, 4.8] meters
-  obs[1]: cart_velocity      — cart velocity (meters per second)
-  obs[2]: pole_angle         — pole angle from vertical, range [-0.418, 0.418] radians (~24 degrees)
-  obs[3]: pole_angular_vel   — pole angular velocity (radians per second)
+A pendulum is attached at a pivot point. It starts hanging downward and must be
+swung up to balance upright. This requires building energy first, then stabilizing.
 
-Actions:
-  0 = push cart LEFT  (force = -10 N)
-  1 = push cart RIGHT (force = +10 N)
+## Observation
 
-Episode ends when:
-  - |cart_position| > 2.4 meters (cart fell off track), OR
-  - |pole_angle| > 12 degrees (pole fell over), OR
-  - 500 steps reached (perfect score)
+  obs[0]: theta       — pole angle (radians). 0 = upright, ±pi = hanging downward
+  obs[1]: theta_dot   — angular velocity (radians/second)
 
-Score = mean steps survived across 200 episodes.
-Baseline (random): ~20 steps.
-Simple heuristic (push in direction pole is falling): ~150 steps.
-Good policy (LQR / linear combination): ~400-500 steps.
+## Actions
+
+  0 = apply negative torque (−2 Nm, clockwise)
+  1 = apply positive torque (+2 Nm, counterclockwise)
+
+## Physics
+
+  theta_ddot = (g/l) * sin(theta) + torque / (m * l²)
+
+  Constants: g=9.8, l=1.0, m=1.0, max_torque=2.0, max_omega=8.0, dt=0.05
+
+## Episode
+
+  - Starts near hanging: theta ≈ ±pi, theta_dot ≈ 0
+  - Ends after 400 steps (20 seconds)
+  - Score per step: cos(theta) — +1.0 when upright, −1.0 when hanging
+
+## Metric
+
+  mean_reward = average cos(theta) across all steps and all episodes.
+  Range: −1.0 (always hanging) to +1.0 (always upright).
+
+## Baseline and Target Performance
+
+  Random policy:              ~−0.95 (stays near hanging)
+  Simple energy pump only:    ~−0.20 (oscillates, rarely reaches top)
+  Energy pump + LQR balance:  ~+0.60 (reaches top and holds for a while)
+  Near-optimal:               ~+0.80 (swings up quickly, balances stably)
+
+## Key Insight
+
+CartPole-style LQR alone cannot solve this — the pendulum starts far from the
+upright equilibrium and must first accumulate energy. Two phases are needed:
+
+  Phase 1 (swing-up): Pump energy by pushing in the direction of current velocity.
+    If theta_dot > 0 (swinging counterclockwise): apply positive torque (action=1)
+    If theta_dot < 0 (swinging clockwise):        apply negative torque (action=0)
+
+  Phase 2 (balance): Once near upright (|theta| small), switch to stabilization:
+    Apply torque opposing theta and theta_dot (like LQR or PD control)
+
+The tricky part: deciding WHEN to switch and choosing good gains for each phase.

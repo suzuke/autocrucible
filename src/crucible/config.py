@@ -25,6 +25,8 @@ class AgentConfig:
     type: str = "claude-code"
     instructions: Optional[str] = None
     system_prompt: Optional[str] = None
+    model: str | None = None
+    base_url: str | None = None
     context_window: ContextWindowConfig = field(default_factory=ContextWindowConfig)
 
 
@@ -49,15 +51,39 @@ class MetricConfig:
 
 
 @dataclass
+class BudgetConfig:
+    max_cost_usd: float | None = None
+    max_cost_per_iter_usd: float | None = None
+    warn_at_percent: int = 80
+
+
+@dataclass
 class ConstraintsConfig:
     timeout_seconds: int = 600
     max_retries: int = 3
+    budget: BudgetConfig | None = None
+    plateau_threshold: int = 8
 
 
 @dataclass
 class GitConfig:
     branch_prefix: str = "crucible"
     tag_failed: bool = True
+
+
+@dataclass
+class EvaluationConfig:
+    repeat: int = 1
+    aggregation: str = "median"  # median | mean
+
+
+@dataclass
+class SandboxConfig:
+    backend: str = "none"  # docker | none
+    base_image: str = "python:3.12-slim"
+    network: bool = False
+    memory_limit: str | None = None  # e.g. "2g"
+    cpu_limit: int | None = None
 
 
 @dataclass
@@ -70,6 +96,8 @@ class Config:
     constraints: ConstraintsConfig = field(default_factory=ConstraintsConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     git: GitConfig = field(default_factory=GitConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
+    sandbox: SandboxConfig | None = None
 
 
 def _build_context_window(data: dict) -> ContextWindowConfig:
@@ -82,6 +110,16 @@ def _build_context_window(data: dict) -> ContextWindowConfig:
     )
 
 
+def _build_budget(data: dict | None) -> BudgetConfig | None:
+    if not data:
+        return None
+    return BudgetConfig(
+        max_cost_usd=data.get("max_cost_usd"),
+        max_cost_per_iter_usd=data.get("max_cost_per_iter_usd"),
+        warn_at_percent=data.get("warn_at_percent", 80),
+    )
+
+
 def _build_agent(data: dict) -> AgentConfig:
     if not data:
         return AgentConfig()
@@ -89,7 +127,30 @@ def _build_agent(data: dict) -> AgentConfig:
         type=data.get("type", "claude-code"),
         instructions=data.get("instructions"),
         system_prompt=data.get("system_prompt"),
+        model=data.get("model"),
+        base_url=data.get("base_url"),
         context_window=_build_context_window(data.get("context_window", {})),
+    )
+
+
+def _build_evaluation(data: dict) -> EvaluationConfig:
+    if not data:
+        return EvaluationConfig()
+    return EvaluationConfig(
+        repeat=data.get("repeat", 1),
+        aggregation=data.get("aggregation", "median"),
+    )
+
+
+def _build_sandbox(data: dict | None) -> SandboxConfig | None:
+    if not data:
+        return None
+    return SandboxConfig(
+        backend=data.get("backend", "none"),
+        base_image=data.get("base_image", "python:3.12-slim"),
+        network=data.get("network", False),
+        memory_limit=data.get("memory_limit"),
+        cpu_limit=data.get("cpu_limit"),
     )
 
 
@@ -158,10 +219,14 @@ def load_config(project_root: Path) -> Config:
         constraints=ConstraintsConfig(
             timeout_seconds=constraints_data.get("timeout_seconds", 600),
             max_retries=constraints_data.get("max_retries", 3),
+            budget=_build_budget(constraints_data.get("budget")),
+            plateau_threshold=constraints_data.get("plateau_threshold", 8),
         ),
         agent=_build_agent(raw.get("agent", {})),
         git=GitConfig(
             branch_prefix=git_data.get("branch_prefix", "crucible"),
             tag_failed=git_data.get("tag_failed", True),
         ),
+        evaluation=_build_evaluation(raw.get("evaluation", {})),
+        sandbox=_build_sandbox(raw.get("sandbox")),
     )
