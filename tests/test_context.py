@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from crucible.context import ContextAssembler, _strategy_hint, _classify_crash
+from crucible.context import ContextAssembler, _strategy_hint, _classify_crash, _plateau_hint
 from crucible.config import (
     Config, FilesConfig, CommandsConfig, MetricConfig,
     ConstraintsConfig, AgentConfig, ContextWindowConfig, GitConfig,
@@ -274,3 +274,45 @@ def test_assemble_baseline_not_in_history_table(tmp_path):
     assert "Forked from" not in prompt
     # But the real experiment should be there
     assert "first real improvement" in prompt
+
+
+# -- Plateau detection tests --------------------------------------------------
+
+def test_plateau_hint_no_records():
+    assert _plateau_hint([], 8) is None
+
+
+def test_plateau_hint_below_threshold():
+    records = [_make_record("keep")] + [_make_record("discard")] * 5
+    assert _plateau_hint(records, 8) is None
+
+
+def test_plateau_hint_triggers_at_threshold():
+    records = [_make_record("keep")] + [_make_record("discard")] * 8
+    hint = _plateau_hint(records, 8)
+    assert hint is not None
+    assert "8 consecutive iterations" in hint
+    assert "fundamentally different approach" in hint
+
+
+def test_plateau_hint_all_failures():
+    records = [_make_record("discard")] * 10
+    hint = _plateau_hint(records, 8)
+    assert hint is not None
+    assert "10 consecutive iterations" in hint
+
+
+def test_plateau_hint_in_assembled_output(tmp_path):
+    cfg = make_config(tmp_path)
+    cfg.constraints.plateau_threshold = 3
+    (tmp_path / "program.md").write_text("Instructions.")
+    tsv = tmp_path / "results.tsv"
+    log = ResultsLog(tsv)
+    log.init()
+    log.log(ExperimentRecord(commit="aaa0001", metric_value=1.0, status="keep", description="initial"))
+    for i in range(4):
+        log.log(ExperimentRecord(commit=f"bbb{i:04d}", metric_value=2.0, status="discard", description=f"failed attempt {i}"))
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    prompt = ctx.assemble(log)
+    assert "NOT improved for 4 consecutive iterations" in prompt
+    assert "fundamentally different approach" in prompt
