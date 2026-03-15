@@ -1,5 +1,6 @@
 import pytest
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 from crucible.runner import ExperimentRunner, RunResult
 
 
@@ -43,3 +44,72 @@ def test_stderr_tail(tmp_path):
     runner = ExperimentRunner(workspace=tmp_path)
     result = runner.execute("python3 -c 'raise ValueError(\"boom\")'", timeout=10)
     assert "boom" in result.stderr_tail
+
+
+# --- execute_with_repeat tests ---
+
+
+def test_execute_with_repeat_median(tmp_path):
+    """Median of 3 values is returned."""
+    runner = ExperimentRunner(workspace=tmp_path)
+    ok = RunResult(exit_code=0, timed_out=False)
+    metrics = iter([1.0, 3.0, 2.0])
+
+    with patch.object(runner, "execute", return_value=ok), \
+         patch.object(runner, "parse_metric", side_effect=lambda *a: next(metrics)):
+        result, value = runner.execute_with_repeat(
+            "run", "eval", "m", repeat=3, aggregation="median", timeout=10,
+        )
+    assert value == 2.0
+
+
+def test_execute_with_repeat_mean(tmp_path):
+    """Mean aggregation works."""
+    runner = ExperimentRunner(workspace=tmp_path)
+    ok = RunResult(exit_code=0, timed_out=False)
+    metrics = iter([1.0, 3.0, 2.0])
+
+    with patch.object(runner, "execute", return_value=ok), \
+         patch.object(runner, "parse_metric", side_effect=lambda *a: next(metrics)):
+        result, value = runner.execute_with_repeat(
+            "run", "eval", "m", repeat=3, aggregation="mean", timeout=10,
+        )
+    assert value == 2.0
+
+
+def test_execute_with_repeat_failure_returns_none(tmp_path):
+    """If any run fails, return None metric."""
+    runner = ExperimentRunner(workspace=tmp_path)
+    fail = RunResult(exit_code=1, timed_out=False)
+
+    with patch.object(runner, "execute", return_value=fail):
+        result, value = runner.execute_with_repeat(
+            "run", "eval", "m", repeat=3, aggregation="median", timeout=10,
+        )
+    assert value is None
+
+
+def test_execute_with_repeat_one(tmp_path):
+    """repeat=1 works like a normal single run."""
+    runner = ExperimentRunner(workspace=tmp_path)
+    ok = RunResult(exit_code=0, timed_out=False)
+
+    with patch.object(runner, "execute", return_value=ok), \
+         patch.object(runner, "parse_metric", return_value=42.0):
+        result, value = runner.execute_with_repeat(
+            "run", "eval", "m", repeat=1, aggregation="median", timeout=10,
+        )
+    assert value == 42.0
+
+
+def test_execute_with_repeat_metric_parse_fails(tmp_path):
+    """If metric parsing fails on any run, return None."""
+    runner = ExperimentRunner(workspace=tmp_path)
+    ok = RunResult(exit_code=0, timed_out=False)
+
+    with patch.object(runner, "execute", return_value=ok), \
+         patch.object(runner, "parse_metric", return_value=None):
+        result, value = runner.execute_with_repeat(
+            "run", "eval", "m", repeat=3, aggregation="median", timeout=10,
+        )
+    assert value is None

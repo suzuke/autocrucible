@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import statistics
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -75,6 +76,35 @@ class ExperimentRunner:
             proc.kill()
             proc.wait()
             raise
+
+    def execute_with_repeat(
+        self,
+        run_cmd: str,
+        eval_cmd: str,
+        metric_name: str,
+        repeat: int,
+        aggregation: str,
+        timeout: int,
+    ) -> tuple[RunResult, float | None]:
+        """Execute experiment repeat times, return aggregated metric."""
+        values: list[float] = []
+        last_result = None
+        for _ in range(repeat):
+            result = self.execute(run_cmd, timeout)
+            last_result = result
+            if result.exit_code != 0 or result.timed_out:
+                return result, None
+            metric = self.parse_metric(eval_cmd, metric_name)
+            if metric is None:
+                return result, None
+            values.append(metric)
+
+        if not values:
+            return last_result, None
+
+        if aggregation == "mean":
+            return last_result, statistics.mean(values)
+        return last_result, statistics.median(values)
 
     def parse_metric(self, eval_command: str, metric_name: str) -> Optional[float]:
         """Run an eval command and parse a named metric from its output.

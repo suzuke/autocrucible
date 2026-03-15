@@ -149,23 +149,29 @@ class Orchestrator:
         current_best = self.results.best(self.config.metric.direction)
         best_val = current_best.metric_value if current_best else None
 
-        # 8. Execute experiment
+        # 8. Execute experiment (with optional repeat)
         t0_run = time.monotonic()
-        run_result = self.runner.execute(
-            self.config.commands.run,
-            self.config.constraints.timeout_seconds,
-        )
+        eval_cfg = self.config.evaluation
+        if eval_cfg.repeat > 1:
+            run_result, metric_value = self.runner.execute_with_repeat(
+                self.config.commands.run, self.config.commands.eval,
+                self.config.metric.name, eval_cfg.repeat,
+                eval_cfg.aggregation, self.config.constraints.timeout_seconds,
+            )
+        else:
+            run_result = self.runner.execute(
+                self.config.commands.run,
+                self.config.constraints.timeout_seconds,
+            )
+            metric_value = None
+            if run_result.exit_code == 0 and not run_result.timed_out:
+                metric_value = self.runner.parse_metric(
+                    self.config.commands.eval,
+                    self.config.metric.name,
+                )
         run_duration = time.monotonic() - t0_run
 
         total_duration = agent_duration + run_duration
-
-        # 9. Parse metric
-        metric_value: Optional[float] = None
-        if run_result.exit_code == 0 and not run_result.timed_out:
-            metric_value = self.runner.parse_metric(
-                self.config.commands.eval,
-                self.config.metric.name,
-            )
 
         # 10. Handle crash (metric is None or invalid)
         if metric_value is None or not self.guardrails.check_metric(metric_value):

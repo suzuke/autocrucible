@@ -70,6 +70,12 @@ class GitConfig:
 
 
 @dataclass
+class EvaluationConfig:
+    repeat: int = 1
+    aggregation: str = "median"  # median | mean
+
+
+@dataclass
 class Config:
     name: str = ""
     description: str = ""
@@ -79,6 +85,7 @@ class Config:
     constraints: ConstraintsConfig = field(default_factory=ConstraintsConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     git: GitConfig = field(default_factory=GitConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
 
 def _build_context_window(data: dict) -> ContextWindowConfig:
@@ -109,6 +116,15 @@ def _build_agent(data: dict) -> AgentConfig:
         instructions=data.get("instructions"),
         system_prompt=data.get("system_prompt"),
         context_window=_build_context_window(data.get("context_window", {})),
+    )
+
+
+def _build_evaluation(data: dict) -> EvaluationConfig:
+    if not data:
+        return EvaluationConfig()
+    return EvaluationConfig(
+        repeat=data.get("repeat", 1),
+        aggregation=data.get("aggregation", "median"),
     )
 
 
@@ -185,4 +201,5 @@ def load_config(project_root: Path) -> Config:
             branch_prefix=git_data.get("branch_prefix", "crucible"),
             tag_failed=git_data.get("tag_failed", True),
         ),
+        evaluation=_build_evaluation(raw.get("evaluation", {})),
     )
