@@ -5,7 +5,14 @@ import pytest
 from click.testing import CliRunner
 from pathlib import Path
 from crucible.cli import main
-from crucible.results import results_filename
+from crucible.results import results_filename, ExperimentRecord, _serialize_record
+
+
+def _jsonl_line(commit, metric, status, desc):
+    """Create a JSONL line for test results."""
+    return _serialize_record(ExperimentRecord(
+        commit=commit, metric_value=metric, status=status, description=desc,
+    )) + "\n"
 
 
 MOCK_ANALYZE = '{"inferred": {"name": "test", "metric_name": "score", "metric_direction": "maximize", "editable_files": ["solution.py"], "timeout_seconds": 60}, "uncertain": []}'
@@ -114,13 +121,13 @@ def test_compare_command(tmp_path):
     runner.invoke(main, ["init", "--tag", "a", "--project-dir", str(tmp_path)])
     results_path = tmp_path / results_filename("a")
     with results_path.open("a") as f:
-        f.write("abc1234\t0.5\tkeep\tfirst improvement\n")
+        f.write(_jsonl_line("abc1234", 0.5, "keep", "first improvement"))
     # Go back to main and create branch b
     subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
     runner.invoke(main, ["init", "--tag", "b", "--project-dir", str(tmp_path)])
     results_path_b = tmp_path / results_filename("b")
     with results_path_b.open("a") as f:
-        f.write("def5678\t0.3\tkeep\tsecond improvement\n")
+        f.write(_jsonl_line("def5678", 0.3, "keep", "second improvement"))
 
     result = runner.invoke(main, ["compare", "a", "b", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0
@@ -149,9 +156,9 @@ def test_postmortem_no_ai(tmp_path):
     # Add some results
     results_path = tmp_path / results_filename("pm1")
     with results_path.open("a") as f:
-        f.write("abc1234\t0.5\tkeep\tfirst improvement\n")
-        f.write("def5678\t0.6\tdiscard\tworse attempt\n")
-        f.write("ghi9012\t0.3\tkeep\tbig improvement\n")
+        f.write(_jsonl_line("abc1234", 0.5, "keep", "first improvement"))
+        f.write(_jsonl_line("def5678", 0.6, "discard", "worse attempt"))
+        f.write(_jsonl_line("ghi9012", 0.3, "keep", "big improvement"))
     result = runner.invoke(main, ["postmortem", "--tag", "pm1", "--no-ai", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0
     assert "Summary" in result.output
@@ -165,8 +172,8 @@ def test_postmortem_json(tmp_path):
     # Add some results
     results_path = tmp_path / results_filename("pm2")
     with results_path.open("a") as f:
-        f.write("abc1234\t0.5\tkeep\tfirst improvement\n")
-        f.write("def5678\t0.3\tkeep\tsecond improvement\n")
+        f.write(_jsonl_line("abc1234", 0.5, "keep", "first improvement"))
+        f.write(_jsonl_line("def5678", 0.3, "keep", "second improvement"))
     result = runner.invoke(main, ["postmortem", "--tag", "pm2", "--no-ai", "--json", "--project-dir", str(tmp_path)])
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -235,7 +242,7 @@ def test_init_separate_tags_have_separate_results(tmp_path):
     runner.invoke(main, ["init", "--tag", "run1", "--project-dir", str(tmp_path)])
     # Add a result to run1
     with (tmp_path / results_filename("run1")).open("a") as f:
-        f.write("abc1234\t0.5\tkeep\tfirst\n")
+        f.write(_jsonl_line("abc1234", 0.5, "keep", "first"))
     # Go back to main and init run2
     subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
     runner.invoke(main, ["init", "--tag", "run2", "--project-dir", str(tmp_path)])
@@ -266,7 +273,7 @@ def test_run_shows_fork_menu_when_previous_runs_exist(tmp_path):
     # Create run1 with results
     runner.invoke(main, ["init", "--tag", "run1", "--project-dir", str(tmp_path)])
     with (tmp_path / results_filename("run1")).open("a") as f:
-        f.write("abc1234\t0.5\tkeep\tfirst improvement\n")
+        f.write(_jsonl_line("abc1234", 0.5, "keep", "first improvement"))
     subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
 
     # Run run2 — user selects "Start fresh" (option 2)
@@ -294,7 +301,7 @@ def test_run_fork_from_previous(tmp_path):
         cwd=tmp_path, capture_output=True, text=True, check=True,
     ).stdout.strip()
     with (tmp_path / results_filename("run1")).open("a") as f:
-        f.write(f"{best_commit}\t0.5\tkeep\timprovement\n")
+        f.write(_jsonl_line(best_commit, 0.5, "keep", "improvement"))
     subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
 
     # Run run2 — user selects run1 (option 1)
@@ -320,7 +327,7 @@ def test_run_no_interactive_skips_menu(tmp_path):
     # Create run1 with results
     runner.invoke(main, ["init", "--tag", "run1", "--project-dir", str(tmp_path)])
     with (tmp_path / results_filename("run1")).open("a") as f:
-        f.write("abc1234\t0.5\tkeep\timprovement\n")
+        f.write(_jsonl_line("abc1234", 0.5, "keep", "improvement"))
     subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
 
     with patch("crucible.orchestrator.Orchestrator.run_loop"):
@@ -362,7 +369,7 @@ def test_fork_baseline_full_flow(tmp_path):
         cwd=tmp_path, capture_output=True, text=True, check=True,
     ).stdout.strip()
     with (tmp_path / results_filename("run1")).open("a") as f:
-        f.write(f"{best_commit}\t0.3\tkeep\toptimized x\n")
+        f.write(_jsonl_line(best_commit, 0.3, "keep", "optimized x"))
 
     # Go back to main
     subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)

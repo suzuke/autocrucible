@@ -3,11 +3,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+from crucible.results import UsageInfo
+
 
 @dataclass
 class AgentResult:
     modified_files: list[Path]
     description: str
+    usage: UsageInfo | None = None
+    duration_seconds: float | None = None
 
 
 class AgentInterface(ABC):

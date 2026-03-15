@@ -3,19 +3,21 @@ import unittest.mock
 import pytest
 from pathlib import Path
 from crucible.postmortem import PostmortemAnalyzer, PostmortemReport, render_text
-from crucible.results import HEADER
+from crucible.results import ExperimentRecord, _serialize_record
 
 
-def _make_results_tsv(path: Path, records: list[tuple[str, float, str, str]]) -> None:
-    lines = [HEADER]
+def _make_results_jsonl(path: Path, records: list[tuple[str, float, str, str]]) -> None:
+    lines = []
     for commit, metric, status, desc in records:
-        lines.append(f"{commit}\t{metric}\t{status}\t{desc}")
+        lines.append(_serialize_record(ExperimentRecord(
+            commit=commit, metric_value=metric, status=status, description=desc,
+        )))
     path.write_text("\n".join(lines) + "\n")
 
 
 def test_postmortem_summary_stats(tmp_path):
-    results_path = tmp_path / "results-test.tsv"
-    _make_results_tsv(results_path, [
+    results_path = tmp_path / "results-test.jsonl"
+    _make_results_jsonl(results_path, [
         ("aaa0001", 1.0, "keep", "baseline"),
         ("aaa0002", 1.1, "discard", "worse"),
         ("aaa0003", 0.8, "keep", "better"),
@@ -33,8 +35,8 @@ def test_postmortem_summary_stats(tmp_path):
 
 
 def test_postmortem_failure_streaks(tmp_path):
-    results_path = tmp_path / "results-test.tsv"
-    _make_results_tsv(results_path, [
+    results_path = tmp_path / "results-test.jsonl"
+    _make_results_jsonl(results_path, [
         ("aaa0001", 1.0, "keep", "baseline"),
         ("aaa0002", 1.1, "discard", "worse"),
         ("aaa0003", 0.0, "crash", "oom"),
@@ -49,8 +51,8 @@ def test_postmortem_failure_streaks(tmp_path):
 
 
 def test_postmortem_trend_data(tmp_path):
-    results_path = tmp_path / "results-test.tsv"
-    _make_results_tsv(results_path, [
+    results_path = tmp_path / "results-test.jsonl"
+    _make_results_jsonl(results_path, [
         ("aaa0001", 1.0, "keep", "baseline"),
         ("aaa0002", 0.8, "keep", "better"),
     ])
@@ -69,8 +71,8 @@ def test_postmortem_trend_data(tmp_path):
 
 
 def test_postmortem_minimize_direction(tmp_path):
-    results_path = tmp_path / "results-test.tsv"
-    _make_results_tsv(results_path, [
+    results_path = tmp_path / "results-test.jsonl"
+    _make_results_jsonl(results_path, [
         ("aaa0001", 1.0, "keep", "baseline"),
         ("aaa0002", 0.5, "keep", "better"),
         ("aaa0003", 0.8, "keep", "meh"),
@@ -119,8 +121,8 @@ def test_render_text_empty_results():
 
 def test_ai_insights_called_with_data(tmp_path):
     """Mock _call_claude_for_insights, verify report.ai_insights is set."""
-    results_path = tmp_path / "results-test.tsv"
-    _make_results_tsv(results_path, [
+    results_path = tmp_path / "results-test.jsonl"
+    _make_results_jsonl(results_path, [
         ("aaa0001", 1.0, "keep", "baseline"),
         ("aaa0002", 0.8, "keep", "improved lr"),
         ("aaa0003", 0.0, "crash", "oom"),
@@ -139,8 +141,8 @@ def test_ai_insights_called_with_data(tmp_path):
 
 def test_ai_insights_prompt_contains_data(tmp_path):
     """Capture prompt passed to Claude, verify it contains metric values and descriptions."""
-    results_path = tmp_path / "results-test.tsv"
-    _make_results_tsv(results_path, [
+    results_path = tmp_path / "results-test.jsonl"
+    _make_results_jsonl(results_path, [
         ("aaa0001", 1.0, "keep", "baseline"),
         ("aaa0002", 0.5, "keep", "better model"),
     ])

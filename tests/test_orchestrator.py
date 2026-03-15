@@ -8,6 +8,7 @@ from crucible.config import (
     ConstraintsConfig, AgentConfig, ContextWindowConfig, GitConfig,
 )
 from crucible.agents.base import AgentResult
+from crucible.results import ExperimentRecord
 
 
 def make_config():
@@ -112,7 +113,7 @@ def test_resume_existing_branch(tmp_path):
 
     orch1 = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
     orch1.init()
-    orch1.results.log(commit="abc1234", metric_value=0.5, status="keep", description="first")
+    orch1.results.log(ExperimentRecord(commit="abc1234", metric_value=0.5, status="keep", description="first"))
 
     subprocess.run(["git", "checkout", "main"], cwd=tmp_path, check=True, capture_output=True)
 
