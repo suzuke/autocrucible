@@ -113,8 +113,13 @@ class Orchestrator:
         """
         self._iteration += 1
 
-        # 1. Assemble prompt
-        prompt = self.context.assemble(self.results)
+        # 1. Assemble prompt (inline files for agents without read capability)
+        if "read" not in self.agent.capabilities():
+            prompt = self.context.assemble_with_files(
+                self.results, self.workspace, self.config.files.editable,
+            )
+        else:
+            prompt = self.context.assemble(self.results)
 
         # 2. Call agent (hidden files are protected via SDK can_use_tool callback)
         t0_agent = time.monotonic()

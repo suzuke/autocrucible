@@ -316,3 +316,29 @@ def test_plateau_hint_in_assembled_output(tmp_path):
     prompt = ctx.assemble(log)
     assert "NOT improved for 4 consecutive iterations" in prompt
     assert "fundamentally different approach" in prompt
+
+
+# -- assemble_with_files tests -----------------------------------------------
+
+def test_assemble_with_files_includes_content(tmp_path):
+    cfg = make_config(tmp_path)
+    (tmp_path / "program.md").write_text("Instructions.")
+    (tmp_path / "train.py").write_text("x = 1\ny = 2\n")
+    log = ResultsLog(tmp_path / "results.jsonl")
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    prompt = ctx.assemble_with_files(log, tmp_path, ["train.py"])
+    assert "x = 1" in prompt
+    assert "train.py" in prompt
+    assert "Editable File Contents" in prompt
+
+
+def test_assemble_with_files_missing_file(tmp_path):
+    cfg = make_config(tmp_path)
+    (tmp_path / "program.md").write_text("Instructions.")
+    log = ResultsLog(tmp_path / "results.jsonl")
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    prompt = ctx.assemble_with_files(log, tmp_path, ["nonexistent.py"])
+    # Should not crash, just skip missing file
+    assert "Editable File Contents" in prompt

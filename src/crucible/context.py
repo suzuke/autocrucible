@@ -303,6 +303,19 @@ class ContextAssembler:
             "- Do NOT output full file contents. Use targeted edits."
         )
 
+    def assemble_with_files(
+        self, log: ResultsLog, workspace: Path, editable_files: list[str],
+    ) -> str:
+        """Assemble prompt with file contents inlined (for agents without read tools)."""
+        base = self.assemble(log)
+        parts = [base, "\n\n---\n\n## Editable File Contents\n"]
+        for fname in editable_files:
+            fpath = workspace / fname
+            if fpath.exists():
+                content = fpath.read_text()
+                parts.append(f"\n### {fname}\n```\n{content}\n```\n")
+        return "".join(parts)
+
     def assemble(self, log: ResultsLog) -> str:
         """Assemble all sections into a complete prompt."""
         records = log.read_all()
