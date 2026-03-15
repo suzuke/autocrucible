@@ -49,9 +49,17 @@ class MetricConfig:
 
 
 @dataclass
+class BudgetConfig:
+    max_cost_usd: float | None = None
+    max_cost_per_iter_usd: float | None = None
+    warn_at_percent: int = 80
+
+
+@dataclass
 class ConstraintsConfig:
     timeout_seconds: int = 600
     max_retries: int = 3
+    budget: BudgetConfig | None = None
 
 
 @dataclass
@@ -79,6 +87,16 @@ def _build_context_window(data: dict) -> ContextWindowConfig:
         include_history=data.get("include_history", True),
         history_limit=data.get("history_limit", 20),
         include_best=data.get("include_best", True),
+    )
+
+
+def _build_budget(data: dict | None) -> BudgetConfig | None:
+    if not data:
+        return None
+    return BudgetConfig(
+        max_cost_usd=data.get("max_cost_usd"),
+        max_cost_per_iter_usd=data.get("max_cost_per_iter_usd"),
+        warn_at_percent=data.get("warn_at_percent", 80),
     )
 
 
@@ -158,6 +176,7 @@ def load_config(project_root: Path) -> Config:
         constraints=ConstraintsConfig(
             timeout_seconds=constraints_data.get("timeout_seconds", 600),
             max_retries=constraints_data.get("max_retries", 3),
+            budget=_build_budget(constraints_data.get("budget")),
         ),
         agent=_build_agent(raw.get("agent", {})),
         git=GitConfig(
