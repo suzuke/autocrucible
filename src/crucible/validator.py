@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import statistics
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List
 
@@ -16,6 +17,16 @@ class CheckResult:
     name: str
     passed: bool
     message: str
+
+
+@dataclass
+class StabilityResult:
+    stable: bool
+    cv: float = 0.0
+    values: list[float] | None = None
+    mean: float = 0.0
+    stdev: float = 0.0
+    reason: str = ""
 
 
 def validate_project(project_root: Path) -> List[CheckResult]:
@@ -77,3 +88,29 @@ def validate_project(project_root: Path) -> List[CheckResult]:
         results.append(CheckResult("Eval/metric", False, f"Could not parse '{config.metric.name}' from eval output"))
 
     return results
+
+
+def check_stability(workspace: Path, config, runs: int = 5) -> StabilityResult:
+    """Run experiment N times and compute coefficient of variation."""
+    runner = ExperimentRunner(workspace=workspace)
+    timeout = min(config.constraints.timeout_seconds, 120)
+    values: list[float] = []
+    for _ in range(runs):
+        run_result = runner.execute(config.commands.run, timeout)
+        if run_result.exit_code != 0 or run_result.timed_out:
+            continue
+        metric = runner.parse_metric(config.commands.eval, config.metric.name)
+        if metric is not None:
+            values.append(metric)
+
+    if len(values) < 2:
+        return StabilityResult(stable=False, reason="too few successful runs")
+
+    mean = statistics.mean(values)
+    stdev = statistics.stdev(values)
+    cv = (stdev / abs(mean) * 100) if mean != 0 else float("inf")
+
+    return StabilityResult(
+        stable=cv < 5.0,
+        cv=cv, values=values, mean=mean, stdev=stdev,
+    )

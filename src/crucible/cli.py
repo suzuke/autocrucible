@@ -540,7 +540,9 @@ def status(tag: str, project_dir: str, as_json: bool) -> None:
 
 @main.command()
 @click.option("--project-dir", default=".", help="Project root directory.")
-def validate(project_dir: str) -> None:
+@click.option("--stability", is_flag=True, help="Check metric stability.")
+@click.option("--runs", default=5, help="Number of runs for stability check.")
+def validate(project_dir: str, stability: bool, runs: int) -> None:
     """Validate project configuration and run a test execution."""
     from crucible.validator import validate_project
 
@@ -553,6 +555,19 @@ def validate(project_dir: str) -> None:
         click.echo(f"  [{icon}] {r.name}: {r.message}")
         if not r.passed:
             all_passed = False
+
+    if stability:
+        from crucible.validator import check_stability
+
+        config = load_config(project)
+        result = check_stability(project, config, runs=runs)
+        if result.stable:
+            click.echo(f"  [PASS] Metric stability: CV = {result.cv:.1f}% over {runs} runs")
+        else:
+            click.echo(f"  [WARN] Metric stability: CV = {result.cv:.1f}% over {runs} runs")
+            if result.values:
+                click.echo(f"         Values: {result.values}")
+            click.echo("         Consider: fix random seeds or increase sample size")
 
     if not all_passed:
         raise click.ClickException("Validation failed.")
