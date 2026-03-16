@@ -484,6 +484,18 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, no_interact
                     )
 
         orch.init(fork_from=fork_from)
+
+        # Sync venv to match current branch's requirements
+        # This ensures a fresh run doesn't inherit packages from a previous run
+        is_docker = config.sandbox and config.sandbox.backend != "none"
+        if not is_docker and (project / ".venv").exists():
+            click.echo("Syncing environment...")
+            sync_cmd = "uv sync" if (project / "pyproject.toml").exists() else None
+            if not sync_cmd and (project / "requirements.txt").exists():
+                sync_cmd = "pip install -r requirements.txt"
+            if sync_cmd:
+                subprocess.run(sync_cmd, shell=True, cwd=project, capture_output=True)
+
         if config.commands.setup:
             click.echo(f"Running setup: {config.commands.setup}")
             result = subprocess.run(config.commands.setup, shell=True, cwd=project)
