@@ -99,13 +99,48 @@ h1 { font-size: 28px; margin-bottom: 16px; }
   background: #bbada0;
   border-radius: 8px;
   padding: 8px;
+  position: relative;
 }
-.tile {
+.cell {
+  border-radius: 4px;
+  background: #cdc1b4;
+}
+.tile-anim {
+  position: absolute;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 4px;
   font-weight: 700;
+  transition: top 0.1s ease, left 0.1s ease;
+  z-index: 1;
+}
+.tile-anim.no-transition {
+  transition: none;
+}
+.tile-anim.tile-pop {
+  animation: pop 0.15s ease-out forwards;
+}
+.tile-anim.tile-merge {
+  animation: merge-bump 0.15s ease-out;
+}
+@keyframes pop {
+  0%   { transform: scale(0); opacity: 0; }
+  60%  { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes merge-bump {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+.move-indicator {
+  font-size: 20px;
+  margin-top: 6px;
+  min-height: 28px;
+  color: #8f7a66;
+  font-weight: 700;
+  letter-spacing: 2px;
 }
 #panel2 { display: none; }
 </style>
@@ -148,11 +183,13 @@ h1 { font-size: 28px; margin-bottom: 16px; }
   <div class="board-panel" id="panel1">
     <div class="board-label" id="label1"></div>
     <div class="board-grid" id="grid1"></div>
+    <div class="move-indicator" id="arrow1"></div>
     <div class="info" id="info1"></div>
   </div>
   <div class="board-panel" id="panel2">
     <div class="board-label" id="label2"></div>
     <div class="board-grid" id="grid2"></div>
+    <div class="move-indicator" id="arrow2"></div>
     <div class="info" id="info2"></div>
   </div>
 </div>
@@ -172,13 +209,145 @@ function textColor(v) { return (v <= 4) ? DARK_TEXT : LIGHT_TEXT; }
 let data1 = null, data2 = null;
 let moves1 = null, moves2 = null;
 let boardSize1 = 4, boardSize2 = 4;
+let tileSize1 = 100, tileSize2 = 100;
 let pos = 0;
+let prevPos = -1;
 let playing = false;
 let lastFrameTime = 0;
 let speed = 5;
 let animId = null;
+let animTimeout = null;
+
+const MOVE_ARROWS = { up: '⬆', down: '⬇', left: '⬅', right: '➡' };
+const GAP = 8;
+const PADDING = 8;
 
 const $ = id => document.getElementById(id);
+
+// --- 2048 move simulation ---
+// Process a single line (row or column) sliding toward index 0.
+// Returns array of {val, destIdx, sources: [{r,c}], merged: bool}
+function slideLine(cells) {
+  // cells: [{val, r, c}, ...] ordered in slide direction
+  const nonZero = cells.filter(c => c.val !== 0);
+  const result = [];
+  let i = 0;
+  while (i < nonZero.length) {
+    if (i + 1 < nonZero.length && nonZero[i].val === nonZero[i + 1].val) {
+      result.push({
+        val: nonZero[i].val * 2,
+        sources: [nonZero[i], nonZero[i + 1]],
+        merged: true
+      });
+      i += 2;
+    } else {
+      result.push({
+        val: nonZero[i].val,
+        sources: [nonZero[i]],
+        merged: false
+      });
+      i += 1;
+    }
+  }
+  return result;
+}
+
+// Simulate a move and return tile movements.
+// Returns: {movements: [{fromR, fromC, toR, toC, val, merged}]}
+function simulateMove(board, direction, bs) {
+  const movements = [];
+
+  function processLine(cells, assignRC) {
+    const result = slideLine(cells);
+    result.forEach((entry, destIdx) => {
+      const {toR, toC} = assignRC(destIdx);
+      for (const src of entry.sources) {
+        movements.push({
+          fromR: src.r, fromC: src.c,
+          toR, toC,
+          val: entry.val,
+          merged: entry.merged
+        });
+      }
+    });
+  }
+
+  if (direction === 'left') {
+    for (let r = 0; r < bs; r++) {
+      const cells = [];
+      for (let c = 0; c < bs; c++) cells.push({val: board[r][c], r, c});
+      processLine(cells, di => ({toR: r, toC: di}));
+    }
+  } else if (direction === 'right') {
+    for (let r = 0; r < bs; r++) {
+      const cells = [];
+      for (let c = bs - 1; c >= 0; c--) cells.push({val: board[r][c], r, c});
+      processLine(cells, di => ({toR: r, toC: bs - 1 - di}));
+    }
+  } else if (direction === 'up') {
+    for (let c = 0; c < bs; c++) {
+      const cells = [];
+      for (let r = 0; r < bs; r++) cells.push({val: board[r][c], r, c});
+      processLine(cells, di => ({toR: di, toC: c}));
+    }
+  } else if (direction === 'down') {
+    for (let c = 0; c < bs; c++) {
+      const cells = [];
+      for (let r = bs - 1; r >= 0; r--) cells.push({val: board[r][c], r, c});
+      processLine(cells, di => ({toR: bs - 1 - di, toC: c}));
+    }
+  }
+  return movements;
+}
+
+// Find newly spawned tiles by comparing simulated result with actual new board
+function findSpawned(movements, newBoard, bs) {
+  const occupied = Array.from({length: bs}, () => Array(bs).fill(false));
+  // Mark cells that received tiles from movements
+  const merged = {};
+  for (const m of movements) {
+    const key = m.toR * bs + m.toC;
+    occupied[m.toR][m.toC] = true;
+    if (m.merged) merged[key] = m.val;
+  }
+  const spawned = [];
+  for (let r = 0; r < bs; r++) {
+    for (let c = 0; c < bs; c++) {
+      if (newBoard[r][c] !== 0 && !occupied[r][c]) {
+        spawned.push({r, c, val: newBoard[r][c]});
+      }
+    }
+  }
+  return {spawned, merged};
+}
+
+// --- Grid and tile rendering ---
+function cellPos(r, c, tileSize) {
+  return {
+    top: PADDING + r * (tileSize + GAP),
+    left: PADDING + c * (tileSize + GAP)
+  };
+}
+
+function createTileEl(r, c, val, tileSize, extraClass) {
+  const el = document.createElement('div');
+  el.className = 'tile-anim' + (extraClass ? ' ' + extraClass : '');
+  const p = cellPos(r, c, tileSize);
+  el.style.top = p.top + 'px';
+  el.style.left = p.left + 'px';
+  el.style.width = tileSize + 'px';
+  el.style.height = tileSize + 'px';
+  el.style.background = tileColor(val);
+  el.style.color = textColor(val);
+  el.textContent = val === 0 ? '' : val;
+  const fs = val >= 1024 ? Math.floor(tileSize * 0.3) : Math.floor(tileSize * 0.4);
+  el.style.fontSize = fs + 'px';
+  return el;
+}
+
+function clearTiles(gridEl) {
+  gridEl.querySelectorAll('.tile-anim').forEach(el => el.remove());
+}
 
 function loadFile(input, slot) {
   const file = input.files[0];
@@ -225,48 +394,108 @@ function selectGame(slot, which) {
   if (slot === 1) {
     moves1 = game.moves;
     boardSize1 = bs;
+    tileSize1 = Math.min(100, Math.floor(400 / bs));
     $('label1').textContent = `${which} (seed=${game.seed}, final=${game.score})`;
-    initGrid($('grid1'), bs);
+    initGrid($('grid1'), bs, tileSize1);
   } else {
     moves2 = game.moves;
     boardSize2 = bs;
+    tileSize2 = Math.min(100, Math.floor(400 / bs));
     $('label2').textContent = `${which} (seed=${game.seed}, final=${game.score})`;
-    initGrid($('grid2'), bs);
+    initGrid($('grid2'), bs, tileSize2);
   }
   pos = 0;
+  prevPos = -1;
   stopPlay();
   render();
 }
 
-function initGrid(gridEl, bs) {
-  const tileSize = Math.min(100, Math.floor(400 / bs));
+function initGrid(gridEl, bs, tileSize) {
+  const totalSize = PADDING * 2 + bs * tileSize + (bs - 1) * GAP;
   gridEl.style.gridTemplateColumns = `repeat(${bs}, ${tileSize}px)`;
   gridEl.style.gridTemplateRows = `repeat(${bs}, ${tileSize}px)`;
-  gridEl.style.gap = '8px';
+  gridEl.style.gap = GAP + 'px';
+  gridEl.style.width = totalSize + 'px';
+  gridEl.style.height = totalSize + 'px';
+  // Remove old tiles and cells
   gridEl.innerHTML = '';
   for (let i = 0; i < bs * bs; i++) {
-    const t = document.createElement('div');
-    t.className = 'tile';
-    t.style.width = tileSize + 'px';
-    t.style.height = tileSize + 'px';
-    gridEl.appendChild(t);
+    const c = document.createElement('div');
+    c.className = 'cell';
+    c.style.width = tileSize + 'px';
+    c.style.height = tileSize + 'px';
+    gridEl.appendChild(c);
   }
 }
 
-function renderBoard(gridEl, board, bs) {
-  const tiles = gridEl.children;
-  const tileSize = Math.min(100, Math.floor(400 / bs));
+// Render board instantly (no animation)
+function renderBoardStatic(gridEl, board, bs, tileSize) {
+  clearTiles(gridEl);
   for (let r = 0; r < bs; r++) {
     for (let c = 0; c < bs; c++) {
       const v = board[r][c];
-      const t = tiles[r * bs + c];
-      t.style.background = tileColor(v);
-      t.style.color = textColor(v);
-      t.textContent = v === 0 ? '' : v;
-      const fs = v >= 1024 ? Math.floor(tileSize * 0.3) : Math.floor(tileSize * 0.4);
-      t.style.fontSize = fs + 'px';
+      if (v === 0) continue;
+      gridEl.appendChild(createTileEl(r, c, v, tileSize, 'no-transition'));
     }
   }
+}
+
+// Render board with slide animation
+function renderBoardAnimated(gridEl, prevBoard, newBoard, direction, bs, tileSize) {
+  clearTiles(gridEl);
+  if (animTimeout) { clearTimeout(animTimeout); animTimeout = null; }
+
+  const movements = simulateMove(prevBoard, direction, bs);
+  const {spawned, merged} = findSpawned(movements, newBoard, bs);
+
+  // Create tiles at their OLD positions (no transition)
+  const tileEls = [];
+  // Group movements by destination to handle merges
+  const destMap = {};
+  for (const m of movements) {
+    const key = m.toR * bs + m.toC;
+    if (!destMap[key]) destMap[key] = [];
+    destMap[key].push(m);
+  }
+
+  // Create one tile element per source tile
+  for (const m of movements) {
+    const el = createTileEl(m.fromR, m.fromC, prevBoard[m.fromR][m.fromC], tileSize, 'no-transition');
+    gridEl.appendChild(el);
+    tileEls.push({el, movement: m});
+  }
+
+  // Force reflow
+  void gridEl.offsetHeight;
+
+  // Animate to new positions
+  for (const {el, movement: m} of tileEls) {
+    el.classList.remove('no-transition');
+    const p = cellPos(m.toR, m.toC, tileSize);
+    el.style.top = p.top + 'px';
+    el.style.left = p.left + 'px';
+  }
+
+  // After slide completes: update merged values + spawn new tiles
+  animTimeout = setTimeout(() => {
+    clearTiles(gridEl);
+    // Place final tiles
+    for (let r = 0; r < bs; r++) {
+      for (let c = 0; c < bs; c++) {
+        const v = newBoard[r][c];
+        if (v === 0) continue;
+        const key = r * bs + c;
+        const isMerged = key in merged;
+        const isSpawned = spawned.some(s => s.r === r && s.c === c);
+        let cls = '';
+        if (isSpawned) cls = 'tile-pop';
+        else if (isMerged) cls = 'tile-merge';
+        else cls = 'no-transition';
+        gridEl.appendChild(createTileEl(r, c, v, tileSize, cls));
+      }
+    }
+    animTimeout = null;
+  }, 110);
 }
 
 function renderInfo(infoEl, frame, idx, total) {
@@ -288,17 +517,27 @@ function maxPos() {
   return m;
 }
 
+function renderOne(moves, gridEl, arrowEl, infoEl, bs, tileSize, forward) {
+  const i = Math.min(pos, moves.length - 1);
+  const pi = prevPos >= 0 ? Math.min(prevPos, moves.length - 1) : -1;
+  const frame = moves[i];
+  const direction = frame.move || null;
+
+  if (forward && pi >= 0 && pi !== i && direction) {
+    renderBoardAnimated(gridEl, moves[pi].board, frame.board, direction, bs, tileSize);
+  } else {
+    renderBoardStatic(gridEl, frame.board, bs, tileSize);
+  }
+
+  renderInfo(infoEl, frame, i, moves.length);
+  arrowEl.textContent = direction ? MOVE_ARROWS[direction] || '' : '';
+}
+
 function render() {
-  if (moves1) {
-    const i = Math.min(pos, moves1.length - 1);
-    renderBoard($('grid1'), moves1[i].board, boardSize1);
-    renderInfo($('info1'), moves1[i], i, moves1.length);
-  }
-  if (moves2) {
-    const i = Math.min(pos, moves2.length - 1);
-    renderBoard($('grid2'), moves2[i].board, boardSize2);
-    renderInfo($('info2'), moves2[i], i, moves2.length);
-  }
+  const forward = pos > prevPos;
+  if (moves1) renderOne(moves1, $('grid1'), $('arrow1'), $('info1'), boardSize1, tileSize1, forward);
+  if (moves2) renderOne(moves2, $('grid2'), $('arrow2'), $('info2'), boardSize2, tileSize2, forward);
+  prevPos = pos;
 }
 
 function stopPlay() {
@@ -309,7 +548,7 @@ function stopPlay() {
 
 function togglePlay() {
   if (playing) { stopPlay(); return; }
-  if (pos >= maxPos()) pos = 0;
+  if (pos >= maxPos()) { pos = 0; prevPos = -1; }
   playing = true;
   $('btnPlay').innerHTML = '&#x23F8;';
   lastFrameTime = performance.now();
@@ -337,7 +576,7 @@ $('file1').addEventListener('change', function() { loadFile(this, 1); });
 $('file2').addEventListener('change', function() { loadFile(this, 2); });
 $('sel1').addEventListener('change', function() { if (data1) selectGame(1, this.value); });
 $('sel2').addEventListener('change', function() { if (data2) selectGame(2, this.value); });
-$('btnStart').addEventListener('click', () => { pos = 0; stopPlay(); render(); });
+$('btnStart').addEventListener('click', () => { pos = 0; prevPos = -1; stopPlay(); render(); });
 $('btnPrev').addEventListener('click', () => { if (pos > 0) { pos--; stopPlay(); render(); } });
 $('btnPlay').addEventListener('click', togglePlay);
 $('btnNext').addEventListener('click', () => { if (pos < maxPos()) { pos++; stopPlay(); render(); } });
