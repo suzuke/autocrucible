@@ -79,6 +79,19 @@ def validate_project(project_root: Path) -> List[CheckResult]:
     if all_ok:
         results.append(CheckResult("Editable files", True, "All files exist"))
 
+    # Check artifacts don't overlap with other file categories
+    if config.files.artifacts:
+        other_files = set(config.files.editable + config.files.readonly + config.files.hidden)
+        overlap = set(config.files.artifacts) & other_files
+        if overlap:
+            results.append(CheckResult(
+                "Artifacts", False,
+                f"Artifacts overlap with other file categories: {', '.join(sorted(overlap))}"
+            ))
+        else:
+            results.append(CheckResult("Artifacts", True,
+                f"Persistent dirs: {', '.join(config.files.artifacts)}"))
+
     # 4. Run command executes
     runner = ExperimentRunner(workspace=project_root)
     validate_timeout = min(config.constraints.timeout_seconds, 120)

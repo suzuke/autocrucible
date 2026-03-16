@@ -108,3 +108,59 @@ def test_check_stability_too_few_runs(tmp_path):
 
     assert result.stable is False
     assert result.reason == "too few successful runs"
+
+
+CONFIG_WITH_ARTIFACTS = """\
+name: "test"
+files:
+  editable: ["solution.py"]
+  artifacts: ["data/"]
+commands:
+  run: "python3 solution.py > run.log 2>&1"
+  eval: "grep '^metric:' run.log"
+metric:
+  name: "metric"
+  direction: "minimize"
+"""
+
+
+CONFIG_WITH_OVERLAPPING_ARTIFACTS = """\
+name: "test"
+files:
+  editable: ["solution.py"]
+  artifacts: ["solution.py", "data/"]
+commands:
+  run: "python3 solution.py > run.log 2>&1"
+  eval: "grep '^metric:' run.log"
+metric:
+  name: "metric"
+  direction: "minimize"
+"""
+
+
+def test_validate_artifacts_no_overlap(tmp_path):
+    """Artifacts that don't overlap with other categories pass validation."""
+    cfg_dir = tmp_path / ".crucible"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(CONFIG_WITH_ARTIFACTS)
+    (cfg_dir / "program.md").write_text("Optimize the metric.")
+    (tmp_path / "solution.py").write_text("print('metric: 0.5')")
+    results = validate_project(tmp_path)
+    artifact_checks = [r for r in results if r.name == "Artifacts"]
+    assert len(artifact_checks) == 1
+    assert artifact_checks[0].passed is True
+    assert "data/" in artifact_checks[0].message
+
+
+def test_validate_artifacts_overlap_with_editable(tmp_path):
+    """Artifacts overlapping with editable files fail validation."""
+    cfg_dir = tmp_path / ".crucible"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(CONFIG_WITH_OVERLAPPING_ARTIFACTS)
+    (cfg_dir / "program.md").write_text("Optimize the metric.")
+    (tmp_path / "solution.py").write_text("print('metric: 0.5')")
+    results = validate_project(tmp_path)
+    artifact_checks = [r for r in results if r.name == "Artifacts"]
+    assert len(artifact_checks) == 1
+    assert artifact_checks[0].passed is False
+    assert "solution.py" in artifact_checks[0].message
