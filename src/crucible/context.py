@@ -193,6 +193,16 @@ class ContextAssembler:
                 f"Hidden files (exist but you CANNOT read, create, or modify them): {hidden}"
             )
 
+        if self.config.files.artifacts:
+            artifact_list = ", ".join(self.config.files.artifacts)
+            lines.append(
+                f"Persistent directories (survive across iterations, not version-controlled): {artifact_list}"
+            )
+            lines.append(
+                "Files in these directories are NOT affected by revert. "
+                "Use them to store model weights, training data, or other artifacts that should persist."
+            )
+
         if self.config.constraints.allow_install:
             lines.append(
                 "Package installation: ENABLED — you can add packages by editing requirements.txt"

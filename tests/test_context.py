@@ -395,3 +395,31 @@ def test_directive_includes_install_rule(tmp_path):
     ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
     prompt = ctx.assemble(log)
     assert "add it to requirements.txt" in prompt
+
+
+def test_section_state_shows_artifacts(tmp_path):
+    from crucible.config import Config, FilesConfig, MetricConfig
+    from crucible.context import ContextAssembler
+    config = Config(
+        name="test",
+        files=FilesConfig(editable=["main.py"], artifacts=["artifacts/", "weights/"]),
+        metric=MetricConfig(name="score", direction="maximize"),
+    )
+    ctx = ContextAssembler(config=config, project_root=tmp_path, branch_name="test/tag")
+    state = ctx._section_state([], None, {"total": 0, "kept": 0, "discarded": 0, "crashed": 0})
+    assert "Persistent directories" in state
+    assert "artifacts/" in state
+    assert "weights/" in state
+
+
+def test_section_state_no_artifacts_when_empty(tmp_path):
+    from crucible.config import Config, FilesConfig, MetricConfig
+    from crucible.context import ContextAssembler
+    config = Config(
+        name="test",
+        files=FilesConfig(editable=["main.py"]),
+        metric=MetricConfig(name="score", direction="maximize"),
+    )
+    ctx = ContextAssembler(config=config, project_root=tmp_path, branch_name="test/tag")
+    state = ctx._section_state([], None, {"total": 0, "kept": 0, "discarded": 0, "crashed": 0})
+    assert "Persistent" not in state
