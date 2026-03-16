@@ -416,3 +416,29 @@ def test_run_auto_inits_git_repo(tmp_path):
     assert "Git repo initialized" in result.output
     assert (tmp_path / ".git").exists()
     assert (tmp_path / results_filename("auto2")).exists()
+
+
+def test_run_max_iterations_flag(tmp_path):
+    """--max-iterations flag is passed to run_loop."""
+    setup_project(tmp_path)
+    runner = CliRunner()
+    with patch("crucible.orchestrator.Orchestrator.run_loop") as mock_loop:
+        result = runner.invoke(
+            main,
+            ["run", "--tag", "mi1", "--max-iterations", "5", "--project-dir", str(tmp_path)],
+        )
+    assert result.exit_code == 0, result.output
+    mock_loop.assert_called_once_with(max_iterations=5)
+
+
+def test_run_without_max_iterations_passes_none(tmp_path):
+    """Without --max-iterations, run_loop is called with max_iterations=None."""
+    setup_project(tmp_path)
+    runner = CliRunner()
+    with patch("crucible.orchestrator.Orchestrator.run_loop") as mock_loop:
+        result = runner.invoke(
+            main,
+            ["run", "--tag", "mi2", "--project-dir", str(tmp_path)],
+        )
+    assert result.exit_code == 0, result.output
+    mock_loop.assert_called_once_with(max_iterations=None)

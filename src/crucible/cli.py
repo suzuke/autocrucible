@@ -407,9 +407,10 @@ def _scan_previous_runs(project: Path, current_tag: str, direction: str) -> list
 @click.option("--project-dir", default=".", help="Project root directory.")
 @click.option("--model", default=None, help="Claude model to use (e.g. sonnet, opus).")
 @click.option("--timeout", default=600, type=int, help="Agent timeout per iteration (seconds).")
+@click.option("--max-iterations", default=None, type=int, help="Maximum iterations to run (default: unlimited).")
 @click.option("--no-interactive", is_flag=True, default=False, help="Skip interactive prompts (start fresh).")
 @_verbose_option
-def run(tag: str, project_dir: str, model: str | None, timeout: int, no_interactive: bool) -> None:
+def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterations: int | None, no_interactive: bool) -> None:
     """Run the experiment loop until interrupted."""
     try:
         project = Path(project_dir).resolve()
@@ -504,7 +505,7 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, no_interact
         click.echo(f"Initialised experiment '{tag}' in {project}")
 
     click.echo("Press Ctrl+C to stop gracefully.")
-    orch.run_loop()
+    orch.run_loop(max_iterations=max_iterations)
     click.echo("Stopped.")
 
 
