@@ -58,6 +58,7 @@ class Orchestrator:
                 config=config.sandbox,
                 workspace=self.workspace,
                 editable_files=config.files.editable,
+                artifact_dirs=config.files.artifacts,
             )
 
         self.context = ContextAssembler(

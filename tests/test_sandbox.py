@@ -121,6 +121,34 @@ def test_docker_run_builds_correct_command(tmp_path):
             assert result.timed_out is False
 
 
+def test_docker_run_mounts_artifact_dirs(tmp_path):
+    cfg = SandboxConfig(backend="docker")
+    runner = SandboxRunner(
+        config=cfg,
+        workspace=tmp_path,
+        artifact_dirs=["artifacts/", "weights/"],
+    )
+
+    with patch.object(runner, "_ensure_image", return_value="crucible-test:latest"):
+        with patch("crucible.sandbox.subprocess.Popen") as mock_popen:
+            mock_proc = MagicMock()
+            mock_proc.communicate.return_value = ("", "")
+            mock_proc.returncode = 0
+            mock_popen.return_value = mock_proc
+
+            runner._docker_run("python train.py", timeout=60)
+
+            cmd = mock_popen.call_args[0][0]
+            # Verify artifact dirs are mounted as rw
+            cmd_str = " ".join(str(c) for c in cmd)
+            assert f"{tmp_path}/artifacts:/workspace/artifacts/:rw" in cmd_str
+            assert f"{tmp_path}/weights:/workspace/weights/:rw" in cmd_str
+
+            # Verify directories were created on host
+            assert (tmp_path / "artifacts").is_dir()
+            assert (tmp_path / "weights").is_dir()
+
+
 def test_docker_run_network_enabled(tmp_path):
     cfg = SandboxConfig(backend="docker", network=True)
     runner = SandboxRunner(config=cfg, workspace=tmp_path)

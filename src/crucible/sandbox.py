@@ -35,10 +35,12 @@ class SandboxRunner:
         config: SandboxConfig | None,
         workspace: Path,
         editable_files: list[str] | None = None,
+        artifact_dirs: list[str] | None = None,
     ) -> None:
         self.config = config or SandboxConfig(backend="none")
         self.workspace = Path(workspace)
         self.editable_files = editable_files or []
+        self.artifact_dirs = artifact_dirs or []
         self._native = ExperimentRunner(workspace=workspace)
         self._cached_hash: str | None = None
 
@@ -89,6 +91,12 @@ class SandboxRunner:
             fpath = self.workspace / f
             if fpath.exists():
                 cmd.extend(["-v", f"{fpath}:/workspace/{f}:rw"])
+
+        # Mount artifact directories as read-write
+        for d in self.artifact_dirs:
+            dpath = self.workspace / d
+            dpath.mkdir(parents=True, exist_ok=True)
+            cmd.extend(["-v", f"{dpath}:/workspace/{d}:rw"])
 
         # Ensure run.log is writable (touch first so Docker doesn't create a directory)
         run_log = self.workspace / "run.log"
