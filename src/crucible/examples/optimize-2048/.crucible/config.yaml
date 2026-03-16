@@ -1,0 +1,28 @@
+name: "optimize-2048"
+
+files:
+  editable:
+    - "strategy.py"
+  readonly:
+    - "game.py"
+    - "view.html"
+  hidden:
+    - "evaluate.py"
+
+commands:
+  run: "python3 -u evaluate.py 2>&1 | tee run.log"
+  eval: "cat run.log"
+
+metric:
+  name: "avg_score"
+  direction: "maximize"
+
+constraints:
+  timeout_seconds: 120
+  max_retries: 5
+
+agent:
+  instructions: "program.md"
+
+git:
+  branch_prefix: "crucible"
