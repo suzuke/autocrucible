@@ -18,6 +18,7 @@ metric:
 constraints:
   timeout_seconds: 180
   max_retries: 5
+  allow_install: true
 
 agent:
   instructions: "program.md"
