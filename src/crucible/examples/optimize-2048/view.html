@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2048 Replay Viewer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #faf8ef;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  color: #776e65;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+}
+h1 { font-size: 28px; margin-bottom: 16px; }
+.file-inputs {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.file-inputs label {
+  font-weight: 600;
+  font-size: 14px;
+}
+.file-inputs input[type="file"] {
+  margin-left: 6px;
+  font-size: 13px;
+}
+.selectors {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.selectors label { font-weight: 600; font-size: 14px; }
+.selectors select {
+  margin-left: 4px;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #bbada0;
+}
+.controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.controls button {
+  font-size: 18px;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #8f7a66;
+  color: #f9f6f2;
+  cursor: pointer;
+  min-width: 40px;
+}
+.controls button:hover { background: #776e65; }
+.speed-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  font-size: 14px;
+}
+.speed-control input[type="range"] { width: 100px; }
+.boards-container {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.board-panel { text-align: center; }
+.board-label {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  min-height: 20px;
+}
+.info {
+  font-size: 14px;
+  margin-top: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+.info span { font-weight: 600; }
+.board-grid {
+  display: inline-grid;
+  background: #bbada0;
+  border-radius: 8px;
+  padding: 8px;
+}
+.tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-weight: 700;
+}
+#panel2 { display: none; }
+</style>
+</head>
+<body>
+
+<h1>2048 Replay Viewer</h1>
+
+<div class="file-inputs">
+  <div>
+    <label>Replay 1: <input type="file" id="file1" accept=".json"></label>
+  </div>
+  <div>
+    <label>Replay 2 (compare): <input type="file" id="file2" accept=".json"></label>
+  </div>
+</div>
+
+<div class="selectors">
+  <div>
+    <label>Game 1: <select id="sel1"><option value="">— load file —</option></select></label>
+  </div>
+  <div>
+    <label>Game 2: <select id="sel2"><option value="">— load file —</option></select></label>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="btnStart" title="Start">&#x23EE;</button>
+  <button id="btnPrev" title="Previous">&#x25C0;</button>
+  <button id="btnPlay" title="Play">&#x25B6;</button>
+  <button id="btnNext" title="Next">&#x25B6;</button>
+  <button id="btnEnd" title="End">&#x23ED;</button>
+  <div class="speed-control">
+    <label>Speed: <input type="range" id="speedSlider" min="1" max="20" value="5"></label>
+    <span id="speedLabel">5 mv/s</span>
+  </div>
+</div>
+
+<div class="boards-container">
+  <div class="board-panel" id="panel1">
+    <div class="board-label" id="label1"></div>
+    <div class="board-grid" id="grid1"></div>
+    <div class="info" id="info1"></div>
+  </div>
+  <div class="board-panel" id="panel2">
+    <div class="board-label" id="label2"></div>
+    <div class="board-grid" id="grid2"></div>
+    <div class="info" id="info2"></div>
+  </div>
+</div>
+
+<script>
+const TILE_COLORS = {
+  0: '#cdc1b4', 2: '#eee4da', 4: '#ede0c8', 8: '#f2b179', 16: '#f59563',
+  32: '#f67c5f', 64: '#f65e3b', 128: '#edcf72', 256: '#edcc61', 512: '#edc850',
+  1024: '#edc53f', 2048: '#edc22e'
+};
+const DARK_TEXT = '#776e65';
+const LIGHT_TEXT = '#f9f6f2';
+
+function tileColor(v) { return TILE_COLORS[v] || '#3c3a32'; }
+function textColor(v) { return (v <= 4) ? DARK_TEXT : LIGHT_TEXT; }
+
+let data1 = null, data2 = null;
+let moves1 = null, moves2 = null;
+let boardSize1 = 4, boardSize2 = 4;
+let pos = 0;
+let playing = false;
+let lastFrameTime = 0;
+let speed = 5;
+let animId = null;
+
+const $ = id => document.getElementById(id);
+
+function loadFile(input, slot) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const d = JSON.parse(e.target.result);
+    if (slot === 1) {
+      data1 = d;
+      populateSelect($('sel1'), d);
+      selectGame(1, 'best');
+    } else {
+      data2 = d;
+      populateSelect($('sel2'), d);
+      selectGame(2, 'best');
+      $('panel2').style.display = '';
+    }
+  };
+  reader.readAsText(file);
+}
+
+function populateSelect(sel, d) {
+  sel.innerHTML = '';
+  if (d.best) {
+    const o = document.createElement('option');
+    o.value = 'best';
+    o.textContent = `best (seed=${d.best.seed}, score=${d.best.score})`;
+    sel.appendChild(o);
+  }
+  if (d.worst) {
+    const o = document.createElement('option');
+    o.value = 'worst';
+    o.textContent = `worst (seed=${d.worst.seed}, score=${d.worst.score})`;
+    sel.appendChild(o);
+  }
+}
+
+function selectGame(slot, which) {
+  const d = slot === 1 ? data1 : data2;
+  if (!d) return;
+  const game = d[which];
+  if (!game) return;
+  const bs = d.board_size || 4;
+  if (slot === 1) {
+    moves1 = game.moves;
+    boardSize1 = bs;
+    $('label1').textContent = `${which} (seed=${game.seed}, final=${game.score})`;
+    initGrid($('grid1'), bs);
+  } else {
+    moves2 = game.moves;
+    boardSize2 = bs;
+    $('label2').textContent = `${which} (seed=${game.seed}, final=${game.score})`;
+    initGrid($('grid2'), bs);
+  }
+  pos = 0;
+  stopPlay();
+  render();
+}
+
+function initGrid(gridEl, bs) {
+  const tileSize = Math.min(100, Math.floor(400 / bs));
+  gridEl.style.gridTemplateColumns = `repeat(${bs}, ${tileSize}px)`;
+  gridEl.style.gridTemplateRows = `repeat(${bs}, ${tileSize}px)`;
+  gridEl.style.gap = '8px';
+  gridEl.innerHTML = '';
+  for (let i = 0; i < bs * bs; i++) {
+    const t = document.createElement('div');
+    t.className = 'tile';
+    t.style.width = tileSize + 'px';
+    t.style.height = tileSize + 'px';
+    gridEl.appendChild(t);
+  }
+}
+
+function renderBoard(gridEl, board, bs) {
+  const tiles = gridEl.children;
+  const tileSize = Math.min(100, Math.floor(400 / bs));
+  for (let r = 0; r < bs; r++) {
+    for (let c = 0; c < bs; c++) {
+      const v = board[r][c];
+      const t = tiles[r * bs + c];
+      t.style.background = tileColor(v);
+      t.style.color = textColor(v);
+      t.textContent = v === 0 ? '' : v;
+      const fs = v >= 1024 ? Math.floor(tileSize * 0.3) : Math.floor(tileSize * 0.4);
+      t.style.fontSize = fs + 'px';
+    }
+  }
+}
+
+function renderInfo(infoEl, frame, idx, total) {
+  infoEl.innerHTML = `<span>Move: ${idx}/${total - 1}</span>` +
+    `<span>Score: ${frame.score}</span>` +
+    `<span>Max: ${maxTile(frame.board)}</span>` +
+    (frame.move ? `<span>Dir: ${frame.move}</span>` : '');
+}
+
+function maxTile(board) {
+  let m = 0;
+  for (const row of board) for (const v of row) if (v > m) m = v;
+  return m;
+}
+
+function maxPos() {
+  let m = moves1 ? moves1.length - 1 : 0;
+  if (moves2) m = Math.max(m, moves2.length - 1);
+  return m;
+}
+
+function render() {
+  if (moves1) {
+    const i = Math.min(pos, moves1.length - 1);
+    renderBoard($('grid1'), moves1[i].board, boardSize1);
+    renderInfo($('info1'), moves1[i], i, moves1.length);
+  }
+  if (moves2) {
+    const i = Math.min(pos, moves2.length - 1);
+    renderBoard($('grid2'), moves2[i].board, boardSize2);
+    renderInfo($('info2'), moves2[i], i, moves2.length);
+  }
+}
+
+function stopPlay() {
+  playing = false;
+  $('btnPlay').innerHTML = '&#x25B6;';
+  if (animId) { cancelAnimationFrame(animId); animId = null; }
+}
+
+function togglePlay() {
+  if (playing) { stopPlay(); return; }
+  if (pos >= maxPos()) pos = 0;
+  playing = true;
+  $('btnPlay').innerHTML = '&#x23F8;';
+  lastFrameTime = performance.now();
+  animId = requestAnimationFrame(tick);
+}
+
+function tick(now) {
+  if (!playing) return;
+  const interval = 1000 / speed;
+  if (now - lastFrameTime >= interval) {
+    lastFrameTime = now;
+    if (pos < maxPos()) {
+      pos++;
+      render();
+    } else {
+      stopPlay();
+      return;
+    }
+  }
+  animId = requestAnimationFrame(tick);
+}
+
+// Event listeners
+$('file1').addEventListener('change', function() { loadFile(this, 1); });
+$('file2').addEventListener('change', function() { loadFile(this, 2); });
+$('sel1').addEventListener('change', function() { if (data1) selectGame(1, this.value); });
+$('sel2').addEventListener('change', function() { if (data2) selectGame(2, this.value); });
+$('btnStart').addEventListener('click', () => { pos = 0; stopPlay(); render(); });
+$('btnPrev').addEventListener('click', () => { if (pos > 0) { pos--; stopPlay(); render(); } });
+$('btnPlay').addEventListener('click', togglePlay);
+$('btnNext').addEventListener('click', () => { if (pos < maxPos()) { pos++; stopPlay(); render(); } });
+$('btnEnd').addEventListener('click', () => { pos = maxPos(); stopPlay(); render(); });
+$('speedSlider').addEventListener('input', function() {
+  speed = parseInt(this.value);
+  $('speedLabel').textContent = speed + ' mv/s';
+});
+</script>
+</body>
+</html>
