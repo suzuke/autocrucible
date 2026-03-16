@@ -72,6 +72,7 @@ uv run pytest           # run tests
 crucible new ~/my-project -e optimize-sorting
 cd ~/my-project
 crucible run --tag run1
+crucible run --tag run1 --max-iterations 5   # stop after 5 iterations
 
 # Check results
 crucible status --tag run1

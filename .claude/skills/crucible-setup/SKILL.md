@@ -130,6 +130,7 @@ metric:
 constraints:
   timeout_seconds: <60-600>     # start generous, tighten later
   max_retries: 10               # agents need multiple attempts, 3 is too few
+  # max_iterations: null        # max iterations to run (null = unlimited)
 
 agent:
   type: "claude-code"
