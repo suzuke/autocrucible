@@ -190,3 +190,22 @@ def test_load_missing_required_fields(tmp_path):
     (cfg_dir / "config.yaml").write_text("name: test\n")
     with pytest.raises(ConfigError):
         load_config(tmp_path)
+
+
+def test_max_iterations_default_none(tmp_path):
+    """Config without max_iterations defaults to None."""
+    cfg_dir = tmp_path / ".crucible"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(MINIMAL_YAML)
+    cfg = load_config(tmp_path)
+    assert cfg.constraints.max_iterations is None
+
+
+def test_max_iterations_parsed_from_yaml(tmp_path):
+    """Config with max_iterations parses correctly."""
+    yaml_with_max = MINIMAL_YAML.rstrip() + "\nconstraints:\n  max_iterations: 10\n"
+    cfg_dir = tmp_path / ".crucible"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(yaml_with_max)
+    cfg = load_config(tmp_path)
+    assert cfg.constraints.max_iterations == 10

@@ -65,6 +65,7 @@ class ConstraintsConfig:
     budget: BudgetConfig | None = None
     plateau_threshold: int = 8
     allow_install: bool = False
+    max_iterations: int | None = None
 
 
 @dataclass
@@ -225,6 +226,7 @@ def load_config(project_root: Path) -> Config:
             budget=_build_budget(constraints_data.get("budget")),
             plateau_threshold=constraints_data.get("plateau_threshold", 8),
             allow_install=constraints_data.get("allow_install", False),
+            max_iterations=constraints_data.get("max_iterations"),
         ),
         agent=_build_agent(raw.get("agent", {})),
         git=GitConfig(
