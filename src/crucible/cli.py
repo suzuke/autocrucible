@@ -200,6 +200,7 @@ metric:
 # constraints:
 #   timeout_seconds: 600  # kill experiment after this
 #   max_retries: 3        # max consecutive failures before stop
+#   max_iterations: null   # max iterations to run (null = unlimited)
 
 # agent:
 #   instructions: "program.md"
