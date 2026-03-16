@@ -31,6 +31,12 @@ Weighted score: 30% vs Random + 70% vs Greedy.
 
 Gomoku is played on a 9×9 board. Two players alternate placing stones. The first player to get 5 in a row (horizontal, vertical, or diagonal) wins. The game engine is in `game.py` (read-only). The evaluation harness is in `evaluate.py` (read-only).
 
+## Persistent Storage
+
+The `artifacts/` directory survives across iterations (not affected by revert).
+Use it to save model checkpoints (`artifacts/model.pt`) so you can resume
+training from previous iterations instead of starting from scratch each time.
+
 ## Context
 
-The baseline implements AlphaZero: a dual-headed neural network (policy + value), Monte Carlo Tree Search guided by the network, and self-play training. The 300s training budget is tight. The evaluation uses 50 MCTS simulations per move.
+The baseline implements AlphaZero: a dual-headed neural network (policy + value), Monte Carlo Tree Search guided by the network, and self-play training. The 300s training budget is tight — use `artifacts/` to accumulate training across iterations. The evaluation uses 50 MCTS simulations per move.

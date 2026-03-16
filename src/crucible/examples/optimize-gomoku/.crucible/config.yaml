@@ -7,6 +7,8 @@ files:
     - "game.py"
   hidden:
     - "evaluate.py"
+  artifacts:
+    - "artifacts/"
 
 commands:
   run: "python3 -u evaluate.py 2>&1 | tee run.log"
