@@ -1,4 +1,5 @@
 replay.json
 run.log
+results-*.tsv
 __pycache__/
 *.pyc
