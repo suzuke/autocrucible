@@ -475,3 +475,57 @@ def test_init_creates_artifacts_dirs_and_gitignores(tmp_path):
     gitignore = (tmp_path / ".gitignore").read_text()
     assert "data/" in gitignore
     assert "checkpoints/" in gitignore
+
+
+def test_run_loop_stops_at_max_iterations(tmp_path):
+    """run_loop stops after max_iterations iterations."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    call_count = 0
+
+    def modify_file(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        (tmp_path / "train.py").write_text(f"x = {call_count + 100}")
+        return AgentResult(modified_files=[Path("train.py")], description=f"iter {call_count}")
+    mock_agent.generate_edit.side_effect = modify_file
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        # Return decreasing values so each iteration is "keep"
+        mock_parse.side_effect = [0.5, 0.4, 0.3]
+        orch.run_loop(max_iterations=3)
+
+    assert call_count == 3
+
+
+def test_run_loop_none_max_iterations_uses_config(tmp_path):
+    """run_loop with no explicit max_iterations falls back to config value."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.constraints.max_iterations = 2
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    call_count = 0
+
+    def modify_file(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        (tmp_path / "train.py").write_text(f"x = {call_count + 100}")
+        return AgentResult(modified_files=[Path("train.py")], description=f"iter {call_count}")
+    mock_agent.generate_edit.side_effect = modify_file
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        mock_parse.side_effect = [0.5, 0.4]
+        orch.run_loop()  # No explicit max_iterations — should use config
+
+    assert call_count == 2

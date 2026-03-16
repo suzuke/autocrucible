@@ -329,13 +329,22 @@ class Orchestrator:
                     pass
         return {"insertions": insertions, "deletions": deletions}
 
-    def run_loop(self) -> None:
-        """Run iterations indefinitely until Ctrl+C."""
+    def run_loop(self, max_iterations: int | None = None) -> None:
+        """Run iterations until stopped, budget exceeded, or max_iterations reached."""
+        if max_iterations is None:
+            max_iterations = self.config.constraints.max_iterations
+
         max_retries = self.config.constraints.max_retries
+        session_count = 0
         try:
             while True:
+                if max_iterations is not None and session_count >= max_iterations:
+                    logger.info(f"Reached max iterations ({max_iterations}), stopping.")
+                    break
+
                 logger.info(f"--- iter {self._iteration + 1} ---")
                 status = self.run_one_iteration()
+                session_count += 1
 
                 best = self.results.best(self.config.metric.direction)
                 best_str = f"{best.metric_value}" if best else "N/A"
