@@ -90,8 +90,11 @@ class SandboxRunner:
             if fpath.exists():
                 cmd.extend(["-v", f"{fpath}:/workspace/{f}:rw"])
 
-        # Ensure run.log is writable
-        cmd.extend(["-v", f"{self.workspace}/run.log:/workspace/run.log:rw"])
+        # Ensure run.log is writable (touch first so Docker doesn't create a directory)
+        run_log = self.workspace / "run.log"
+        if not run_log.exists():
+            run_log.touch()
+        cmd.extend(["-v", f"{run_log}:/workspace/run.log:rw"])
 
         cmd.extend([image, "bash", "-c", command])
 
