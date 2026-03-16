@@ -203,6 +203,17 @@ crucible run --tag run1
 - **Environment**: If your project has a `.venv/`, crucible automatically activates it when running experiment commands, so `python3 evaluate.py` uses the correct interpreter and packages.
 - **Git**: Every attempt is committed. Improvements advance the branch; failures are tagged and reset, preserving the diff for analysis.
 
+## What's New in v0.4.0
+
+- **JSONL Results** — Structured logging with iteration, timestamp, delta, diff stats, and duration per record. Export raw data with `crucible history --format jsonl`.
+- **Cost Tracking** — Set `constraints.budget` with `max_cost_usd` and per-iteration limits. `crucible status` shows accumulated cost.
+- **Plateau Detection** — Auto-injects a stronger prompt when the metric stagnates for N consecutive iterations. Configure with `constraints.plateau_threshold` (default 8).
+- **Eval Quality** — `crucible validate --stability --runs N` checks metric variance across repeated runs. `evaluation.repeat` + `evaluation.aggregation` for multi-run median/mean.
+- **Docker Sandbox** — `sandbox.backend: "docker"` runs experiments in isolated containers with network isolation, memory/CPU limits, and readonly filesystem protection.
+- **Agent Package Install** — `constraints.allow_install: true` lets the agent edit `requirements.txt`. Auto pip install before execution; Docker mode rebuilds the image with new deps.
+- **Per-Iteration Logs** — Agent reasoning saved to `logs/iter-N/agent.txt`, experiment output to `logs/iter-N/run.log`.
+- **Agent Abstraction** — `create_agent()` factory and `capabilities()` method. Extension point for future backends.
+
 ### Postmortem analysis
 
 After a run completes (or is interrupted), analyze what happened:
@@ -224,6 +235,9 @@ crucible validate
 #   [PASS] Editable files: All files exist
 #   [PASS] Run command: Executed successfully
 #   [PASS] Eval/metric: ops_per_sec: 42000.0
+
+crucible validate --stability --runs 5
+#   [PASS] Metric stability: CV = 3.9% over 5 runs
 ```
 
 ### Verbose logging
@@ -257,6 +271,21 @@ commands:
 constraints:
   timeout_seconds: 600                     # Kill experiment after this
   max_retries: 3                           # Max consecutive failures before stop
+  plateau_threshold: 8                     # Consecutive stagnant iters before strong prompt
+  allow_install: false                     # Let agent add packages via requirements.txt
+  budget:                                  # Cost tracking
+    max_cost_usd: 10.0
+    max_cost_per_iter_usd: 0.50
+    warn_at_percent: 80
+evaluation:                                # Multi-run evaluation
+  repeat: 1                                # Runs per iteration (1 = single run)
+  aggregation: "median"                    # median | mean
+sandbox:                                   # Docker isolation
+  backend: "none"                          # docker | none
+  base_image: "python:3.12-slim"
+  network: false
+  memory_limit: "2g"
+  cpu_limit: 2
 agent:
   type: "claude-code"                      # Agent backend
   instructions: "program.md"              # Static instructions file
@@ -309,7 +338,7 @@ This keeps complexity in your domain logic (where it belongs) rather than in the
 - Each session runs on a branch: `<branch_prefix>/<tag>`
 - Successful experiments advance the branch (commit stays)
 - Failed experiments are tagged `failed/<tag>/<n>` then reset, preserving the diff for analysis
-- `results.tsv` records every experiment regardless of outcome
+- `results-{tag}.jsonl` records every experiment regardless of outcome
 
 ### Guard Rails
 
@@ -369,8 +398,12 @@ my-experiment/
 ├── solution.py          # Code the agent modifies (editable)
 ├── evaluate.py          # Fixed harness that measures the metric (hidden)
 ├── pyproject.toml       # Experiment dependencies (NOT crucible itself)
-├── results.tsv          # Auto-generated experiment log
-└── run.log              # Latest experiment output
+├── results-{tag}.jsonl  # Auto-generated experiment log (per run)
+├── run.log              # Latest experiment output
+└── logs/                # Per-iteration logs
+    └── iter-1/
+        ├── agent.txt    # Agent reasoning
+        └── run.log      # Experiment output
 ```
 
 Crucible is installed as a **global CLI tool** — it is NOT a dependency of your experiment project. Your project's `pyproject.toml` only lists experiment-specific packages (numpy, torch, etc.).
@@ -485,14 +518,14 @@ The agent cannot run arbitrary commands — it only has access to Read, Edit, Wr
 - **Scope the editable files narrowly.** If `sort.py` only contains a sort function, the blast radius is limited even if the agent writes bad code.
 - **Always set the evaluation harness as `hidden`, not `readonly`.** Readonly files are readable — the agent **will** study them and exploit implementation details (fixed seeds, scoring formulas, test data) to game the metric. In the `optimize-regression` example, the agent read `evaluate.py`, found `seed=42`, reconstructed the exact noise vector, and achieved MSE=0.0 in 3 iterations by memorizing the test set instead of learning regression. Hidden files are moved out of reach during agent execution but restored for the experiment subprocess.
 - **Use `constraints.timeout_seconds`** to kill runaway experiments.
-- **Run in a container or VM** for untrusted workloads. Crucible doesn't require root or network access.
+- **Use Docker sandbox** (`sandbox.backend: "docker"`) for untrusted workloads. Experiments run with network isolation, memory limits, and readonly filesystem.
 - **Review the git log.** Every change is committed — you can audit exactly what the agent did.
 
 This is the same trust model as CI/CD: you review the code, the system runs it. Crucible just automates the iteration loop.
 
 ### Where's the web dashboard?
 
-There isn't one — by design. `results.tsv` is a plain TSV file that any tool can read, and experiments typically run tens of iterations, not thousands. A full web UI would be a separate project-sized effort for marginal benefit.
+There isn't one — by design. `results-{tag}.jsonl` is a structured JSONL file that any tool can read, and experiments typically run tens of iterations, not thousands. A full web UI would be a separate project-sized effort for marginal benefit.
 
 **Live monitoring** (in a separate terminal):
 
@@ -504,16 +537,16 @@ watch -n 5 crucible history --last 10
 **Quick trend chart:**
 
 ```bash
-# ASCII chart with gnuplot
-tail -n +2 results.tsv | cut -f2 | gnuplot -e "set terminal dumb; plot '-' with lines"
+# Extract metrics with jq
+crucible history --format jsonl | jq -r '.metric_value'
 
 # Or Python
 python3 -c "
-import csv
-with open('results.tsv') as f:
-    for i, x in enumerate(csv.DictReader(f, delimiter='\t')):
-        bar = '#' * int(float(x['metric_value']) / 10)
-        print(f'{i+1:3d} {float(x[\"metric_value\"]):8.2f} {bar}')
+import json, sys
+for line in open('results-run1.jsonl'):
+    r = json.loads(line)
+    bar = '#' * int(r['metric_value'] / 10)
+    print(f'{r[\"iteration\"]:3d} {r[\"metric_value\"]:8.2f} {bar}')
 "
 ```
 
@@ -521,5 +554,5 @@ with open('results.tsv') as f:
 
 ```bash
 crucible status --json | jq .
-crucible history --json --last 50 | jq '.[].metric'
+crucible history --format jsonl | jq '.metric_value'
 ```
