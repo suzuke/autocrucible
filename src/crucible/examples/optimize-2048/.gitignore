@@ -3,3 +3,4 @@ run.log
 results-*.tsv
 __pycache__/
 *.pyc
+results-*.jsonl
