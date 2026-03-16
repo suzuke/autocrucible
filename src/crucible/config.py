@@ -35,6 +35,7 @@ class FilesConfig:
     editable: List[str] = field(default_factory=list)
     readonly: List[str] = field(default_factory=list)
     hidden: List[str] = field(default_factory=list)
+    artifacts: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -207,6 +208,7 @@ def load_config(project_root: Path) -> Config:
             editable=files_data.get("editable", []),
             readonly=files_data.get("readonly", []),
             hidden=files_data.get("hidden", []),
+            artifacts=files_data.get("artifacts", []),
         ),
         commands=CommandsConfig(
             run=commands_data["run"],
