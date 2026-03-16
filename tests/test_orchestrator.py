@@ -400,6 +400,34 @@ def test_allow_install_adds_requirements_to_editable(tmp_path):
     assert (tmp_path / "requirements.txt").exists()
 
 
+def test_iteration_saves_agent_log(tmp_path):
+    """Agent output is saved to logs/iter-N/agent.txt."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    def modify_file(*args, **kwargs):
+        (tmp_path / "train.py").write_text("x = 2")
+        return AgentResult(
+            modified_files=[Path("train.py")],
+            description="optimize x",
+            agent_output="I read the code.\nDecided to change x to 2.",
+        )
+    mock_agent.generate_edit.side_effect = modify_file
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        mock_parse.return_value = 0.95
+        orch.run_one_iteration()
+
+    agent_log = tmp_path / "logs" / "iter-1" / "agent.txt"
+    assert agent_log.exists()
+    assert "Decided to change x to 2" in agent_log.read_text()
+
+
 def test_allow_install_installs_on_requirements_change(tmp_path):
     """When requirements.txt is modified and allow_install is true, pip install runs."""
     setup_repo(tmp_path)

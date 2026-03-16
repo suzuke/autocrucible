@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -99,7 +100,7 @@ class Orchestrator:
         # and agents don't trigger violations by accidentally touching them
         gitignore = self.workspace / ".gitignore"
         lines = gitignore.read_text().splitlines() if gitignore.exists() else []
-        needed = [p for p in ("results-*.jsonl", "run.log") if p not in lines]
+        needed = [p for p in ("results-*.jsonl", "run.log", "logs/") if p not in lines]
         if needed:
             lines.extend(needed)
             gitignore.write_text("\n".join(lines) + "\n")
@@ -200,6 +201,9 @@ class Orchestrator:
 
         total_duration = agent_duration + run_duration
 
+        # Save per-iteration logs (agent reasoning + run.log)
+        self._save_iteration_logs(self._iteration, agent_result)
+
         # 10. Handle crash (metric is None or invalid)
         if metric_value is None or not self.guardrails.check_metric(metric_value):
             self._fail_seq += 1
@@ -271,7 +275,22 @@ class Orchestrator:
             diff_stats=self._get_diff_stats(commit),
             duration_seconds=duration_seconds,
             usage=agent_result.usage,
+            log_dir=f"logs/iter-{self._iteration}",
         )
+
+    def _save_iteration_logs(self, iteration: int, agent_result) -> None:
+        """Save agent output and run.log to logs/iter-{N}/."""
+        log_dir = self.workspace / "logs" / f"iter-{iteration}"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save agent reasoning
+        if agent_result.agent_output:
+            (log_dir / "agent.txt").write_text(agent_result.agent_output)
+
+        # Copy run.log if exists
+        run_log = self.workspace / "run.log"
+        if run_log.exists():
+            shutil.copy2(run_log, log_dir / "run.log")
 
     def _install_requirements(self):
         """Install packages from requirements.txt."""

@@ -12,6 +12,7 @@ class AgentResult:
     description: str
     usage: UsageInfo | None = None
     duration_seconds: float | None = None
+    agent_output: str | None = None
 
 
 class AgentInterface(ABC):

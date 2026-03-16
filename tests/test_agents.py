@@ -12,6 +12,14 @@ def test_agent_result_dataclass():
     assert r.modified_files == [Path("train.py")]
 
 
+def test_agent_result_has_agent_output():
+    r = AgentResult(
+        modified_files=[], description="test",
+        agent_output="some reasoning text",
+    )
+    assert r.agent_output == "some reasoning text"
+
+
 def test_claude_code_agent_generate_edit(tmp_path):
     """Test with mocked Claude Agent SDK query()."""
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)

@@ -36,6 +36,7 @@ class ExperimentRecord:
     diff_stats: dict | None = None
     duration_seconds: float | None = None
     usage: UsageInfo | None = None
+    log_dir: str | None = None
 
 
 def _serialize_record(record: ExperimentRecord) -> str:

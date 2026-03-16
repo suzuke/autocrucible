@@ -189,6 +189,7 @@ class ClaudeCodeAgent(AgentInterface):
 
         description = "no description"
         last_text = ""
+        all_text_parts: list[str] = []
 
         try:
             async for message in query(prompt=prompt, options=options):
@@ -196,6 +197,7 @@ class ClaudeCodeAgent(AgentInterface):
                     for block in message.content:
                         if isinstance(block, TextBlock) and block.text.strip():
                             last_text = block.text.strip()
+                            all_text_parts.append(block.text.strip())
                             # Stream agent output for visibility
                             for line in block.text.splitlines():
                                 logger.debug(f"  {line}")
@@ -203,16 +205,20 @@ class ClaudeCodeAgent(AgentInterface):
                 elif isinstance(message, ResultMessage):
                     if message.is_error:
                         duration = time.monotonic() - start
+                        agent_output = "\n".join(all_text_parts) if all_text_parts else None
                         return AgentResult(
                             modified_files=[],
                             description=f"agent error: {message.result or 'unknown'}",
                             duration_seconds=duration,
+                            agent_output=agent_output,
                         )
         except TimeoutError:
             duration = time.monotonic() - start
+            agent_output = "\n".join(all_text_parts) if all_text_parts else None
             return AgentResult(
                 modified_files=[], description="claude agent timed out",
                 duration_seconds=duration,
+                agent_output=agent_output,
             )
 
         if last_text:
@@ -226,9 +232,11 @@ class ClaudeCodeAgent(AgentInterface):
             logger.info("[agent] no files changed")
         else:
             logger.info(f"[agent] modified: {[str(f) for f in all_files]}")
+        agent_output = "\n".join(all_text_parts) if all_text_parts else None
         return AgentResult(
             modified_files=all_files, description=description,
             duration_seconds=duration,
+            agent_output=agent_output,
         )
 
 
