@@ -165,7 +165,11 @@ class Orchestrator:
         commit_hash = self.git.head()
 
         # Install updated requirements if allow_install is enabled
-        if self.config.constraints.allow_install and "requirements.txt" in modified:
+        # Docker mode: skip pip install here — _hash_deps() will detect the change
+        # and rebuild the image with deps baked in (build has network access)
+        if (self.config.constraints.allow_install
+                and "requirements.txt" in modified
+                and not (self.config.sandbox and self.config.sandbox.backend != "none")):
             self._install_requirements()
 
         # Compute delta from current best
