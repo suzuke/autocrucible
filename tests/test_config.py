@@ -122,6 +122,25 @@ metric:
     assert config.agent.system_prompt is None
 
 
+def test_allow_install_default_false(tmp_path):
+    """Config without allow_install should default to False."""
+    cfg_dir = tmp_path / ".crucible"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(MINIMAL_YAML)
+    cfg = load_config(tmp_path)
+    assert cfg.constraints.allow_install is False
+
+
+def test_allow_install_parsed_from_yaml(tmp_path):
+    """Config with allow_install: true should parse correctly."""
+    yaml_with_install = MINIMAL_YAML.rstrip() + "\nconstraints:\n  allow_install: true\n"
+    cfg_dir = tmp_path / ".crucible"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.yaml").write_text(yaml_with_install)
+    cfg = load_config(tmp_path)
+    assert cfg.constraints.allow_install is True
+
+
 def test_load_missing_required_fields(tmp_path):
     cfg_dir = tmp_path / ".crucible"
     cfg_dir.mkdir()

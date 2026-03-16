@@ -386,3 +386,44 @@ def test_no_sandbox_uses_native_runner(tmp_path):
     orch.init()
     from crucible.runner import ExperimentRunner
     assert isinstance(orch.runner, ExperimentRunner)
+
+
+def test_allow_install_adds_requirements_to_editable(tmp_path):
+    """allow_install adds requirements.txt to editable set and touches the file."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.constraints.allow_install = True
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+    assert "requirements.txt" in orch.guardrails.editable
+    assert (tmp_path / "requirements.txt").exists()
+
+
+def test_allow_install_installs_on_requirements_change(tmp_path):
+    """When requirements.txt is modified and allow_install is true, pip install runs."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.constraints.allow_install = True
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    def modify_files(*args, **kwargs):
+        (tmp_path / "train.py").write_text("x = 2")
+        (tmp_path / "requirements.txt").write_text("numpy\n")
+        return AgentResult(
+            modified_files=[Path("train.py"), Path("requirements.txt")],
+            description="add numpy",
+        )
+    mock_agent.generate_edit.side_effect = modify_files
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse, \
+         patch.object(orch, "_install_requirements") as mock_install:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        mock_parse.return_value = 0.95
+        result = orch.run_one_iteration()
+
+    assert result == "keep"
+    mock_install.assert_called_once()

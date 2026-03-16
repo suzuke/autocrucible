@@ -67,6 +67,13 @@ class Orchestrator:
 
         self.budget = BudgetGuard(config.constraints.budget)
 
+        # Allow agent to install packages via requirements.txt
+        if config.constraints.allow_install:
+            self.guardrails.editable.add("requirements.txt")
+            req = self.workspace / "requirements.txt"
+            if not req.exists():
+                req.touch()
+
         self._fail_seq = 0
         self._consecutive_failures = 0
         self._consecutive_skips = 0
@@ -156,6 +163,10 @@ class Orchestrator:
         # 7. Git commit
         self.git.commit(agent_result.description)
         commit_hash = self.git.head()
+
+        # Install updated requirements if allow_install is enabled
+        if self.config.constraints.allow_install and "requirements.txt" in modified:
+            self._install_requirements()
 
         # Compute delta from current best
         current_best = self.results.best(self.config.metric.direction)
@@ -257,6 +268,20 @@ class Orchestrator:
             duration_seconds=duration_seconds,
             usage=agent_result.usage,
         )
+
+    def _install_requirements(self):
+        """Install packages from requirements.txt."""
+        req = self.workspace / "requirements.txt"
+        if not req.exists():
+            return
+        logger.info("Installing updated requirements...")
+        result = subprocess.run(
+            ["pip", "install", "-r", str(req)],
+            cwd=self.workspace,
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            logger.warning(f"pip install failed: {result.stderr[-200:]}")
 
     def _get_diff_stats(self, commit: str) -> dict:
         """Get insertion/deletion counts for a commit."""

@@ -346,11 +346,15 @@ def init(tag: str, project_dir: str) -> None:
     from crucible.agents import create_agent
     from crucible.orchestrator import Orchestrator
 
+    editable = set(config.files.editable)
+    if config.constraints.allow_install:
+        editable.add("requirements.txt")
+
     agent = create_agent(
         config.agent,
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
-        editable_files=set(config.files.editable),
+        editable_files=editable,
     )
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
     orch.init()
@@ -416,13 +420,17 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, no_interact
     from crucible.agents import create_agent
     from crucible.orchestrator import Orchestrator
 
+    editable = set(config.files.editable)
+    if config.constraints.allow_install:
+        editable.add("requirements.txt")
+
     agent = create_agent(
         config.agent,
         timeout=timeout,
         model=model,
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
-        editable_files=set(config.files.editable),
+        editable_files=editable,
     )
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
 

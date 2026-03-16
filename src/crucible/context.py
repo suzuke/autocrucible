@@ -193,6 +193,20 @@ class ContextAssembler:
                 f"Hidden files (exist but you CANNOT read, create, or modify them): {hidden}"
             )
 
+        if self.config.constraints.allow_install:
+            lines.append(
+                "Package installation: ENABLED — you can add packages by editing requirements.txt"
+            )
+            req = self.project_root / "requirements.txt"
+            if req.exists():
+                deps = [l.strip() for l in req.read_text().splitlines() if l.strip() and not l.startswith("#")]
+                if deps:
+                    lines.append(f"Available packages: {', '.join(deps)} (+ Python stdlib)")
+                else:
+                    lines.append("Available packages: Python stdlib only")
+            else:
+                lines.append("Available packages: Python stdlib only (edit requirements.txt to add more)")
+
         return "\n".join(lines)
 
     def _section_history(self, records: list[ExperimentRecord]) -> str:
@@ -283,6 +297,18 @@ class ContextAssembler:
     def _section_directive(self) -> str:
         """Section 4: Action directive with mandatory workflow."""
         editable = ", ".join(self.config.files.editable)
+        rules = (
+            "**Rules:**\n"
+            "- NEVER repeat a failed/crashed approach, even with small variations\n"
+            "- ONE change per iteration — don't combine multiple ideas\n"
+            "- A crash scores zero — correctness first\n"
+            "- Simplicity test: if a change adds >50 lines of complexity "
+            "for <1% expected improvement, it is NOT worth it. "
+            "Prefer clean, targeted changes.\n"
+            "- Do NOT output full file contents. Use targeted edits."
+        )
+        if self.config.constraints.allow_install:
+            rules += "\n- To use a new package: add it to requirements.txt AND import it in your code"
         return (
             "## Your Task\n\n"
             "**Workflow (STRICT ORDER):**\n\n"
@@ -293,14 +319,7 @@ class ContextAssembler:
             "3. **EDIT** — Make ONE bold, high-impact change to: " + editable + ". "
             "Ensure syntactic correctness and preserve the interface.\n"
             "4. **EXPLAIN** — One short line (<120 chars, no markdown): what you changed and why.\n\n"
-            "**Rules:**\n"
-            "- NEVER repeat a failed/crashed approach, even with small variations\n"
-            "- ONE change per iteration — don't combine multiple ideas\n"
-            "- A crash scores zero — correctness first\n"
-            "- Simplicity test: if a change adds >50 lines of complexity "
-            "for <1% expected improvement, it is NOT worth it. "
-            "Prefer clean, targeted changes.\n"
-            "- Do NOT output full file contents. Use targeted edits."
+            + rules
         )
 
     def assemble_with_files(

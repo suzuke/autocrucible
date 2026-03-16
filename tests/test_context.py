@@ -342,3 +342,56 @@ def test_assemble_with_files_missing_file(tmp_path):
     prompt = ctx.assemble_with_files(log, tmp_path, ["nonexistent.py"])
     # Should not crash, just skip missing file
     assert "Editable File Contents" in prompt
+
+
+# -- allow_install context tests ----------------------------------------------
+
+def test_state_shows_available_packages(tmp_path):
+    """When allow_install is enabled, requirements.txt contents are shown."""
+    cfg = make_config(tmp_path)
+    cfg.constraints.allow_install = True
+    (tmp_path / "program.md").write_text("Instructions.")
+    (tmp_path / "requirements.txt").write_text("numpy\nscipy\n")
+    log = ResultsLog(tmp_path / "results.jsonl")
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    prompt = ctx.assemble(log)
+    assert "numpy" in prompt
+    assert "scipy" in prompt
+
+
+def test_state_shows_install_enabled(tmp_path):
+    """When allow_install is enabled, prompt mentions requirements.txt."""
+    cfg = make_config(tmp_path)
+    cfg.constraints.allow_install = True
+    (tmp_path / "program.md").write_text("Instructions.")
+    log = ResultsLog(tmp_path / "results.jsonl")
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    prompt = ctx.assemble(log)
+    assert "requirements.txt" in prompt
+    assert "Package installation: ENABLED" in prompt
+
+
+def test_state_shows_stdlib_only_when_no_requirements(tmp_path):
+    """When allow_install is enabled but no requirements.txt, show stdlib only."""
+    cfg = make_config(tmp_path)
+    cfg.constraints.allow_install = True
+    (tmp_path / "program.md").write_text("Instructions.")
+    log = ResultsLog(tmp_path / "results.jsonl")
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    prompt = ctx.assemble(log)
+    assert "Python stdlib only" in prompt
+
+
+def test_directive_includes_install_rule(tmp_path):
+    """When allow_install is enabled, directive includes package install rule."""
+    cfg = make_config(tmp_path)
+    cfg.constraints.allow_install = True
+    (tmp_path / "program.md").write_text("Instructions.")
+    log = ResultsLog(tmp_path / "results.jsonl")
+    log.init()
+    ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
+    prompt = ctx.assemble(log)
+    assert "add it to requirements.txt" in prompt
