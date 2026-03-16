@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import statistics
 import subprocess
 from dataclasses import dataclass, field
@@ -51,6 +52,7 @@ class ExperimentRunner:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            start_new_session=True,
         )
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
@@ -61,11 +63,18 @@ class ExperimentRunner:
                 stderr_tail=stderr_tail,
             )
         except subprocess.TimeoutExpired:
-            proc.terminate()
+            # Kill entire process group (shell + all children)
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except OSError:
+                proc.terminate()
             try:
                 _, stderr = proc.communicate(timeout=5)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except OSError:
+                    proc.kill()
                 _, stderr = proc.communicate()
             return RunResult(
                 exit_code=-1,
@@ -73,7 +82,10 @@ class ExperimentRunner:
                 stderr_tail=_tail(stderr, 50),
             )
         except KeyboardInterrupt:
-            proc.kill()
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                proc.kill()
             proc.wait()
             raise
 

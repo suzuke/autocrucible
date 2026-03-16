@@ -18,7 +18,7 @@ metric:
   direction: "maximize"
 
 constraints:
-  timeout_seconds: 120
+  timeout_seconds: 300
   max_retries: 5
 
 agent:

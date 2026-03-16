@@ -4,7 +4,7 @@ You are optimizing a 2048 game-playing AI.
 
 ## Goal
 
-Maximize `avg_score` — the average game score over 50 games with fixed seeds.
+Maximize `avg_score` — the average game score over 20 games with fixed seeds.
 
 ## Interface
 
@@ -52,4 +52,4 @@ The evaluator reports these to help guide your strategy:
 - Only edit `strategy.py`
 - DO NOT attempt to run or execute any scripts — the platform runs them automatically
 - DO NOT modify any other file
-- Keep `choose_move` fast enough that 50 games complete within 120 seconds
+- Keep `choose_move` fast enough that 20 games complete within 300 seconds

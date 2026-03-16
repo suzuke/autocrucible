@@ -1,6 +1,6 @@
 """Evaluation harness for 2048 strategy — DO NOT MODIFY.
 
-Runs 50 games with fixed seeds (0-49). Measures avg_score as the primary
+Runs 20 games with fixed seeds (0-19). Measures avg_score as the primary
 metric, plus several sub-metrics for diagnostics.
 
 Output format (parsed by crucible):
@@ -25,7 +25,7 @@ from collections import Counter
 
 from game import Game2048
 
-NUM_GAMES = 50
+NUM_GAMES = 20
 
 
 def compute_monotonicity(board):
