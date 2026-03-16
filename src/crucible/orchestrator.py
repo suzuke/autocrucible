@@ -101,6 +101,11 @@ class Orchestrator:
         gitignore = self.workspace / ".gitignore"
         lines = gitignore.read_text().splitlines() if gitignore.exists() else []
         needed = [p for p in ("results-*.jsonl", "run.log", "logs/") if p not in lines]
+        # Add artifacts paths to gitignore and create directories
+        for artifact_path in self.config.files.artifacts:
+            if artifact_path not in lines:
+                needed.append(artifact_path)
+            (self.workspace / artifact_path).mkdir(parents=True, exist_ok=True)
         if needed:
             lines.extend(needed)
             gitignore.write_text("\n".join(lines) + "\n")

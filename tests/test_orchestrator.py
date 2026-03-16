@@ -455,3 +455,23 @@ def test_allow_install_installs_on_requirements_change(tmp_path):
 
     assert result == "keep"
     mock_install.assert_called_once()
+
+
+def test_init_creates_artifacts_dirs_and_gitignores(tmp_path):
+    """init() creates artifact directories and adds them to .gitignore."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.files.artifacts = ["data/", "checkpoints/"]
+    mock_agent = MagicMock()
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    # Artifact directories should be created
+    assert (tmp_path / "data").is_dir()
+    assert (tmp_path / "checkpoints").is_dir()
+
+    # Artifact paths should be in .gitignore
+    gitignore = (tmp_path / ".gitignore").read_text()
+    assert "data/" in gitignore
+    assert "checkpoints/" in gitignore
