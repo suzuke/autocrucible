@@ -1,0 +1,29 @@
+name: "optimize-pathfind"
+
+files:
+  editable:
+    - "pathfind.py"
+  hidden:
+    - "benchmark.py"
+
+commands:
+  run: "python3 -u benchmark.py > run.log 2>&1"
+  eval: "grep '^nodes_explored:' run.log"
+
+metric:
+  name: "nodes_explored"
+  direction: "minimize"
+
+constraints:
+  timeout_seconds: 30
+  max_retries: 3
+
+search:
+  strategy: beam
+  beam_width: 3
+
+agent:
+  instructions: "program.md"
+
+git:
+  branch_prefix: "crucible"

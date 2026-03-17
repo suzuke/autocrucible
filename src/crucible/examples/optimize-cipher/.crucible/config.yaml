@@ -1,0 +1,29 @@
+name: "optimize-cipher"
+
+files:
+  editable:
+    - "cipher.py"
+  hidden:
+    - "benchmark.py"
+
+commands:
+  run: "python3 -u benchmark.py > run.log 2>&1"
+  eval: "grep '^throughput:' run.log"
+
+metric:
+  name: "throughput"
+  direction: "maximize"
+
+constraints:
+  timeout_seconds: 30
+  max_retries: 3
+
+search:
+  strategy: restart
+  plateau_threshold: 4
+
+agent:
+  instructions: "program.md"
+
+git:
+  branch_prefix: "crucible"
