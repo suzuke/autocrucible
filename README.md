@@ -1,13 +1,23 @@
+<div align="center">
+
+<img src="autocrucible-loop.png" alt="AutoCrucible: Autonomous Experiment Loop" width="700" />
+
 # autocrucible
+
+### Like [autoresearch](https://github.com/karpathy/autoresearch), but with guardrails.
 
 [![PyPI](https://img.shields.io/pypi/v/autocrucible)](https://pypi.org/project/autocrucible/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+**[Install](#install)** · **[Quick Start](#quick-start)** · **[How It Works](#how-it-works)** · **[Examples](#examples)** · **[Docs](#documentation)**
+
 [繁體中文](README.zh-TW.md) | English
 
-Like [autoresearch](https://github.com/karpathy/autoresearch), but with guardrails. Autonomous experiment loops where the agent **can't** game the metric.
+</div>
 
-Define what to edit, how to run, and what to measure — then let an LLM agent iterate to optimize your metric. Crucible enforces file-level access control (editable / readonly / hidden), validates metrics, and manages git history automatically. The agent writes code; the platform controls everything else.
+*Try an idea, measure it, keep what works, discard what doesn't — and the agent can't cheat.*
+
+Autonomous experiment loops where the agent **can't** game the metric. Crucible enforces file-level access control (editable / readonly / hidden), validates metrics, and manages git history automatically. The agent writes code; the platform controls everything else.
 
 ## Prerequisites
 

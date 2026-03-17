@@ -1,13 +1,23 @@
+<div align="center">
+
+<img src="autocrucible-loop.png" alt="AutoCrucible: Autonomous Experiment Loop" width="700" />
+
 # autocrucible
+
+### 類似 [autoresearch](https://github.com/karpathy/autoresearch)，但有護欄。
 
 [![PyPI](https://img.shields.io/pypi/v/autocrucible)](https://pypi.org/project/autocrucible/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+**[安裝](#安裝)** · **[快速開始](#快速開始)** · **[運作方式](#運作方式)** · **[範例](#範例)** · **[文件](#文件)**
+
 繁體中文 | [English](README.md)
 
-類似 [autoresearch](https://github.com/karpathy/autoresearch)，但有護欄。自主實驗迴圈，agent **無法**鑽指標的漏洞。
+</div>
 
-定義要編輯的檔案、執行指令和評估指標，讓 LLM agent 迭代優化。Crucible 強制檔案層級存取控制（editable / readonly / hidden）、驗證 metric 有效性、自動管理 git 歷史。Agent 只負責寫程式碼，平台控制其他一切。
+*嘗試、測量、保留有效的、丟掉沒用的——而且 agent 沒辦法作弊。*
+
+自主實驗迴圈，agent **無法**鑽指標的漏洞。Crucible 強制檔案層級存取控制（editable / readonly / hidden）、驗證 metric 有效性、自動管理 git 歷史。Agent 只負責寫程式碼，平台控制其他一切。
 
 ## 前置需求
 
