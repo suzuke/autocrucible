@@ -23,8 +23,11 @@ commands:
 constraints:
   timeout_seconds: 600                     # Kill experiment after this
   max_retries: 3                           # Max consecutive failures before stop
-  plateau_threshold: 8                     # Consecutive stagnant iters before strong prompt
   allow_install: false                     # Let agent add packages via requirements.txt
+search:                                    # Search strategy (optional)
+  strategy: "greedy"                       # greedy (default) | restart | beam
+  beam_width: 3                            # beam only: number of independent branches
+  plateau_threshold: 8                     # restart + beam: stagnant iters before acting
   budget:                                  # Cost tracking
     max_cost_usd: 10.0
     max_cost_per_iter_usd: 0.50
@@ -84,6 +87,39 @@ print(f"metric: {metric}")
 ```
 
 This keeps complexity in your domain logic (where it belongs) rather than in the platform.
+
+## Search Strategy
+
+Controls how crucible explores the optimization landscape. Set via the `search` top-level key.
+
+### `greedy` (default)
+
+Always builds on the current best commit. Efficient when the landscape is smooth. Risks getting stuck in local optima on long runs.
+
+### `restart`
+
+When `plateau_threshold` consecutive iterations produce no improvement, resets to the initial baseline commit and tries a completely different direction — with full history preserved as agent context.
+
+```yaml
+search:
+  strategy: restart
+  plateau_threshold: 8   # iters without improvement before resetting
+```
+
+### `beam`
+
+Maintains `beam_width` independent branches, cycling through them in round-robin. Each beam sees a compact summary of what other beams have tried, preventing redundant exploration.
+
+```yaml
+search:
+  strategy: beam
+  beam_width: 3          # number of branches to maintain
+  plateau_threshold: 8   # not used in beam mode (each beam has its own counter)
+```
+
+**Note:** beam is still **serial** — one agent run at a time. Total cost is proportional to iterations, not multiplied by `beam_width`. The advantage is breadth of exploration, not speed.
+
+**When to use beam:** You have >50 iterations available and suspect the landscape has multiple distinct local optima.
 
 ## Git Strategy
 

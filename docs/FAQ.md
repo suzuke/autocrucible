@@ -8,7 +8,25 @@ Crucible uses a greedy keep/discard loop — improvements are kept, regressions 
 - It can reason about failures and deliberately try different architectural approaches, not just parameter tweaks
 - It reads the actual code each iteration, so it can make structural changes that a blind search never would
 
-That said, local optima is a real risk for long runs. The built-in escape hatch is **multiple tags** — essentially manual beam search:
+That said, local optima is a real risk for long runs. Crucible has two built-in escape hatches:
+
+**`search.strategy: restart`** — automatically resets to the baseline commit after `plateau_threshold` stagnant iterations, injecting the full history as context so the agent tries a completely different direction:
+
+```yaml
+search:
+  strategy: restart
+  plateau_threshold: 8   # iters without improvement before resetting
+```
+
+**`search.strategy: beam`** — maintains `beam_width` independent branches, cycling through them in round-robin. Each branch sees a compact summary of what other branches have tried, preventing redundant exploration:
+
+```yaml
+search:
+  strategy: beam
+  beam_width: 3
+```
+
+**Manual multi-tag** is also available for full control:
 
 ```bash
 # Explore different directions from the same baseline
@@ -23,7 +41,6 @@ You can also backtrack to an earlier commit and branch from there:
 git log crucible/run1              # find a promising commit
 git checkout <commit>
 crucible run --tag run1-variant    # auto-inits new branch from that point
-crucible run --tag run1-variant
 ```
 
 ## Why only one metric? What about multi-objective optimization?
