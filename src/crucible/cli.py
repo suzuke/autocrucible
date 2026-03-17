@@ -505,6 +505,14 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
                 raise click.ClickException(f"Setup command failed with exit code {result.returncode}")
         click.echo(f"Initialised experiment '{tag}' in {project}")
 
+    # Hint: suggest validate if repeat=1 and not yet validated
+    validated_marker = project / ".crucible" / ".validated"
+    if config.evaluation.repeat == 1 and not validated_marker.exists():
+        click.echo(
+            "Tip: Run 'crucible validate' first to check if your metric needs "
+            "repeat runs (stochastic experiments may benefit from evaluation.repeat: 3)."
+        )
+
     click.echo("Press Ctrl+C to stop gracefully.")
     orch.run_loop(max_iterations=max_iterations)
     click.echo("Stopped.")
