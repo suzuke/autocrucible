@@ -110,7 +110,54 @@ def validate_project(project_root: Path) -> List[CheckResult]:
     else:
         results.append(CheckResult("Eval/metric", False, f"Could not parse '{config.metric.name}' from eval output"))
 
+    # 6. Stability check (auto-fixes evaluation.repeat if unstable)
+    stability = run_stability_check_and_update(project_root, config, runs=3)
+    if stability.reason == "repeat already configured":
+        results.append(CheckResult(
+            "Stability", True,
+            f"evaluation.repeat={config.evaluation.repeat} already configured — skipping check"
+        ))
+    elif stability.stable:
+        results.append(CheckResult(
+            "Stability", True,
+            f"CV={stability.cv:.1f}%  mean={stability.mean:.4f}  stdev={stability.stdev:.4f} ✓ stable"
+        ))
+    else:
+        results.append(CheckResult(
+            "Stability", True,
+            f"CV={stability.cv:.1f}% ⚠ unstable — auto-set evaluation.repeat=3 in config.yaml"
+        ))
+
     return results
+
+
+def run_stability_check_and_update(
+    project_root: Path, config, runs: int = 3
+) -> StabilityResult:
+    """Run stability check and auto-update config.yaml if metric is unstable.
+
+    If evaluation.repeat is already > 1, skip and return stable.
+    Writes .crucible/.validated marker on completion.
+    """
+    if config.evaluation.repeat > 1:
+        return StabilityResult(stable=True, reason="repeat already configured")
+
+    result = check_stability(project_root, config, runs=runs)
+
+    if not result.stable:
+        import yaml as _yaml
+        config_path = project_root / ".crucible" / "config.yaml"
+        with open(config_path) as f:
+            raw = _yaml.safe_load(f)
+        raw.setdefault("evaluation", {})["repeat"] = 3
+        raw["evaluation"].setdefault("aggregation", "median")
+        with open(config_path, "w") as f:
+            _yaml.dump(raw, f, default_flow_style=False, allow_unicode=True)
+
+    marker = project_root / ".crucible" / ".validated"
+    marker.write_text("")
+
+    return result
 
 
 def check_stability(workspace: Path, config, runs: int = 5) -> StabilityResult:

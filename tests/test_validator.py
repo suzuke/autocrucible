@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from crucible.validator import validate_project, CheckResult, check_stability, StabilityResult
+from crucible.validator import validate_project, CheckResult, check_stability, StabilityResult, run_stability_check_and_update
 
 
 VALID_CONFIG = """\
@@ -150,6 +150,75 @@ def test_validate_artifacts_no_overlap(tmp_path):
     assert len(artifact_checks) == 1
     assert artifact_checks[0].passed is True
     assert "data/" in artifact_checks[0].message
+
+
+def _make_minimal_config_yaml(repeat=1):
+    return (
+        "name: test\nfiles:\n  editable: [sort.py]\n"
+        "commands:\n  run: python sort.py\n  eval: python eval.py\n"
+        "metric:\n  name: score\n  direction: maximize\n"
+        f"evaluation:\n  repeat: {repeat}\n"
+    )
+
+
+def test_run_stability_check_stable(tmp_path):
+    """Stable metric: no config change, returns stable result."""
+    (tmp_path / ".crucible").mkdir()
+    (tmp_path / ".crucible" / "config.yaml").write_text(_make_minimal_config_yaml())
+    from crucible.config import load_config
+    config = load_config(tmp_path)
+    with patch("crucible.validator.ExperimentRunner") as MockRunner:
+        inst = MockRunner.return_value
+        inst.execute.return_value = MagicMock(exit_code=0, timed_out=False)
+        inst.parse_metric.return_value = 1.0
+        result = run_stability_check_and_update(tmp_path, config, runs=3)
+    assert result.stable is True
+    # config.yaml should NOT have been modified to add repeat: 3
+    updated = load_config(tmp_path)
+    assert updated.evaluation.repeat == 1
+
+
+def test_run_stability_check_unstable_writes_repeat(tmp_path):
+    """Unstable metric (CV > 5%): auto-writes evaluation.repeat: 3 to config."""
+    (tmp_path / ".crucible").mkdir()
+    (tmp_path / ".crucible" / "config.yaml").write_text(_make_minimal_config_yaml())
+    from crucible.config import load_config
+    config = load_config(tmp_path)
+    values = iter([1.0, 1.2, 0.8])  # CV ≈ 20%
+    with patch("crucible.validator.ExperimentRunner") as MockRunner:
+        inst = MockRunner.return_value
+        inst.execute.return_value = MagicMock(exit_code=0, timed_out=False)
+        inst.parse_metric.side_effect = lambda *a: next(values)
+        result = run_stability_check_and_update(tmp_path, config, runs=3)
+    assert result.stable is False
+    assert result.cv > 5.0
+    updated = load_config(tmp_path)
+    assert updated.evaluation.repeat == 3
+
+
+def test_run_stability_check_writes_validated_marker(tmp_path):
+    """Successful stability check writes .crucible/.validated marker."""
+    (tmp_path / ".crucible").mkdir()
+    (tmp_path / ".crucible" / "config.yaml").write_text(_make_minimal_config_yaml())
+    from crucible.config import load_config
+    config = load_config(tmp_path)
+    with patch("crucible.validator.ExperimentRunner") as MockRunner:
+        inst = MockRunner.return_value
+        inst.execute.return_value = MagicMock(exit_code=0, timed_out=False)
+        inst.parse_metric.return_value = 1.0
+        run_stability_check_and_update(tmp_path, config, runs=3)
+    assert (tmp_path / ".crucible" / ".validated").exists()
+
+
+def test_run_stability_check_already_repeat(tmp_path):
+    """If repeat already > 1, skip stability check and return stable."""
+    (tmp_path / ".crucible").mkdir()
+    (tmp_path / ".crucible" / "config.yaml").write_text(_make_minimal_config_yaml(repeat=3))
+    from crucible.config import load_config
+    config = load_config(tmp_path)
+    result = run_stability_check_and_update(tmp_path, config, runs=3)
+    assert result.stable is True
+    assert result.reason == "repeat already configured"
 
 
 def test_validate_artifacts_overlap_with_editable(tmp_path):

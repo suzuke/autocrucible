@@ -101,7 +101,7 @@ class Orchestrator:
         # and agents don't trigger violations by accidentally touching them
         gitignore = self.workspace / ".gitignore"
         lines = gitignore.read_text().splitlines() if gitignore.exists() else []
-        needed = [p for p in ("results-*.jsonl", "run.log", "logs/") if p not in lines]
+        needed = [p for p in ("results-*.jsonl", "run.log", "logs/", ".crucible/.validated") if p not in lines]
         # Add artifacts paths to gitignore and create directories
         for artifact_path in self.config.files.artifacts:
             if artifact_path not in lines:
