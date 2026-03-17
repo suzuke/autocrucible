@@ -86,6 +86,12 @@ class SandboxRunner:
         # Mount workspace as readonly
         cmd.extend(["-v", f"{self.workspace}:/workspace:ro", "-w", "/workspace"])
 
+        # Shadow .env variants with /dev/null so agent-generated code cannot
+        # read secrets even if the hook is bypassed (defense-in-depth)
+        for env_name in (".env", ".env.local", ".env.production", ".env.staging"):
+            if (self.workspace / env_name).exists():
+                cmd.extend(["-v", f"/dev/null:/workspace/{env_name}:ro"])
+
         # Mount editable files as read-write (override readonly)
         for f in self.editable_files:
             fpath = self.workspace / f
