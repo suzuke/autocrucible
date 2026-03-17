@@ -138,6 +138,9 @@ crucible new ~/my-project -e <example-name>
 | `optimize-compress` | `compression_ratio` | maximize | Lossless text compression (no zlib/gzip allowed) |
 | `optimize-gomoku` | `win_rate` | maximize | AlphaZero-style Gomoku agent training |
 | `optimize-snake` | `avg_score` | maximize | Snake AI heuristic search (no dependencies) |
+| `optimize-monte-carlo` | `error` | minimize | Monte Carlo integration — showcases stability validation |
+| `optimize-cipher` | `throughput` | maximize | Substitution cipher — showcases restart strategy |
+| `optimize-pathfind` | `nodes_explored` | minimize | Grid pathfinding — showcases beam strategy |
 
 ### Demo: optimize-compress
 
@@ -153,6 +156,51 @@ Starting from a baseline RLE compressor (0.51x — worse than no compression), t
 - **Iter 1**: Implements LZ77 + Huffman → ~2.63x
 - **Iter 2**: Adds optimal parsing DP + symbol remapping → ~2.81x (beats zlib's 2.65x)
 - **Iter 3+**: Context modeling, arithmetic coding → 3.0x+
+
+### v0.5.0 Feature Showcase Examples
+
+Three examples that demonstrate the v0.5.0 search strategy and stability features:
+
+#### optimize-monte-carlo — Stability Validation
+
+Monte Carlo integration of ∫₀¹ x² dx. Each run uses different random samples, so the metric varies by ~30–40% between runs — exactly the scenario that makes single-run evaluation unreliable.
+
+```bash
+crucible new ~/mc -e optimize-monte-carlo
+cd ~/mc
+crucible validate          # detects CV ~36% > 5%, auto-writes evaluation.repeat: 3
+crucible run --tag mc-v1   # now each iteration runs 3× and reports median
+```
+
+The stability check prevents the agent from chasing noise: without `evaluation.repeat`, a "lucky" run looks like an improvement even when nothing changed.
+
+#### optimize-cipher — Restart Strategy
+
+Substitution cipher on 1 MB of text. The loop-based baseline can be optimized (list comprehension, caching) to ~55 MB/s — but `str.translate()` runs at 200+ MB/s and is a completely different approach that greedy search won't reach on its own.
+
+```bash
+crucible new ~/cipher -e optimize-cipher
+cd ~/cipher
+crucible run --tag cipher-v1
+```
+
+With `plateau_threshold: 4`, after 4 stagnant iterations the platform resets to the original code and injects full history. The agent sees "loop optimizations reached ceiling" and explores `str.translate()` — a ~4× breakthrough.
+
+**Key insight:** Restart is not "retry". The code resets, but the agent retains full history and knows exactly which directions are exhausted.
+
+#### optimize-pathfind — Beam Strategy
+
+BFS pathfinding on 100 random 20×20 grids. BFS visits ~40–70% of grid cells; A* with Manhattan heuristic visits ~10–20%; jump-point search is even more efficient.
+
+```bash
+crucible new ~/pathfind -e optimize-pathfind
+cd ~/pathfind
+crucible run --tag pathfind-v1
+```
+
+With `beam_width: 3`, three independent branches explore different algorithm families. Each beam sees a compact summary of what others tried — if beam-0 found bidirectional BFS and beam-1 found A*, beam-2 won't waste iterations reimplementing them.
+
+**Key insight:** Beam is serial (one agent at a time, cost proportional to iterations). The advantage is exploration breadth, not speed.
 
 ## Project Structure
 

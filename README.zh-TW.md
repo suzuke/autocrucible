@@ -138,6 +138,9 @@ crucible new ~/my-project -e <範例名稱>
 | `optimize-compress` | `compression_ratio` | maximize | 無損文字壓縮（禁用 zlib/gzip） |
 | `optimize-gomoku` | `win_rate` | maximize | AlphaZero 風格五子棋 agent 訓練 |
 | `optimize-snake` | `avg_score` | maximize | 貪食蛇 AI 啟發式搜尋（無外部依賴） |
+| `optimize-monte-carlo` | `error` | minimize | Monte Carlo 積分——展示穩定性驗證功能 |
+| `optimize-cipher` | `throughput` | maximize | 替換式加密——展示 restart 搜尋策略 |
+| `optimize-pathfind` | `nodes_explored` | minimize | 網格路徑搜尋——展示 beam 搜尋策略 |
 
 ### 範例展示：optimize-compress
 
@@ -153,6 +156,51 @@ crucible run --tag run1
 - **Iter 1**：實作 LZ77 + Huffman → ~2.63x
 - **Iter 2**：加入最佳解析 DP + symbol remapping → ~2.81x（超越 zlib 的 2.65x）
 - **Iter 3+**：上下文建模、算術編碼 → 3.0x+
+
+### v0.5.0 功能展示範例
+
+三個範例分別展示 v0.5.0 的搜尋策略與穩定性驗證功能：
+
+#### optimize-monte-carlo — 穩定性驗證
+
+Monte Carlo 積分估算 ∫₀¹ x² dx。每次跑都用不同的隨機樣本，指標在各次之間變動約 30–40%——正是讓單次評估不可靠的典型情境。
+
+```bash
+crucible new ~/mc -e optimize-monte-carlo
+cd ~/mc
+crucible validate          # 偵測 CV ~36% > 5%，自動寫入 evaluation.repeat: 3
+crucible run --tag mc-v1   # 每次迭代跑 3 次，取 median
+```
+
+穩定性檢查防止 agent 追逐雜訊：沒有 `evaluation.repeat`，「運氣好」的單次跑看起來像是改善，實際上什麼都沒有進步。
+
+#### optimize-cipher — Restart 策略
+
+1 MB 文字的替換式加密。loop-based baseline 可以優化到 ~55 MB/s，但 `str.translate()` 可達 200+ MB/s——完全不同的方法，greedy 搜尋不會自然走到這條路。
+
+```bash
+crucible new ~/cipher -e optimize-cipher
+cd ~/cipher
+crucible run --tag cipher-v1
+```
+
+`plateau_threshold: 4` 觸發後，平台重置代碼並注入完整歷史。Agent 看到「loop 優化已到 ceiling」，轉而嘗試 `str.translate()`——達到 ~4× 的突破。
+
+**核心概念：** Restart 不是「重試」。代碼重置了，但 agent 保有完整歷史，清楚知道哪些方向已經走到盡頭。
+
+#### optimize-pathfind — Beam 策略
+
+100 個隨機 20×20 網格迷宮的最短路徑搜尋。BFS 會走遍 40–70% 的格子；A* 搭配 Manhattan 啟發式只需 10–20%；Jump Point Search 更進一步。
+
+```bash
+crucible new ~/pathfind -e optimize-pathfind
+cd ~/pathfind
+crucible run --tag pathfind-v1
+```
+
+`beam_width: 3` 讓三個獨立分支探索不同演算法家族。每個 beam 都能看到其他 beam 嘗試過什麼——如果 beam-0 找到了 bidirectional BFS、beam-1 找到了 A*，beam-2 就不會浪費迭代重新實作同樣的東西。
+
+**核心概念：** Beam 是串行執行（一次跑一個 agent），成本與迭代次數成正比。優勢是探索廣度，而非速度。
 
 ## 專案結構
 
