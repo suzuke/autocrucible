@@ -5,7 +5,9 @@
 
 [繁體中文](README.zh-TW.md) | English
 
-A general-purpose autonomous experiment platform. Define what to edit, how to run, and what to measure — then let an LLM agent iterate indefinitely to optimize your metric.
+Like [autoresearch](https://github.com/karpathy/autoresearch), but with guardrails. Autonomous experiment loops where the agent **can't** game the metric.
+
+Define what to edit, how to run, and what to measure — then let an LLM agent iterate to optimize your metric. Crucible enforces file-level access control (editable / readonly / hidden), validates metrics, and manages git history automatically. The agent writes code; the platform controls everything else.
 
 ## Prerequisites
 

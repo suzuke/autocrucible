@@ -5,7 +5,9 @@
 
 繁體中文 | [English](README.md)
 
-通用自主實驗平台。定義要編輯的檔案、執行指令和評估指標，然後讓 LLM agent 無限迭代來優化你的指標。
+類似 [autoresearch](https://github.com/karpathy/autoresearch)，但有護欄。自主實驗迴圈，agent **無法**鑽指標的漏洞。
+
+定義要編輯的檔案、執行指令和評估指標，讓 LLM agent 迭代優化。Crucible 強制檔案層級存取控制（editable / readonly / hidden）、驗證 metric 有效性、自動管理 git 歷史。Agent 只負責寫程式碼，平台控制其他一切。
 
 ## 前置需求
 
