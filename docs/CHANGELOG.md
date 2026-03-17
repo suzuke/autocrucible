@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.0
+
+- **Search Strategies** — `search.strategy` config key with three modes: `greedy` (default), `restart`, `beam`. Restart resets to baseline after N stagnant iterations; beam maintains K independent branches with cross-beam context sharing.
+- **Stability Validation** — `crucible validate` runs the experiment 3× and auto-writes `evaluation.repeat: 3` to config.yaml if CV > 5%. Writes `.crucible/.validated` marker to suppress future hints.
+- **Validate Hint** — `crucible run` hints to run `crucible validate` on first iteration when `repeat=1` and not yet validated.
+
 ## v0.4.0
 
 - **JSONL Results** — Structured logging with iteration, timestamp, delta, diff stats, and duration per record. Export raw data with `crucible history --format jsonl`.

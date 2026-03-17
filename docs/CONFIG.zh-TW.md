@@ -23,12 +23,15 @@ commands:
 constraints:
   timeout_seconds: 600                     # 超過此秒數強制終止實驗
   max_retries: 3                           # 連續失敗上限，超過即停止
-  plateau_threshold: 8                     # 連續停滯迭代次數，超過後觸發強化 prompt
   allow_install: false                     # 允許 agent 透過 requirements.txt 新增套件
   budget:                                  # 成本追蹤
     max_cost_usd: 10.0
     max_cost_per_iter_usd: 0.50
     warn_at_percent: 80
+search:                                    # 搜尋策略（選填）
+  strategy: "greedy"                       # greedy（預設）| restart | beam
+  beam_width: 3                            # beam 模式：獨立分支數量
+  plateau_threshold: 8                     # restart + beam：停滯幾次後採取行動
 evaluation:                                # 多次執行評估
   repeat: 1                                # 每次迭代執行幾次（1 = 單次）
   aggregation: "median"                    # median | mean
@@ -84,6 +87,39 @@ print(f"metric: {metric}")
 ```
 
 把複雜度放在你的領域邏輯裡（它本來就屬於那裡），而不是平台裡。
+
+## 搜尋策略
+
+控制 crucible 如何探索優化空間。透過頂層的 `search` key 設定。
+
+### `greedy`（預設）
+
+永遠基於目前最佳 commit 繼續。在曲面平滑時效率最高，但長時間運行可能卡在局部最優。
+
+### `restart`
+
+當 `plateau_threshold` 次連續迭代都沒有改善時，重置回初始 baseline commit，並嘗試完全不同的方向——完整歷史保留作為 agent context。
+
+```yaml
+search:
+  strategy: restart
+  plateau_threshold: 8   # 沒有改善幾次後重置
+```
+
+### `beam`
+
+維護 `beam_width` 個獨立分支，以輪詢方式循環。每個 beam 都能看到其他 beam 嘗試過的內容，避免重複探索。
+
+```yaml
+search:
+  strategy: beam
+  beam_width: 3          # 維護的分支數量
+  plateau_threshold: 8   # beam 模式不使用（每個 beam 有自己的計數器）
+```
+
+**注意：** beam 仍是**串行**執行——一次跑一個 agent。總成本與迭代次數成正比，不會乘以 `beam_width`。優勢是探索廣度，不是速度。
+
+**何時使用 beam：** 你有 50+ 次迭代預算，且懷疑搜尋空間有多個不同的局部最優。
 
 ## Git 策略
 
