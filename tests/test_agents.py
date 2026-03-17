@@ -267,6 +267,43 @@ async def test_hook_denies_hidden_subdir():
     assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+@pytest.mark.asyncio
+async def test_hook_blocks_env_read(tmp_path):
+    """Read tool on .env should be denied."""
+    hooks = _make_file_hooks(set(), set(), tmp_path)
+    hook_fn = hooks["PreToolUse"][0].hooks[0]
+    result = await hook_fn(
+        {"tool_name": "Read", "tool_input": {"file_path": str(tmp_path / ".env")}},
+        None, None,
+    )
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "sensitive" in result["hookSpecificOutput"]["permissionDecisionReason"].lower()
+
+
+@pytest.mark.asyncio
+async def test_hook_blocks_ssh_dir_read(tmp_path):
+    """Read tool on .ssh/config should be denied."""
+    hooks = _make_file_hooks(set(), set(), tmp_path)
+    hook_fn = hooks["PreToolUse"][0].hooks[0]
+    result = await hook_fn(
+        {"tool_name": "Read", "tool_input": {"file_path": str(tmp_path / ".ssh" / "config")}},
+        None, None,
+    )
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+@pytest.mark.asyncio
+async def test_hook_allows_normal_read(tmp_path):
+    """Read tool on a regular file should not be denied by sensitive pattern check."""
+    hooks = _make_file_hooks(set(), set(), tmp_path)
+    hook_fn = hooks["PreToolUse"][0].hooks[0]
+    result = await hook_fn(
+        {"tool_name": "Read", "tool_input": {"file_path": str(tmp_path / "solution.py")}},
+        None, None,
+    )
+    assert result == {}
+
+
 # -- capabilities tests --------------------------------------------------------
 
 

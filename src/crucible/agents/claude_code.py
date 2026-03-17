@@ -46,6 +46,34 @@ SYSTEM_PROMPT = (
 )
 
 
+# Sensitive file patterns — hardcoded, not configurable (prevents agent self-escalation)
+_SENSITIVE_DIR_PATTERNS: frozenset[str] = frozenset({
+    ".ssh", ".aws", ".gnupg", ".kube", ".azure", ".gcloud",
+})
+
+_SENSITIVE_FILE_PREFIXES: frozenset[str] = frozenset({
+    ".env",
+})
+
+
+def _is_sensitive_path(rel: str) -> bool:
+    """Return True if the relative path matches any sensitive pattern.
+
+    Checks:
+    - Any path component matches a sensitive directory name exactly
+    - The filename starts with a sensitive file prefix (.env, .env.local, etc.)
+    """
+    parts = Path(rel).parts
+    for part in parts:
+        if part in _SENSITIVE_DIR_PATTERNS:
+            return True
+    filename = parts[-1] if parts else ""
+    for prefix in _SENSITIVE_FILE_PREFIXES:
+        if filename == prefix or filename.startswith(prefix + "."):
+            return True
+    return False
+
+
 def _resolve_rel_path(raw: str, workspace: Path) -> str | None:
     """Resolve a tool input path to a relative path within the workspace.
 
@@ -61,7 +89,7 @@ def _resolve_rel_path(raw: str, workspace: Path) -> str | None:
             return None
     else:
         rel = str(p)
-    return rel.lstrip("./")
+    return rel.removeprefix("./")
 
 
 def _make_file_hooks(
@@ -93,6 +121,20 @@ def _make_file_hooks(
                     "permissionDecisionReason": (
                         f"Access denied: {rel} is a hidden platform-managed file. "
                         "Do NOT attempt to read, write, or create this file."
+                    ),
+                }
+            }
+
+        # Deny read access to sensitive credential files
+        _read_tools = {"Read", "Glob", "Grep"}
+        if tool_name in _read_tools and _is_sensitive_path(rel):
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        f"Access denied: {rel} matches sensitive file pattern. "
+                        "Crucible does not allow reading credential or key files."
                     ),
                 }
             }
