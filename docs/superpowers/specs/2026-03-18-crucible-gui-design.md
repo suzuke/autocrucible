@@ -42,7 +42,7 @@ The Tauri app reads experiment data directly from the filesystem. No API server,
 
 ```
 open_project(path: String) → ProjectInfo
-  { name, config, tags: Vec<String> }
+  { name, config, tags: Vec<String>, metric_direction: "minimize" | "maximize" }
 
 list_recent_projects() → Vec<ProjectInfo>
   // Persisted in Tauri app data
@@ -59,9 +59,11 @@ get_results(path: String, tag: String) → Vec<ExperimentRecord>
 ```
 
 `ExperimentRecord` fields (matching crucible's JSONL schema):
-- commit, metric_value, status, description, iteration, timestamp
-- delta, delta_percent, files_changed, diff_stats
-- duration_seconds, usage (tokens + cost), log_dir, beam_id
+- commit (7-char short hash), metric_value, status, description, iteration, timestamp
+- delta, delta_percent, files_changed, diff_stats: `{ insertions: int, deletions: int }`
+- duration_seconds, usage: `{ input_tokens: int?, output_tokens: int?, estimated_cost_usd: float? }`, log_dir, beam_id
+
+Status values: `"keep"`, `"discard"`, `"crash"`, `"baseline"`. (Violations/skips are not logged to JSONL.)
 
 ### Iteration Details
 
@@ -100,6 +102,9 @@ Frontend invoke("get_results", {path, tag})
 - **Lazy loading**: all data fetched on demand, no background scanning
 - **Readonly git**: `git2` opens repo in readonly mode
 - **Fault-tolerant JSONL**: skip malformed lines (matches crucible's results.py behavior)
+- **Short commit hashes**: JSONL stores 7-char hashes; `git2::Repository::revparse_single()` resolves these
+- **Numeric sorting**: `logs/iter-N/` directories sorted by numeric suffix, not lexicographically
+- **Beam search files**: `results-{tag}-beam-{N}.jsonl` shown as separate experiments grouped under parent tag
 
 ## UI Layout & Pages
 
@@ -118,8 +123,10 @@ Left sidebar navigation + right content area. Dark theme default.
 **Top section: Metric Trend Chart**
 - X axis: iteration number
 - Y axis: metric value
-- Color coding: green dots = keep, gray = discard, red = crash
+- Color coding: green = keep, gray = discard, red = crash, blue diamond = baseline
 - Line connecting kept values to show improvement trajectory
+- Crash records (metric_value=0.0) excluded from Y-axis scale; rendered as icons at chart bottom
+- Chart orientation respects `metric_direction` from config (up=good for maximize, down=good for minimize)
 
 **Bottom section: Iteration Timeline Table**
 - Columns: `#` | Status icon | Metric | Delta | Cost | Duration | Description
