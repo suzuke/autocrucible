@@ -486,6 +486,8 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
                     )
 
         orch.init(fork_from=fork_from)
+        if config.search.strategy == "beam":
+            orch.init_beams()
 
         # Sync venv to match current branch's requirements
         # This ensures a fresh run doesn't inherit packages from a previous run

@@ -12,6 +12,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+from dataclasses import dataclass, field
+
 from crucible.agents.base import AgentInterface
 from crucible.budget import BudgetGuard
 from crucible.config import Config
@@ -20,6 +22,18 @@ from crucible.git_manager import GitManager
 from crucible.guardrails import GuardRails
 from crucible.results import ExperimentRecord, ResultsLog, results_filename
 from crucible.runner import ExperimentRunner
+
+
+@dataclass
+class BeamState:
+    """Per-beam state for beam search strategy."""
+    beam_id: int
+    results: ResultsLog
+    context: ContextAssembler
+    consecutive_failures: int = 0
+    consecutive_skips: int = 0
+    fail_seq: int = 0
+    iteration: int = 0
 
 
 class Orchestrator:
@@ -81,6 +95,10 @@ class Orchestrator:
         self._consecutive_skips = 0
         self._stop = False
         self._iteration = 0
+        self._baseline_commit: str = ""
+        self._current_beam_id: int | None = None
+        self._beams: list[BeamState] = []
+        self._current_beam_idx: int = 0
 
     def init(self, fork_from: tuple[str, float, str] | None = None) -> None:
         """Create the experiment branch and initialise results-{tag}.tsv.
@@ -94,6 +112,7 @@ class Orchestrator:
             self.git.create_branch_from(self.tag, commit)
         else:
             self.git.create_branch(self.tag)
+        self._baseline_commit = self.git.head()
         self.results.init()
         if fork_from is not None:
             self.results.seed_baseline(metric_value, commit[:7], source_tag)
@@ -282,6 +301,7 @@ class Orchestrator:
             duration_seconds=duration_seconds,
             usage=agent_result.usage,
             log_dir=f"logs/iter-{self._iteration}",
+            beam_id=self._current_beam_id,
         )
 
     def _save_iteration_logs(self, iteration: int, agent_result) -> None:
@@ -329,11 +349,54 @@ class Orchestrator:
                     pass
         return {"insertions": insertions, "deletions": deletions}
 
+    def _count_plateau_streak(self) -> int:
+        """Count consecutive non-keep records from the end of results."""
+        records = self.results.read_all()
+        streak = 0
+        for r in reversed(records):
+            if r.status == "keep":
+                break
+            streak += 1
+        return streak
+
+    def init_beams(self) -> None:
+        """Initialize beam branches and per-beam state. Call after init()."""
+        beam_width = self.config.search.beam_width
+        self.git.create_beam_branches(self.tag, beam_width)
+        self._beams = []
+        for i in range(beam_width):
+            beam_branch = f"{self.config.git.branch_prefix}/{self.tag}-beam-{i}"
+            beam_results = ResultsLog(
+                self.workspace / f"results-{self.tag}-beam-{i}.jsonl"
+            )
+            beam_results.init()
+            beam_context = ContextAssembler(
+                config=self.config,
+                project_root=self.workspace,
+                branch_name=beam_branch,
+            )
+            self._beams.append(BeamState(
+                beam_id=i,
+                results=beam_results,
+                context=beam_context,
+            ))
+        self._current_beam_idx = 0
+
     def run_loop(self, max_iterations: int | None = None) -> None:
         """Run iterations until stopped, budget exceeded, or max_iterations reached."""
+        strategy = self.config.search.strategy
+        if strategy == "beam":
+            self._run_loop_beam(max_iterations)
+        else:
+            self._run_loop_serial(max_iterations)
+
+    def _run_loop_serial(self, max_iterations: int | None = None) -> None:
+        """Serial loop for greedy and restart strategies."""
         if max_iterations is None:
             max_iterations = self.config.constraints.max_iterations
 
+        strategy = self.config.search.strategy
+        plateau_threshold = self.config.search.plateau_threshold
         max_retries = self.config.constraints.max_retries
         session_count = 0
         try:
@@ -365,5 +428,115 @@ class Orchestrator:
                 if self._consecutive_skips >= max_retries:
                     logger.warning(f"[iter {self._iteration}] {max_retries} consecutive skips, stopping.")
                     break
+
+                # Restart strategy: reset to baseline on plateau
+                if strategy == "restart" and self._baseline_commit:
+                    streak = self._count_plateau_streak()
+                    if streak >= plateau_threshold:
+                        logger.info(
+                            f"[iter {self._iteration}] Plateau ({streak} iters) — "
+                            "restarting from baseline"
+                        )
+                        self.git.reset_to_commit(self._baseline_commit)
+                        self.context.add_error(
+                            f"⟳ RESTART — {streak} iterations without improvement. "
+                            "Returning to baseline. Your full history is preserved above. "
+                            "Choose a completely different direction."
+                        )
+                        self._consecutive_failures = 0
+
         except KeyboardInterrupt:
             logger.info(f"Stopped after {self._iteration} iterations.")
+
+    def _run_loop_beam(self, max_iterations: int | None = None) -> None:
+        """Beam search: round-robin across beam_width branches."""
+        if max_iterations is None:
+            max_iterations = self.config.constraints.max_iterations
+        max_retries = self.config.constraints.max_retries
+        session_count = 0
+
+        try:
+            while True:
+                if max_iterations is not None and session_count >= max_iterations:
+                    break
+
+                # All beams exhausted?
+                if self._beams and all(b.consecutive_failures >= max_retries for b in self._beams):
+                    logger.info("All beams exhausted consecutive failures — stopping.")
+                    break
+
+                # Pick next beam (round-robin, skip exhausted beams)
+                if not self._beams:
+                    logger.warning("No beams initialized — falling back to serial loop.")
+                    self._run_loop_serial(max_iterations)
+                    return
+
+                beam = self._beams[self._current_beam_idx % len(self._beams)]
+                self._current_beam_idx += 1
+                if beam.consecutive_failures >= max_retries:
+                    continue
+
+                # Checkout beam branch
+                self.git.checkout_beam(self.tag, beam.beam_id)
+
+                # Build cross-beam summaries for OTHER beams
+                other_summaries = []
+                for b in self._beams:
+                    if b.beam_id == beam.beam_id:
+                        continue
+                    best_rec = b.results.best(self.config.metric.direction)
+                    other_summaries.append({
+                        "beam_id": b.beam_id,
+                        "best": best_rec.metric_value if best_rec else None,
+                        "tried": b.results.read_all(),
+                    })
+
+                # Inject cross-beam context
+                beam.context._beam_summaries = other_summaries
+
+                # Swap orchestrator state to this beam
+                orig_results = self.results
+                orig_context = self.context
+                orig_fail_seq = self._fail_seq
+                orig_consec_fail = self._consecutive_failures
+                orig_consec_skip = self._consecutive_skips
+                orig_iter = self._iteration
+                self._current_beam_id = beam.beam_id
+
+                self.results = beam.results
+                self.context = beam.context
+                self._fail_seq = beam.fail_seq
+                self._consecutive_failures = beam.consecutive_failures
+                self._consecutive_skips = beam.consecutive_skips
+                self._iteration = beam.iteration
+
+                status = self.run_one_iteration()
+                session_count += 1
+
+                # Sync beam state back
+                beam.fail_seq = self._fail_seq
+                beam.consecutive_failures = self._consecutive_failures
+                beam.consecutive_skips = self._consecutive_skips
+                beam.iteration = self._iteration
+
+                # Restore orchestrator state
+                self.results = orig_results
+                self.context = orig_context
+                self._fail_seq = orig_fail_seq
+                self._consecutive_failures = orig_consec_fail
+                self._consecutive_skips = orig_consec_skip
+                self._iteration = orig_iter
+                self._current_beam_id = None
+
+                best = beam.results.best(self.config.metric.direction)
+                best_str = f"{best.metric_value}" if best else "N/A"
+                logger.info(
+                    f"[beam-{beam.beam_id} iter {beam.iteration}] {status} "
+                    f"| best {self.config.metric.name}: {best_str}"
+                )
+
+                if status == "budget_exceeded":
+                    break
+
+        except KeyboardInterrupt:
+            logger.info("Stopped.")
