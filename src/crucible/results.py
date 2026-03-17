@@ -37,6 +37,7 @@ class ExperimentRecord:
     duration_seconds: float | None = None
     usage: UsageInfo | None = None
     log_dir: str | None = None
+    beam_id: int | None = None
 
 
 def _serialize_record(record: ExperimentRecord) -> str:
