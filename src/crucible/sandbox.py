@@ -13,6 +13,12 @@ from crucible.runner import ExperimentRunner, RunResult, run_with_repeat
 
 logger = logging.getLogger(__name__)
 
+# Env files that are always shadow-mounted to /dev/null in Docker for security.
+# These must never appear in editable_files mounts — last -v wins in Docker.
+_SHADOWED_ENV_FILES: frozenset[str] = frozenset({
+    ".env", ".env.local", ".env.production", ".env.staging",
+})
+
 
 def check_docker_available() -> bool:
     """Check if Docker daemon is available."""
@@ -87,13 +93,17 @@ class SandboxRunner:
         cmd.extend(["-v", f"{self.workspace}:/workspace:ro", "-w", "/workspace"])
 
         # Shadow .env variants with /dev/null so agent-generated code cannot
-        # read secrets even if the hook is bypassed (defense-in-depth)
-        for env_name in (".env", ".env.local", ".env.production", ".env.staging"):
+        # read secrets even if the hook is bypassed (defense-in-depth).
+        # Docker-mode only. Native mode relies on the PreToolUse hook.
+        for env_name in _SHADOWED_ENV_FILES:
             if (self.workspace / env_name).exists():
                 cmd.extend(["-v", f"/dev/null:/workspace/{env_name}:ro"])
 
-        # Mount editable files as read-write (override readonly)
+        # Mount editable files as read-write (override readonly).
+        # Skip any files in _SHADOWED_ENV_FILES — the shadow mount must win.
         for f in self.editable_files:
+            if f in _SHADOWED_ENV_FILES:
+                continue
             fpath = self.workspace / f
             if fpath.exists():
                 cmd.extend(["-v", f"{fpath}:/workspace/{f}:rw"])

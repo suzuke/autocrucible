@@ -346,3 +346,84 @@ def test_docker_shadows_env_file(tmp_path):
             args = mock_popen.call_args[0][0]
             args_str = " ".join(str(a) for a in args)
             assert "/dev/null:/workspace/.env:ro" in args_str
+
+
+def test_docker_does_not_shadow_env_if_absent(tmp_path):
+    """Shadow mount should NOT appear when .env does not exist."""
+    import unittest.mock as mock
+    from crucible.config import SandboxConfig
+    from crucible.sandbox import SandboxRunner
+
+    # Do NOT create any .env file
+    config = SandboxConfig(backend="docker", base_image="python:3.11-slim")
+    runner = SandboxRunner(config=config, workspace=tmp_path)
+
+    with patch.object(runner, "_ensure_image", return_value="crucible-test:latest"):
+        with mock.patch("crucible.sandbox.subprocess.Popen") as mock_popen:
+            mock_proc = mock.MagicMock()
+            mock_proc.communicate.return_value = ("", "")
+            mock_proc.returncode = 0
+            mock_popen.return_value = mock_proc
+
+            runner._docker_run("echo test", 30)
+
+            args = mock_popen.call_args[0][0]
+            args_str = " ".join(str(a) for a in args)
+            assert "/dev/null:/workspace/.env:ro" not in args_str
+
+
+def test_docker_shadows_all_env_variants(tmp_path):
+    """All four .env variants should be shadowed when they exist."""
+    import unittest.mock as mock
+    from crucible.config import SandboxConfig
+    from crucible.sandbox import SandboxRunner
+
+    env_files = [".env", ".env.local", ".env.production", ".env.staging"]
+    for name in env_files:
+        (tmp_path / name).write_text("SECRET=abc")
+
+    config = SandboxConfig(backend="docker", base_image="python:3.11-slim")
+    runner = SandboxRunner(config=config, workspace=tmp_path)
+
+    with patch.object(runner, "_ensure_image", return_value="crucible-test:latest"):
+        with mock.patch("crucible.sandbox.subprocess.Popen") as mock_popen:
+            mock_proc = mock.MagicMock()
+            mock_proc.communicate.return_value = ("", "")
+            mock_proc.returncode = 0
+            mock_popen.return_value = mock_proc
+
+            runner._docker_run("echo test", 30)
+
+            args = mock_popen.call_args[0][0]
+            args_str = " ".join(str(a) for a in args)
+            for name in env_files:
+                assert f"/dev/null:/workspace/{name}:ro" in args_str, f"Missing shadow for {name}"
+
+
+def test_docker_shadow_not_overridden_by_editable(tmp_path):
+    """.env in editable_files must not override the shadow mount."""
+    import unittest.mock as mock
+    from crucible.config import SandboxConfig
+    from crucible.sandbox import SandboxRunner
+
+    (tmp_path / ".env").write_text("SECRET=abc")
+
+    config = SandboxConfig(backend="docker", base_image="python:3.11-slim")
+    # Simulate .env accidentally listed as editable
+    runner = SandboxRunner(config=config, workspace=tmp_path, editable_files=[".env"])
+
+    with patch.object(runner, "_ensure_image", return_value="crucible-test:latest"):
+        with mock.patch("crucible.sandbox.subprocess.Popen") as mock_popen:
+            mock_proc = mock.MagicMock()
+            mock_proc.communicate.return_value = ("", "")
+            mock_proc.returncode = 0
+            mock_popen.return_value = mock_proc
+
+            runner._docker_run("echo test", 30)
+
+            args = mock_popen.call_args[0][0]
+            args_str = " ".join(str(a) for a in args)
+            # Shadow mount must be present
+            assert "/dev/null:/workspace/.env:ro" in args_str
+            # Real path must NOT be mounted as rw
+            assert f"{tmp_path}/.env:/workspace/.env:rw" not in args_str
