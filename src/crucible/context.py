@@ -347,8 +347,36 @@ class ContextAssembler:
             parts.append(f"\n### {fname}\n```\n{content}\n```\n")
         return "".join(parts)
 
-    def assemble(self, log: ResultsLog) -> str:
+    def _section_cross_beam_history(self, beam_summaries: list[dict]) -> str:
+        """Compact view of other beams' attempts (read-only context for current beam).
+
+        beam_summaries: list of {beam_id: int, best: float | None, tried: list[ExperimentRecord]}
+        """
+        if not beam_summaries:
+            return ""
+
+        lines = ["## Other Beams (read-only — do NOT repeat approaches already tried there)"]
+        for summary in beam_summaries:
+            bid = summary["beam_id"]
+            best = summary.get("best")
+            tried = summary.get("tried", [])
+
+            parts = []
+            for r in tried[-8:]:
+                symbol = {"keep": "✓", "crash": "💥", "discard": "✗"}.get(r.status, "?")
+                parts.append(f"{symbol} {r.description}")
+
+            best_str = f"{best}" if best is not None else "N/A"
+            tried_str = " | ".join(parts) if parts else "no attempts yet"
+            lines.append(f"beam-{bid}  best={best_str}  tried: {tried_str}")
+
+        return "\n".join(lines)
+
+    def assemble(self, log: ResultsLog, beam_summaries: list[dict] | None = None) -> str:
         """Assemble all sections into a complete prompt."""
+        if beam_summaries is None:
+            beam_summaries = getattr(self, "_beam_summaries", None) or []
+
         records = log.read_all()
         direction = self.config.metric.direction
         candidates = [r for r in records if r.status in ("keep", "baseline")]
@@ -370,6 +398,7 @@ class ContextAssembler:
         sections = [
             self._section_instructions(),
             self._section_state(real_records, best, summary),
+            self._section_cross_beam_history(beam_summaries),
             self._section_history(real_records),
             plateau,
             self._section_errors(),
