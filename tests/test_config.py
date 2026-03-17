@@ -209,3 +209,63 @@ def test_max_iterations_parsed_from_yaml(tmp_path):
     (cfg_dir / "config.yaml").write_text(yaml_with_max)
     cfg = load_config(tmp_path)
     assert cfg.constraints.max_iterations == 10
+
+
+def test_search_config_defaults(tmp_path):
+    """SearchConfig loads with defaults when search key absent."""
+    (tmp_path / ".crucible").mkdir()
+    (tmp_path / ".crucible" / "config.yaml").write_text(
+        "name: test\nfiles:\n  editable: [sort.py]\n"
+        "commands:\n  run: python sort.py\n  eval: python eval.py\n"
+        "metric:\n  name: score\n  direction: maximize\n"
+    )
+    from crucible.config import load_config
+    config = load_config(tmp_path)
+    assert config.search.strategy == "greedy"
+    assert config.search.beam_width == 3
+    assert config.search.plateau_threshold == 8
+
+
+def test_search_config_explicit(tmp_path):
+    """SearchConfig reads explicit search block."""
+    (tmp_path / ".crucible").mkdir()
+    (tmp_path / ".crucible" / "config.yaml").write_text(
+        "name: test\nfiles:\n  editable: [sort.py]\n"
+        "commands:\n  run: python sort.py\n  eval: python eval.py\n"
+        "metric:\n  name: score\n  direction: maximize\n"
+        "search:\n  strategy: beam\n  beam_width: 2\n  plateau_threshold: 5\n"
+    )
+    from crucible.config import load_config
+    config = load_config(tmp_path)
+    assert config.search.strategy == "beam"
+    assert config.search.beam_width == 2
+    assert config.search.plateau_threshold == 5
+
+
+def test_search_plateau_backward_compat(tmp_path):
+    """constraints.plateau_threshold still works as fallback."""
+    (tmp_path / ".crucible").mkdir()
+    (tmp_path / ".crucible" / "config.yaml").write_text(
+        "name: test\nfiles:\n  editable: [sort.py]\n"
+        "commands:\n  run: python sort.py\n  eval: python eval.py\n"
+        "metric:\n  name: score\n  direction: maximize\n"
+        "constraints:\n  plateau_threshold: 12\n"
+    )
+    from crucible.config import load_config
+    config = load_config(tmp_path)
+    assert config.search.plateau_threshold == 12
+
+
+def test_search_strategy_invalid(tmp_path):
+    """Invalid strategy raises ConfigError."""
+    (tmp_path / ".crucible").mkdir()
+    (tmp_path / ".crucible" / "config.yaml").write_text(
+        "name: test\nfiles:\n  editable: [sort.py]\n"
+        "commands:\n  run: python sort.py\n  eval: python eval.py\n"
+        "metric:\n  name: score\n  direction: maximize\n"
+        "search:\n  strategy: ucb1\n"
+    )
+    from crucible.config import load_config, ConfigError
+    import pytest
+    with pytest.raises(ConfigError, match="search.strategy"):
+        load_config(tmp_path)

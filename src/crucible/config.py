@@ -90,6 +90,13 @@ class SandboxConfig:
 
 
 @dataclass
+class SearchConfig:
+    strategy: str = "greedy"   # greedy | restart | beam
+    beam_width: int = 3
+    plateau_threshold: int = 8
+
+
+@dataclass
 class Config:
     name: str = ""
     description: str = ""
@@ -101,6 +108,7 @@ class Config:
     git: GitConfig = field(default_factory=GitConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     sandbox: SandboxConfig | None = None
+    search: SearchConfig = field(default_factory=SearchConfig)
 
 
 def _build_context_window(data: dict) -> ContextWindowConfig:
@@ -157,6 +165,18 @@ def _build_sandbox(data: dict | None) -> SandboxConfig | None:
     )
 
 
+def _build_search(search_data: dict, constraints_data: dict) -> SearchConfig:
+    plateau = search_data.get(
+        "plateau_threshold",
+        constraints_data.get("plateau_threshold", 8),
+    )
+    return SearchConfig(
+        strategy=search_data.get("strategy", "greedy"),
+        beam_width=search_data.get("beam_width", 3),
+        plateau_threshold=plateau,
+    )
+
+
 def _require(raw: dict, *keys: str) -> None:
     """Validate that dotted key paths are present and non-empty."""
     for key in keys:
@@ -195,6 +215,13 @@ def load_config(project_root: Path) -> Config:
     direction = raw["metric"]["direction"]
     if direction not in ("minimize", "maximize"):
         raise ConfigError(f"metric.direction must be 'minimize' or 'maximize', got '{direction}'")
+
+    search_data = raw.get("search", {})
+    strategy = search_data.get("strategy", "greedy")
+    if strategy not in ("greedy", "restart", "beam"):
+        raise ConfigError(
+            f"search.strategy must be 'greedy', 'restart', or 'beam', got '{strategy}'"
+        )
 
     files_data = raw.get("files", {})
     commands_data = raw.get("commands", {})
@@ -235,4 +262,8 @@ def load_config(project_root: Path) -> Config:
         ),
         evaluation=_build_evaluation(raw.get("evaluation", {})),
         sandbox=_build_sandbox(raw.get("sandbox")),
+        search=_build_search(
+            raw.get("search", {}),
+            raw.get("constraints", {}),
+        ),
     )

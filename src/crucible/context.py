@@ -365,7 +365,7 @@ class ContextAssembler:
             "crashed": sum(1 for r in real_records if r.status == "crash"),
         }
 
-        plateau = _plateau_hint(real_records, self.config.constraints.plateau_threshold)
+        plateau = _plateau_hint(real_records, self.config.search.plateau_threshold)
 
         sections = [
             self._section_instructions(),

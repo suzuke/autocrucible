@@ -304,7 +304,7 @@ def test_plateau_hint_all_failures():
 
 def test_plateau_hint_in_assembled_output(tmp_path):
     cfg = make_config(tmp_path)
-    cfg.constraints.plateau_threshold = 3
+    cfg.search.plateau_threshold = 3
     (tmp_path / "program.md").write_text("Instructions.")
     tsv = tmp_path / "results.tsv"
     log = ResultsLog(tsv)
