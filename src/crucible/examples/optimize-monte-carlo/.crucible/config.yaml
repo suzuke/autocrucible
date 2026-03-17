@@ -1,25 +1,22 @@
-name: "optimize-monte-carlo"
-
+agent:
+  instructions: program.md
+commands:
+  eval: grep '^error:' run.log
+  run: python3 -u benchmark.py > run.log 2>&1
+constraints:
+  max_retries: 3
+  timeout_seconds: 30
+evaluation:
+  aggregation: median
+  repeat: 3
 files:
   editable:
-    - "estimate.py"
+  - estimate.py
   hidden:
-    - "benchmark.py"
-
-commands:
-  run: "python3 -u benchmark.py > run.log 2>&1"
-  eval: "grep '^error:' run.log"
-
-metric:
-  name: "error"
-  direction: "minimize"
-
-constraints:
-  timeout_seconds: 30
-  max_retries: 3
-
-agent:
-  instructions: "program.md"
-
+  - benchmark.py
 git:
-  branch_prefix: "crucible"
+  branch_prefix: crucible
+metric:
+  direction: minimize
+  name: error
+name: optimize-monte-carlo
