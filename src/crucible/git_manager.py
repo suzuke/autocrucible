@@ -84,6 +84,22 @@ class GitManager:
         branch_name = f"{self.branch_prefix}/{tag}"
         return self._run("show", f"{branch_name}:{file_path}")
 
+    def reset_to_commit(self, commit: str) -> None:
+        """Hard-reset HEAD to a specific commit (e.g., baseline)."""
+        self._run("reset", "--hard", commit)
+
+    def create_beam_branches(self, tag: str, beam_width: int) -> None:
+        """Create beam_width branches all starting at the current HEAD."""
+        current = self.head()
+        for i in range(beam_width):
+            beam_branch = f"{self.branch_prefix}/{tag}-beam-{i}"
+            self._run("branch", beam_branch, current)
+
+    def checkout_beam(self, tag: str, beam_id: int) -> None:
+        """Checkout the beam branch for the given beam_id."""
+        branch_name = f"{self.branch_prefix}/{tag}-beam-{beam_id}"
+        self._run("checkout", branch_name)
+
     def revert_changes(self) -> None:
         """Discard all working tree changes and remove untracked files."""
         self._run("checkout", "--", ".")
