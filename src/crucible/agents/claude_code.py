@@ -169,20 +169,28 @@ class ClaudeCodeAgent(AgentInterface):
         system_prompt_file: str | None = None,
         hidden_files: set[str] | None = None,
         editable_files: set[str] | None = None,
+        language: str | None = None,
     ):
         self.timeout = timeout
         self.model = model
         self.system_prompt_file = system_prompt_file
         self.hidden_files: set[str] = hidden_files or set()
         self.editable_files: set[str] = editable_files or set()
+        self.language = language
 
     def get_system_prompt(self, workspace: Path) -> str:
         """Return system prompt: custom file content or default."""
         if self.system_prompt_file:
             prompt_path = workspace / ".crucible" / self.system_prompt_file
             if prompt_path.exists():
-                return prompt_path.read_text().strip()
-        return SYSTEM_PROMPT
+                prompt = prompt_path.read_text().strip()
+                if self.language:
+                    prompt += f"\n\nWrite ALL your summaries and descriptions in {self.language}."
+                return prompt
+        prompt = SYSTEM_PROMPT
+        if self.language:
+            prompt += f"\n\nWrite ALL your summaries and descriptions in {self.language}."
+        return prompt
 
     def generate_edit(self, prompt: str, workspace: Path) -> AgentResult:
         """Run Claude Agent SDK to generate code edits.

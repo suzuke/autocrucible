@@ -70,6 +70,26 @@ def test_custom_system_prompt(tmp_path):
     assert agent.get_system_prompt(tmp_path) == "You are a custom agent."
 
 
+def test_language_appended_to_system_prompt(tmp_path):
+    from crucible.agents.claude_code import SYSTEM_PROMPT
+    # No language → default prompt unchanged
+    agent = ClaudeCodeAgent()
+    assert agent.get_system_prompt(tmp_path) == SYSTEM_PROMPT
+    # With language → appended to default prompt
+    agent = ClaudeCodeAgent(language="zh-TW")
+    prompt = agent.get_system_prompt(tmp_path)
+    assert prompt.startswith(SYSTEM_PROMPT)
+    assert "zh-TW" in prompt
+    # With language + custom prompt file
+    crucible_dir = tmp_path / ".crucible"
+    crucible_dir.mkdir(exist_ok=True)
+    (crucible_dir / "custom.md").write_text("Custom agent.")
+    agent = ClaudeCodeAgent(system_prompt_file="custom.md", language="ja")
+    prompt = agent.get_system_prompt(tmp_path)
+    assert prompt.startswith("Custom agent.")
+    assert "ja" in prompt
+
+
 def test_claude_code_agent_error_handling(tmp_path):
     """Test that agent errors are handled gracefully."""
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)

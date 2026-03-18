@@ -26,6 +26,7 @@ class AgentConfig:
     instructions: Optional[str] = None
     system_prompt: Optional[str] = None
     model: str | None = None
+    language: str | None = None
     base_url: str | None = None
     context_window: ContextWindowConfig = field(default_factory=ContextWindowConfig)
 
