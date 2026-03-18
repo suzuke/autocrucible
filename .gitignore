@@ -15,3 +15,4 @@ run.log
 .claude/*
 !.claude/skills/
 .worktrees/
+.superpowers/
