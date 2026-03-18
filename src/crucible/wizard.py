@@ -328,4 +328,13 @@ class ExperimentWizard:
         # Create .gitignore
         (dest / ".gitignore").write_text(GITIGNORE_CONTENT)
 
+        # Fix: ensure config.yaml and program.md are inside .crucible/
+        crucible_dir = dest / ".crucible"
+        for fname in ("config.yaml", "program.md"):
+            root_file = dest / fname
+            target = crucible_dir / fname
+            if root_file.exists() and not target.exists():
+                crucible_dir.mkdir(parents=True, exist_ok=True)
+                root_file.rename(target)
+
         return result["summary"]
