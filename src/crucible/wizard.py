@@ -210,6 +210,86 @@ def _format_environment(env: dict) -> str:
     return "\n".join(lines)
 
 
+def _normalize_config(config_path: Path, decisions: dict) -> None:
+    """Fix common config.yaml mistakes from Claude's generation.
+
+    Claude often produces flat keys (timeout, max_retries, metric_name)
+    instead of the nested structure crucible expects (constraints.timeout_seconds,
+    metric.name, etc.). This normalizes the config in-place.
+    """
+    import yaml
+
+    if not config_path.exists():
+        return
+
+    raw = yaml.safe_load(config_path.read_text())
+    if not isinstance(raw, dict):
+        return
+
+    changed = False
+
+    # Ensure metric section exists with name and direction
+    if "metric" not in raw or not isinstance(raw.get("metric"), dict):
+        metric_name = (
+            raw.pop("metric_name", None)
+            or decisions.get("metric_name")
+            or "metric"
+        )
+        metric_dir = (
+            raw.pop("metric_direction", None)
+            or decisions.get("metric_direction")
+            or "maximize"
+        )
+        # "metric" might be a string (the name) instead of a dict
+        if isinstance(raw.get("metric"), str):
+            metric_name = raw.pop("metric")
+        raw["metric"] = {"name": str(metric_name), "direction": str(metric_dir)}
+        changed = True
+    else:
+        m = raw["metric"]
+        if "name" not in m:
+            m["name"] = decisions.get("metric_name", "metric")
+            changed = True
+        if "direction" not in m:
+            m["direction"] = decisions.get("metric_direction", "maximize")
+            changed = True
+
+    # Move flat timeout/max_retries into constraints
+    constraints = raw.setdefault("constraints", {})
+    if not isinstance(constraints, dict):
+        constraints = {}
+        raw["constraints"] = constraints
+    for flat, nested in [
+        ("timeout", "timeout_seconds"),
+        ("timeout_seconds", "timeout_seconds"),
+        ("max_retries", "max_retries"),
+        ("max_iterations", "max_iterations"),
+    ]:
+        if flat in raw and flat not in ("constraints",):
+            val = raw.pop(flat)
+            if nested not in constraints:
+                constraints[nested] = val
+                changed = True
+
+    # Ensure commands.run doesn't redirect to run.log (crucible handles this)
+    cmds = raw.get("commands", {})
+    if isinstance(cmds, dict):
+        for key in ("run", "eval"):
+            cmd = cmds.get(key, "")
+            if isinstance(cmd, str):
+                # Remove "> run.log 2>&1" or "2>&1 | tee run.log" patterns
+                import re
+                cleaned = re.sub(r'\s*[>|]+\s*run\.log\s*2>&1\s*$', '', cmd)
+                cleaned = re.sub(r'\s*2>&1\s*\|\s*tee\s+run\.log\s*$', '', cleaned)
+                cleaned = re.sub(r'\s*>\s*run\.log\s*$', '', cleaned)
+                if cleaned != cmd:
+                    cmds[key] = cleaned.strip()
+                    changed = True
+
+    if changed:
+        config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
+
+
 GITIGNORE_CONTENT = """\
 results-*.jsonl
 run.log
@@ -336,5 +416,8 @@ class ExperimentWizard:
             if root_file.exists() and not target.exists():
                 crucible_dir.mkdir(parents=True, exist_ok=True)
                 root_file.rename(target)
+
+        # Fix: normalize config.yaml to required crucible schema
+        _normalize_config(crucible_dir / "config.yaml", decisions)
 
         return result["summary"]
