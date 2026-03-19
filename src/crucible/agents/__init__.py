@@ -11,7 +11,7 @@ def create_agent(config: AgentConfig, **kwargs) -> AgentInterface:
 
     Config fields (model, language) are used as defaults; explicit kwargs override.
     """
-    defaults: dict = {}
+    defaults: dict[str, object] = {}
     if config.model is not None:
         defaults["model"] = config.model
     if config.language is not None:

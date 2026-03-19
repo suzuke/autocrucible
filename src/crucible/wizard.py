@@ -400,9 +400,10 @@ class ExperimentWizard:
                 )
 
         # Write each file
+        dest_resolved = dest.resolve()
         for rel_path, content in result["files"].items():
             full_path = (dest / rel_path).resolve()
-            if not full_path.is_relative_to(dest.resolve()):
+            if not full_path.is_relative_to(dest_resolved):
                 raise ValueError(
                     f"Path traversal detected: '{rel_path}' resolves outside "
                     f"destination directory"

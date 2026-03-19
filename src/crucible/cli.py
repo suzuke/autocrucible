@@ -358,7 +358,6 @@ def init(tag: str, project_dir: str) -> None:
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
         editable_files=editable,
-        language=config.agent.language,
     )
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
     orch.init()
@@ -431,14 +430,17 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
     if config.constraints.allow_install:
         editable.add("requirements.txt")
 
+    override_kwargs: dict = {}
+    if timeout is not None:
+        override_kwargs["timeout"] = timeout
+    if model is not None:
+        override_kwargs["model"] = model
     agent = create_agent(
         config.agent,
-        timeout=timeout,
-        model=model,
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
         editable_files=editable,
-        language=config.agent.language,
+        **override_kwargs,
     )
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
 
