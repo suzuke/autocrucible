@@ -15,6 +15,7 @@ import json as json_module
 import click
 
 from crucible.config import ConfigError, load_config
+from crucible.preflight import check_claude_cli
 from crucible.results import ResultsLog, results_filename
 
 
@@ -420,6 +421,8 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
         config = load_config(project)
     except ConfigError as e:
         raise click.ClickException(str(e))
+
+    check_claude_cli()
 
     from crucible.agents import create_agent
     from crucible.orchestrator import Orchestrator

@@ -1,6 +1,6 @@
 [project]
 name = "autocrucible"
-version = "0.5.2"
+version = "0.5.3"
 description = "Autonomous experiment platform for iterative LLM agent optimization"
 readme = "README.md"
 license = "MIT"
