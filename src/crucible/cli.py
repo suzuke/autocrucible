@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import importlib.resources
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -498,9 +499,14 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
             click.echo("Syncing environment...")
             sync_cmd = "uv sync" if (project / "pyproject.toml").exists() else None
             if not sync_cmd and (project / "requirements.txt").exists():
-                sync_cmd = "pip install -r requirements.txt"
+                sync_cmd = "python3 -m pip install -r requirements.txt"
             if sync_cmd:
-                subprocess.run(sync_cmd, shell=True, cwd=project, capture_output=True)
+                # Use .venv Python so pip installs to the same env that runs experiments
+                env = os.environ.copy()
+                venv_bin = project / ".venv" / "bin"
+                env["PATH"] = f"{venv_bin}:{env.get('PATH', '')}"
+                env["VIRTUAL_ENV"] = str(project / ".venv")
+                subprocess.run(sync_cmd, shell=True, cwd=project, env=env, capture_output=True)
 
         if config.commands.setup:
             click.echo(f"Running setup: {config.commands.setup}")

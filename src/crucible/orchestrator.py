@@ -324,9 +324,10 @@ class Orchestrator:
         if not req.exists():
             return
         logger.info("Installing updated requirements...")
+        env = self.runner._make_env()
         result = subprocess.run(
-            ["pip", "install", "-r", str(req)],
-            cwd=self.workspace,
+            ["python3", "-m", "pip", "install", "-r", str(req)],
+            cwd=self.workspace, env=env,
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0:
