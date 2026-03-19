@@ -141,6 +141,7 @@ def _build_agent(data: dict) -> AgentConfig:
         system_prompt=data.get("system_prompt"),
         model=data.get("model"),
         base_url=data.get("base_url"),
+        language=data.get("language"),
         context_window=_build_context_window(data.get("context_window", {})),
     )
 
