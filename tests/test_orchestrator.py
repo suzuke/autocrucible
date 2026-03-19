@@ -457,6 +457,48 @@ def test_allow_install_installs_on_requirements_change(tmp_path):
     mock_install.assert_called_once()
 
 
+def test_install_requirements_uses_venv_env(tmp_path):
+    """_install_requirements uses python3 -m pip with .venv PATH."""
+    setup_repo(tmp_path)
+    (tmp_path / "requirements.txt").write_text("numpy\n")
+    # Create a .venv so runner._make_env() will inject it
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+
+    cfg = make_config()
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+
+    with patch("crucible.orchestrator.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        orch._install_requirements()
+
+    mock_run.assert_called_once()
+    args, kwargs = mock_run.call_args
+    # Must use python3 -m pip, not bare pip
+    assert args[0] == ["python3", "-m", "pip", "install", "-r", str(tmp_path / "requirements.txt")]
+    # Must inject .venv into PATH
+    assert str(venv_bin) in kwargs["env"]["PATH"].split(":")[0]
+    assert kwargs["env"]["VIRTUAL_ENV"] == str(tmp_path / ".venv")
+
+
+def test_install_requirements_no_venv_still_uses_python3_m_pip(tmp_path):
+    """_install_requirements uses python3 -m pip even without .venv."""
+    setup_repo(tmp_path)
+    (tmp_path / "requirements.txt").write_text("requests\n")
+
+    cfg = make_config()
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+
+    with patch("crucible.orchestrator.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        orch._install_requirements()
+
+    args, _ = mock_run.call_args
+    assert args[0][:3] == ["python3", "-m", "pip"]
+
+
 def test_init_creates_artifacts_dirs_and_gitignores(tmp_path):
     """init() creates artifact directories and adds them to .gitignore."""
     setup_repo(tmp_path)
