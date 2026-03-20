@@ -2,8 +2,27 @@ import subprocess
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
-from crucible.agents.base import AgentInterface, AgentResult
+from crucible.agents.base import AgentErrorType, AgentInterface, AgentResult
 from crucible.agents.claude_code import ClaudeCodeAgent
+
+
+def test_agent_error_type_enum():
+    assert AgentErrorType.AUTH.value == "auth"
+    assert AgentErrorType.TIMEOUT.value == "timeout"
+    assert AgentErrorType.UNKNOWN.value == "unknown"
+
+
+def test_agent_result_error_type_default():
+    r = AgentResult(modified_files=[], description="ok")
+    assert r.error_type is None
+
+
+def test_agent_result_error_type_set():
+    r = AgentResult(
+        modified_files=[], description="auth fail",
+        error_type=AgentErrorType.AUTH,
+    )
+    assert r.error_type == AgentErrorType.AUTH
 
 
 def test_agent_result_dataclass():
