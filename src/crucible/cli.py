@@ -835,3 +835,60 @@ def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool) -> None:
         click.echo(json_module.dumps(data))
     else:
         click.echo(render_text(report))
+
+
+def _get_current_version() -> str:
+    """Return the currently installed version of autocrucible."""
+    from importlib.metadata import version
+    return version("autocrucible")
+
+
+def _get_latest_version() -> str | None:
+    """Query PyPI for the latest version. Returns None on failure."""
+    import json as _json
+    import urllib.request
+
+    url = "https://pypi.org/pypi/autocrucible/json"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = _json.loads(resp.read())
+            return data["info"]["version"]
+    except Exception:
+        return None
+
+
+@main.command()
+@click.option("--check", is_flag=True, help="Check for updates without installing.")
+def update(check: bool) -> None:
+    """Update crucible to the latest version."""
+    current = _get_current_version()
+
+    latest = _get_latest_version()
+    if latest is None:
+        raise click.ClickException("Failed to check PyPI for updates. Check your network connection.")
+
+    if latest == current:
+        click.echo(f"Already up to date (v{current}).")
+        return
+
+    if check:
+        click.echo(f"Update available: v{current} → v{latest}")
+        click.echo("Run 'crucible update' to install.")
+        return
+
+    # Check that uv is available
+    if shutil.which("uv") is None:
+        raise click.ClickException(
+            "uv is required for updates. Install it: https://docs.astral.sh/uv/"
+        )
+
+    click.echo(f"Updating autocrucible... v{current} → v{latest}")
+    result = subprocess.run(
+        ["uv", "tool", "upgrade", "autocrucible"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise click.ClickException(f"Update failed: {result.stderr.strip()}")
+
+    click.echo(f"Updated to v{latest} ✓")

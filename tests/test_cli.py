@@ -442,3 +442,89 @@ def test_run_without_max_iterations_passes_none(tmp_path):
         )
     assert result.exit_code == 0, result.output
     mock_loop.assert_called_once_with(max_iterations=None)
+
+
+# ── update command tests ──────────────────────────────────────
+
+
+def test_update_already_up_to_date():
+    """When current == latest, show 'already up to date'."""
+    runner = CliRunner()
+    with (
+        patch("crucible.cli._get_current_version", return_value="0.5.3"),
+        patch("crucible.cli._get_latest_version", return_value="0.5.3"),
+    ):
+        result = runner.invoke(main, ["update"])
+    assert result.exit_code == 0
+    assert "Already up to date (v0.5.3)" in result.output
+
+
+def test_update_check_shows_available():
+    """--check shows available update without installing."""
+    runner = CliRunner()
+    with (
+        patch("crucible.cli._get_current_version", return_value="0.5.3"),
+        patch("crucible.cli._get_latest_version", return_value="0.6.0"),
+    ):
+        result = runner.invoke(main, ["update", "--check"])
+    assert result.exit_code == 0
+    assert "v0.5.3" in result.output
+    assert "v0.6.0" in result.output
+    assert "Run 'crucible update' to install" in result.output
+
+
+def test_update_check_already_latest():
+    """--check when already up to date."""
+    runner = CliRunner()
+    with (
+        patch("crucible.cli._get_current_version", return_value="0.5.3"),
+        patch("crucible.cli._get_latest_version", return_value="0.5.3"),
+    ):
+        result = runner.invoke(main, ["update", "--check"])
+    assert result.exit_code == 0
+    assert "Already up to date" in result.output
+
+
+def test_update_network_failure():
+    """When PyPI is unreachable, show error."""
+    runner = CliRunner()
+    with (
+        patch("crucible.cli._get_current_version", return_value="0.5.3"),
+        patch("crucible.cli._get_latest_version", return_value=None),
+    ):
+        result = runner.invoke(main, ["update"])
+    assert result.exit_code != 0
+    assert "Failed to check PyPI" in result.output
+
+
+def test_update_runs_uv_upgrade():
+    """When update available, runs uv tool upgrade."""
+    runner = CliRunner()
+    with (
+        patch("crucible.cli._get_current_version", return_value="0.5.3"),
+        patch("crucible.cli._get_latest_version", return_value="0.6.0"),
+        patch("shutil.which", return_value="/usr/bin/uv"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        result = runner.invoke(main, ["update"])
+    assert result.exit_code == 0
+    assert "v0.6.0 ✓" in result.output
+    mock_run.assert_called_once_with(
+        ["uv", "tool", "upgrade", "autocrucible"],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_update_uv_not_found():
+    """When uv is not installed, show helpful error."""
+    runner = CliRunner()
+    with (
+        patch("crucible.cli._get_current_version", return_value="0.5.3"),
+        patch("crucible.cli._get_latest_version", return_value="0.6.0"),
+        patch("shutil.which", return_value=None),
+    ):
+        result = runner.invoke(main, ["update"])
+    assert result.exit_code != 0
+    assert "uv is required" in result.output
