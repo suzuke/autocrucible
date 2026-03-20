@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 from crucible.agents.base import AgentErrorType, AgentInterface, AgentResult
-from crucible.agents.claude_code import ClaudeCodeAgent
+from crucible.agents.claude_code import ClaudeCodeAgent, _classify_error
 
 
 def test_agent_error_type_enum():
@@ -365,6 +365,74 @@ async def test_hook_allows_envrc_read(tmp_path):
         None, None,
     )
     assert result == {}
+
+
+# -- _classify_error tests ----------------------------------------------------
+
+
+def test_classify_error_auth_patterns():
+    assert _classify_error("not logged in") == AgentErrorType.AUTH
+    assert _classify_error("Error: unauthorized") == AgentErrorType.AUTH
+    assert _classify_error("login required to proceed") == AgentErrorType.AUTH
+    assert _classify_error("request unauthenticated") == AgentErrorType.AUTH
+
+
+def test_classify_error_no_false_positives():
+    """Benign messages should not trigger AUTH classification."""
+    assert _classify_error("updated the author field") == AgentErrorType.UNKNOWN
+    assert _classify_error("authenticate model parameters") == AgentErrorType.UNKNOWN
+    assert _classify_error("credential file in training data") == AgentErrorType.UNKNOWN
+    assert _classify_error("some random error") == AgentErrorType.UNKNOWN
+
+
+# -- ClaudeCodeAgent error_type integration tests ------------------------------
+
+
+def test_claude_code_agent_auth_error_type(tmp_path):
+    """Agent sets error_type=AUTH when SDK returns auth error."""
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    agent = ClaudeCodeAgent()
+    async def mock_query_auth_error(prompt, options=None):
+        from claude_agent_sdk import ResultMessage
+        yield ResultMessage(
+            subtype="result", duration_ms=100, duration_api_ms=0,
+            is_error=True, num_turns=0, session_id="test-session",
+            result="not logged in",
+        )
+    with patch("crucible.agents.claude_code.query", mock_query_auth_error):
+        result = agent.generate_edit("optimize x", tmp_path)
+    assert result.error_type == AgentErrorType.AUTH
+
+
+def test_claude_code_agent_timeout_error_type(tmp_path):
+    """Agent sets error_type=TIMEOUT on timeout."""
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    agent = ClaudeCodeAgent(timeout=1)
+    async def mock_query_slow(prompt, options=None):
+        import asyncio
+        await asyncio.sleep(10)
+        yield  # never reached
+    with patch("crucible.agents.claude_code.query", mock_query_slow):
+        result = agent.generate_edit("optimize x", tmp_path)
+    assert result.error_type == AgentErrorType.TIMEOUT
+
+
+def test_claude_code_agent_success_no_error_type(tmp_path):
+    """Successful agent run has error_type=None."""
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "train.py").write_text("x = 1")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=tmp_path, check=True, capture_output=True)
+    agent = ClaudeCodeAgent()
+    async def mock_query_ok(prompt, options=None):
+        from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
+        yield AssistantMessage(content=[TextBlock(text="Done")], model="claude-sonnet-4-20250514")
+        yield ResultMessage(subtype="result", duration_ms=100, duration_api_ms=80, is_error=False, num_turns=1, session_id="test")
+    with patch("crucible.agents.claude_code.query", mock_query_ok):
+        result = agent.generate_edit("optimize x", tmp_path)
+    assert result.error_type is None
 
 
 # -- capabilities tests --------------------------------------------------------
