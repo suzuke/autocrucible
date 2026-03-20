@@ -1,0 +1,80 @@
+# Crucible config.yaml — complete reference
+# Copy this to .crucible/config.yaml and customize for your project.
+# Only 'name', 'files.editable', 'commands.run', 'commands.eval',
+# 'metric.name', and 'metric.direction' are required.
+
+name: "my-experiment"
+description: "Optional description of what this experiment optimizes"
+
+# --- Files ---
+files:
+  editable:               # Files the agent CAN modify (required, at least one)
+    - "solution.py"
+  readonly:               # Files the agent can read but not modify
+    - "evaluate.py"
+    - ".crucible/program.md"
+  hidden:                 # Files the agent cannot see or access at all
+    - "opponent.py"
+  artifacts:              # Large files to .gitignore (checkpoints, data, logs)
+    - "model.pt"
+    - "data/"
+
+# --- Commands ---
+commands:
+  run: "python3 -u solution.py 2>&1 | tee run.log"   # Training/execution (required)
+  eval: "cat run.log"                                  # Evaluation — must print metric (required)
+  setup: "pip install -r requirements.txt"             # One-time setup (optional)
+
+# --- Metric ---
+metric:
+  name: "score"           # Metric name to parse from eval output (required)
+  direction: "maximize"   # "maximize" or "minimize" (required)
+
+# --- Constraints ---
+constraints:
+  timeout_seconds: 600    # Max time per run+eval cycle (default: 600)
+  max_retries: 3          # Consecutive failures before stopping (default: 3)
+  max_iterations: 50      # Hard cap on total iterations (default: unlimited)
+  plateau_threshold: 8    # Stop after N iterations without improvement (default: 8)
+  allow_install: false    # Allow agent to install packages (default: false)
+  budget:                 # Cost limits (optional)
+    max_cost_usd: 10.0           # Total experiment budget
+    max_cost_per_iter_usd: 1.0   # Per-iteration cap
+    warn_at_percent: 80          # Warn when this % of budget is used (default: 80)
+
+# --- Agent ---
+agent:
+  type: "claude-code"           # Agent backend (default: "claude-code")
+  instructions: "program.md"    # Agent instructions file in .crucible/ (optional)
+  system_prompt: "system.md"    # Custom system prompt file in .crucible/ (optional)
+  model: null                   # Model override: "haiku", "sonnet", "opus" (default: haiku)
+  language: null                # Force response language, e.g. "zh-TW" (optional)
+  base_url: null                # Custom API endpoint (optional)
+  context_window:
+    include_history: true       # Include past iteration history (default: true)
+    history_limit: 20           # Max history entries to include (default: 20)
+    include_best: true          # Include best solution details (default: true)
+
+# --- Git ---
+git:
+  branch_prefix: "crucible"     # Branch naming: <prefix>/<tag> (default: "crucible")
+  tag_failed: true              # Tag failed attempts for inspection (default: true)
+
+# --- Evaluation ---
+evaluation:
+  repeat: 1              # Run eval N times per iteration (default: 1)
+  aggregation: "median"  # How to aggregate repeats: "median" or "mean" (default: "median")
+
+# --- Search Strategy ---
+search:
+  strategy: "greedy"     # "greedy" | "restart" | "beam" (default: "greedy")
+  beam_width: 3          # Beam width for beam search (default: 3)
+  plateau_threshold: 8   # Override constraints.plateau_threshold (default: 8)
+
+# --- Sandbox (optional) ---
+# sandbox:
+#   backend: "docker"            # "docker" or "none" (default: "none")
+#   base_image: "python:3.12-slim"
+#   network: false               # Allow network access in sandbox
+#   memory_limit: "2g"           # Docker memory limit
+#   cpu_limit: 2                 # Docker CPU limit

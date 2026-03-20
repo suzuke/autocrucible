@@ -165,7 +165,7 @@ class ClaudeCodeAgent(AgentInterface):
     def __init__(
         self,
         timeout: int = DEFAULT_AGENT_TIMEOUT,
-        model: str | None = None,
+        model: str | None = "haiku",
         system_prompt_file: str | None = None,
         hidden_files: set[str] | None = None,
         editable_files: set[str] | None = None,
