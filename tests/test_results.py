@@ -208,7 +208,7 @@ def test_usage_info_defaults():
     u = UsageInfo()
     assert u.input_tokens is None
     assert u.output_tokens is None
-    assert u.estimated_cost_usd is None
+    assert u.total_cost_usd is None
 
 
 def test_record_new_fields_default_none():
@@ -239,7 +239,7 @@ def test_jsonl_roundtrip_with_all_fields(tmp_path):
         files_changed=["model.py", "train.py"],
         diff_stats={"insertions": 10, "deletions": 5},
         duration_seconds=42.5,
-        usage=UsageInfo(input_tokens=1000, output_tokens=500, estimated_cost_usd=0.01),
+        usage=UsageInfo(input_tokens=1000, output_tokens=500, total_cost_usd=0.01),
     )
     log.log(record)
     records = log.read_all()
@@ -255,7 +255,7 @@ def test_jsonl_roundtrip_with_all_fields(tmp_path):
     assert r.duration_seconds == 42.5
     assert r.usage.input_tokens == 1000
     assert r.usage.output_tokens == 500
-    assert r.usage.estimated_cost_usd == 0.01
+    assert r.usage.total_cost_usd == 0.01
 
 
 def test_forward_compat_missing_fields():

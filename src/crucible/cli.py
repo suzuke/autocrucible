@@ -555,9 +555,9 @@ def status(tag: str, project_dir: str, as_json: bool) -> None:
     # Compute cost info from usage data
     all_records = results.read_all()
     costs = [
-        r.usage.estimated_cost_usd
+        r.usage.total_cost_usd
         for r in all_records
-        if r.usage and r.usage.estimated_cost_usd is not None
+        if r.usage and r.usage.total_cost_usd is not None
     ]
     total_cost = sum(costs) if costs else None
     budget_cfg = config.constraints.budget

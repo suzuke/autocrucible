@@ -291,7 +291,7 @@ def test_budget_exceeded_stops(tmp_path):
         (tmp_path / "train.py").write_text("x = 2")
         return AgentResult(
             modified_files=[Path("train.py")], description="optimize",
-            usage=UsageInfo(estimated_cost_usd=0.02),
+            usage=UsageInfo(total_cost_usd=0.02),
         )
     mock_agent.generate_edit.side_effect = modify_file
 
@@ -320,7 +320,7 @@ def test_budget_warning_does_not_stop(tmp_path):
         (tmp_path / "train.py").write_text("x = 2")
         return AgentResult(
             modified_files=[Path("train.py")], description="optimize",
-            usage=UsageInfo(estimated_cost_usd=0.85),
+            usage=UsageInfo(total_cost_usd=0.85),
         )
     mock_agent.generate_edit.side_effect = modify_file
 
@@ -351,7 +351,7 @@ def test_no_budget_config_runs_normally(tmp_path):
         (tmp_path / "train.py").write_text("x = 2")
         return AgentResult(
             modified_files=[Path("train.py")], description="optimize",
-            usage=UsageInfo(estimated_cost_usd=100.0),
+            usage=UsageInfo(total_cost_usd=100.0),
         )
     mock_agent.generate_edit.side_effect = modify_file
 

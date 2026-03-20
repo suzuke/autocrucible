@@ -21,8 +21,8 @@ class BudgetGuard:
 
     def accumulate(self, usage: UsageInfo | None) -> None:
         """Add cost from one iteration."""
-        if usage and usage.estimated_cost_usd:
-            self.total_cost += usage.estimated_cost_usd
+        if usage and usage.total_cost_usd:
+            self.total_cost += usage.total_cost_usd
 
     def check(self, usage: UsageInfo | None) -> str:
         """Check budget limits. Returns 'ok', 'warning', or 'exceeded'."""
@@ -31,8 +31,8 @@ class BudgetGuard:
 
         # Per-iteration check
         if (self.config.max_cost_per_iter_usd
-                and usage and usage.estimated_cost_usd
-                and usage.estimated_cost_usd > self.config.max_cost_per_iter_usd):
+                and usage and usage.total_cost_usd
+                and usage.total_cost_usd > self.config.max_cost_per_iter_usd):
             return "exceeded"
 
         # Total budget check

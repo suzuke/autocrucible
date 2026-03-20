@@ -21,6 +21,7 @@ from claude_agent_sdk import (
 )
 
 from crucible.agents.base import AgentInterface, AgentResult
+from crucible.results import UsageInfo
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +241,7 @@ class ClaudeCodeAgent(AgentInterface):
         description = "no description"
         last_text = ""
         all_text_parts: list[str] = []
+        usage_info: UsageInfo | None = None
 
         try:
             async for message in query(prompt=prompt, options=options):
@@ -253,6 +255,7 @@ class ClaudeCodeAgent(AgentInterface):
                                 logger.debug(f"  {line}")
 
                 elif isinstance(message, ResultMessage):
+                    usage_info = _extract_usage(message)
                     if message.is_error:
                         duration = time.monotonic() - start
                         agent_output = "\n".join(all_text_parts) if all_text_parts else None
@@ -261,6 +264,7 @@ class ClaudeCodeAgent(AgentInterface):
                             description=f"agent error: {message.result or 'unknown'}",
                             duration_seconds=duration,
                             agent_output=agent_output,
+                            usage=usage_info,
                         )
         except TimeoutError:
             duration = time.monotonic() - start
@@ -278,6 +282,13 @@ class ClaudeCodeAgent(AgentInterface):
         all_files = _detect_modified_files(workspace)
 
         duration = time.monotonic() - start
+        if usage_info:
+            logger.info(
+                "[agent] cost: $%.4f  tokens: %s in / %s out",
+                usage_info.total_cost_usd or 0,
+                usage_info.input_tokens or 0,
+                usage_info.output_tokens or 0,
+            )
         if not all_files:
             logger.info("[agent] no files changed")
         else:
@@ -287,7 +298,24 @@ class ClaudeCodeAgent(AgentInterface):
             modified_files=all_files, description=description,
             duration_seconds=duration,
             agent_output=agent_output,
+            usage=usage_info,
         )
+
+
+def _extract_usage(message: ResultMessage) -> UsageInfo | None:
+    """Extract usage info from a ResultMessage."""
+    usage = getattr(message, "usage", None)
+    cost = getattr(message, "total_cost_usd", None)
+    if usage is None and cost is None:
+        return None
+    u = usage or {}
+    return UsageInfo(
+        input_tokens=u.get("input_tokens"),
+        output_tokens=u.get("output_tokens"),
+        cache_read_input_tokens=u.get("cache_read_input_tokens"),
+        cache_creation_input_tokens=u.get("cache_creation_input_tokens"),
+        total_cost_usd=cost,
+    )
 
 
 def _clean_description(text: str) -> str:
