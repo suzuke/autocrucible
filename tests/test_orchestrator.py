@@ -7,7 +7,8 @@ from crucible.config import (
     Config, FilesConfig, CommandsConfig, MetricConfig,
     ConstraintsConfig, AgentConfig, ContextWindowConfig, GitConfig,
 )
-from crucible.agents.base import AgentResult
+from crucible.agents.base import AgentResult, AgentErrorType
+from crucible.config import SearchConfig
 from crucible.results import ExperimentRecord
 
 
@@ -571,3 +572,88 @@ def test_run_loop_none_max_iterations_uses_config(tmp_path):
         orch.run_loop()  # No explicit max_iterations — should use config
 
     assert call_count == 2
+
+
+def test_fatal_error_stops_immediately(tmp_path):
+    """run_one_iteration returns 'fatal' on auth error, no results written."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    mock_agent = MagicMock()
+    mock_agent.capabilities.return_value = {"read", "edit", "write", "glob", "grep"}
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    mock_agent.generate_edit.return_value = AgentResult(
+        modified_files=[], description="agent error: not logged in",
+        error_type=AgentErrorType.AUTH,
+    )
+
+    result = orch.run_one_iteration()
+    assert result == "fatal"
+    assert len(orch.results.read_all()) == 0
+    assert orch._consecutive_failures == 0
+    assert orch._consecutive_skips == 0
+
+
+def test_fatal_breaks_serial_loop(tmp_path):
+    """Serial loop stops after first fatal, runs only 1 iteration."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    mock_agent = MagicMock()
+    mock_agent.capabilities.return_value = {"read", "edit", "write", "glob", "grep"}
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    mock_agent.generate_edit.return_value = AgentResult(
+        modified_files=[], description="agent error: not logged in",
+        error_type=AgentErrorType.AUTH,
+    )
+
+    orch._run_loop_serial(max_iterations=5)
+    assert mock_agent.generate_edit.call_count == 1
+
+
+def test_fatal_breaks_beam_loop(tmp_path):
+    """Fatal in beam mode stops the entire loop, not just the current beam."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    cfg.search = SearchConfig(strategy="beam", beam_width=2)
+    mock_agent = MagicMock()
+    mock_agent.capabilities.return_value = {"read", "edit", "write", "glob", "grep"}
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+    orch.init_beams()
+
+    mock_agent.generate_edit.return_value = AgentResult(
+        modified_files=[], description="agent error: not logged in",
+        error_type=AgentErrorType.AUTH,
+    )
+
+    orch._run_loop_beam(max_iterations=5)
+    assert mock_agent.generate_edit.call_count == 1
+    assert orch._current_beam_id is None
+
+
+def test_resume_after_fatal_works(tmp_path):
+    """After fatal exit, resume() + re-run works without stale state."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    mock_agent = MagicMock()
+    mock_agent.capabilities.return_value = {"read", "edit", "write", "glob", "grep"}
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    mock_agent.generate_edit.return_value = AgentResult(
+        modified_files=[], description="agent error: not logged in",
+        error_type=AgentErrorType.AUTH,
+    )
+    orch._run_loop_serial(max_iterations=5)
+    assert mock_agent.generate_edit.call_count == 1
+
+    orch.resume()
+    assert orch._consecutive_failures == 0
+    assert orch._consecutive_skips == 0
