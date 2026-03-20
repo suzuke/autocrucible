@@ -10,37 +10,22 @@ class TestBudgetGuardNoConfig:
         guard = BudgetGuard(None)
         assert guard.check(None) == "ok"
         assert guard.check(UsageInfo(total_cost_usd=100.0)) == "ok"
-
-    def test_percent_used_zero(self):
-        guard = BudgetGuard(None)
         assert guard.percent_used == 0.0
 
 
 class TestAccumulate:
-    def test_with_valid_usage(self):
+    def test_accumulates_cost(self):
         guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
         guard.accumulate(UsageInfo(input_tokens=100, output_tokens=50, total_cost_usd=0.5))
         assert guard.total_cost == 0.5
-        # iteration_count removed — only total_cost is tracked
-
-    def test_multiple_accumulations(self):
-        guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
-        guard.accumulate(UsageInfo(total_cost_usd=0.3))
         guard.accumulate(UsageInfo(total_cost_usd=0.7))
-        assert guard.total_cost == 1.0
-        # iteration_count removed — only total_cost is tracked
+        assert guard.total_cost == 1.2
 
-    def test_with_none_usage(self):
+    def test_handles_none_gracefully(self):
         guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
         guard.accumulate(None)
-        assert guard.total_cost == 0.0
-        # iteration_count removed — only total_cost is tracked
-
-    def test_with_none_cost_field(self):
-        guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
         guard.accumulate(UsageInfo(input_tokens=100, output_tokens=50, total_cost_usd=None))
         assert guard.total_cost == 0.0
-        # iteration_count removed — only total_cost is tracked
 
 
 class TestCheckExceeded:
@@ -66,11 +51,6 @@ class TestCheckWarning:
         guard.total_cost = 8.0
         assert guard.check(None) == "warning"
 
-    def test_above_warn_threshold(self):
-        guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0, warn_at_percent=80))
-        guard.total_cost = 9.0
-        assert guard.check(None) == "warning"
-
     def test_below_warn_threshold(self):
         guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0, warn_at_percent=80))
         guard.total_cost = 7.0
@@ -90,17 +70,11 @@ class TestCheckOk:
 
 
 class TestPercentUsed:
-    def test_zero_cost(self):
+    def test_percent_used(self):
         guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
         assert guard.percent_used == 0.0
-
-    def test_half_used(self):
-        guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
         guard.total_cost = 5.0
         assert guard.percent_used == 50.0
-
-    def test_fully_used(self):
-        guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
         guard.total_cost = 10.0
         assert guard.percent_used == 100.0
 

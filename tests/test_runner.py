@@ -49,8 +49,9 @@ def test_stderr_tail(tmp_path):
 # --- execute_with_repeat tests ---
 
 
-def test_execute_with_repeat_median(tmp_path):
-    """Median of 3 values is returned."""
+@pytest.mark.parametrize("aggregation", ["median", "mean"])
+def test_execute_with_repeat_aggregation(tmp_path, aggregation):
+    """Both median and mean of [1, 3, 2] return 2.0."""
     runner = ExperimentRunner(workspace=tmp_path)
     ok = RunResult(exit_code=0, timed_out=False)
     metrics = iter([1.0, 3.0, 2.0])
@@ -58,21 +59,7 @@ def test_execute_with_repeat_median(tmp_path):
     with patch.object(runner, "execute", return_value=ok), \
          patch.object(runner, "parse_metric", side_effect=lambda *a: next(metrics)):
         result, value = runner.execute_with_repeat(
-            "run", "eval", "m", repeat=3, aggregation="median", timeout=10,
-        )
-    assert value == 2.0
-
-
-def test_execute_with_repeat_mean(tmp_path):
-    """Mean aggregation works."""
-    runner = ExperimentRunner(workspace=tmp_path)
-    ok = RunResult(exit_code=0, timed_out=False)
-    metrics = iter([1.0, 3.0, 2.0])
-
-    with patch.object(runner, "execute", return_value=ok), \
-         patch.object(runner, "parse_metric", side_effect=lambda *a: next(metrics)):
-        result, value = runner.execute_with_repeat(
-            "run", "eval", "m", repeat=3, aggregation="mean", timeout=10,
+            "run", "eval", "m", repeat=3, aggregation=aggregation, timeout=10,
         )
     assert value == 2.0
 

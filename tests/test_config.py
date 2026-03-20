@@ -141,15 +141,19 @@ def test_allow_install_parsed_from_yaml(tmp_path):
     assert cfg.constraints.allow_install is True
 
 
-def test_load_config_with_artifacts(tmp_path):
-    """Config loads files.artifacts as a list of paths."""
+@pytest.mark.parametrize("artifacts_yaml,expected", [
+    ("  artifacts: ['artifacts/', 'checkpoints/']\n", ["artifacts/", "checkpoints/"]),
+    ("", []),
+])
+def test_load_config_artifacts(tmp_path, artifacts_yaml, expected):
+    """Config loads files.artifacts or defaults to empty list."""
     crucible_dir = tmp_path / ".crucible"
     crucible_dir.mkdir()
     (crucible_dir / "config.yaml").write_text(
         "name: test\n"
         "files:\n"
         "  editable: ['main.py']\n"
-        "  artifacts: ['artifacts/', 'checkpoints/']\n"
+        + artifacts_yaml +
         "commands:\n"
         "  run: 'echo ok'\n"
         "  eval: 'echo ok'\n"
@@ -160,28 +164,7 @@ def test_load_config_with_artifacts(tmp_path):
     (tmp_path / "main.py").touch()
     from crucible.config import load_config
     config = load_config(tmp_path)
-    assert config.files.artifacts == ["artifacts/", "checkpoints/"]
-
-
-def test_load_config_without_artifacts(tmp_path):
-    """Config defaults artifacts to empty list when not specified."""
-    crucible_dir = tmp_path / ".crucible"
-    crucible_dir.mkdir()
-    (crucible_dir / "config.yaml").write_text(
-        "name: test\n"
-        "files:\n"
-        "  editable: ['main.py']\n"
-        "commands:\n"
-        "  run: 'echo ok'\n"
-        "  eval: 'echo ok'\n"
-        "metric:\n"
-        "  name: score\n"
-        "  direction: maximize\n"
-    )
-    (tmp_path / "main.py").touch()
-    from crucible.config import load_config
-    config = load_config(tmp_path)
-    assert config.files.artifacts == []
+    assert config.files.artifacts == expected
 
 
 def test_load_missing_required_fields(tmp_path):

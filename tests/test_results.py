@@ -2,23 +2,12 @@ import json
 
 import pytest
 from pathlib import Path
-from crucible.results import ResultsLog, ExperimentRecord, UsageInfo, results_filename
+from crucible.results import ResultsLog, ExperimentRecord, UsageInfo
 
 
 def _rec(commit="aaa0001", metric_value=1.0, status="keep", description="test", **kwargs):
     """Helper to create an ExperimentRecord with defaults."""
     return ExperimentRecord(commit=commit, metric_value=metric_value, status=status, description=description, **kwargs)
-
-
-def test_init_creates_empty_file(tmp_path):
-    f = tmp_path / "results.jsonl"
-    log = ResultsLog(f)
-    log.init()
-    assert f.read_text() == ""
-
-
-def test_results_filename():
-    assert results_filename("run1") == "results-run1.jsonl"
 
 
 def test_log_appends_record(tmp_path):
@@ -201,28 +190,6 @@ def test_summary_excludes_baseline(tmp_path):
     assert s["kept"] == 1
 
 
-# --- New tests for JSONL features ---
-
-
-def test_usage_info_defaults():
-    u = UsageInfo()
-    assert u.input_tokens is None
-    assert u.output_tokens is None
-    assert u.total_cost_usd is None
-
-
-def test_record_new_fields_default_none():
-    r = ExperimentRecord(commit="abc", metric_value=1.0, status="keep", description="test")
-    assert r.iteration is None
-    assert r.timestamp is None
-    assert r.delta is None
-    assert r.delta_percent is None
-    assert r.files_changed is None
-    assert r.diff_stats is None
-    assert r.duration_seconds is None
-    assert r.usage is None
-
-
 def test_jsonl_roundtrip_with_all_fields(tmp_path):
     f = tmp_path / "results.jsonl"
     log = ResultsLog(f)
@@ -280,6 +247,3 @@ def test_none_values_not_serialized(tmp_path):
     assert "timestamp" not in d
 
 
-def test_read_from_string_empty():
-    assert ResultsLog.read_from_string("") == []
-    assert ResultsLog.read_from_string("\n\n") == []

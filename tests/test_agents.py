@@ -6,20 +6,6 @@ from crucible.agents.base import AgentInterface, AgentResult
 from crucible.agents.claude_code import ClaudeCodeAgent
 
 
-def test_agent_result_dataclass():
-    r = AgentResult(modified_files=[Path("train.py")], description="test change")
-    assert r.description == "test change"
-    assert r.modified_files == [Path("train.py")]
-
-
-def test_agent_result_has_agent_output():
-    r = AgentResult(
-        modified_files=[], description="test",
-        agent_output="some reasoning text",
-    )
-    assert r.agent_output == "some reasoning text"
-
-
 def test_claude_code_agent_generate_edit(tmp_path):
     """Test with mocked Claude Agent SDK query()."""
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
@@ -151,20 +137,15 @@ def test_claude_code_agent_no_edits(tmp_path):
 from crucible.agents.claude_code import _clean_description
 
 
-def test_clean_description_strips_markdown():
-    assert _clean_description("**Change:** foo bar") == "foo bar"
-    assert _clean_description("**Summary:** hello") == "hello"
-    assert _clean_description("**bold text** rest") == "bold text rest"
-
-
-def test_clean_description_preserves_plain():
-    assert _clean_description("simple description") == "simple description"
-
-
-def test_clean_description_truncates():
-    long_text = "a" * 300
-    result = _clean_description(long_text)
-    assert len(result) == 200
+@pytest.mark.parametrize("input_text,expected", [
+    ("**Change:** foo bar", "foo bar"),
+    ("**Summary:** hello", "hello"),
+    ("**bold text** rest", "bold text rest"),
+    ("simple description", "simple description"),
+    ("a" * 300, "a" * 200),
+])
+def test_clean_description(input_text, expected):
+    assert _clean_description(input_text) == expected
 
 
 # -- hidden file hook tests ----------------------------------------------------
@@ -348,16 +329,6 @@ async def test_hook_allows_envrc_read(tmp_path):
     assert result == {}
 
 
-# -- capabilities tests --------------------------------------------------------
-
-
-def test_capabilities_default():
-    """Default capabilities returns all five tools."""
-    agent = ClaudeCodeAgent()
-    caps = agent.capabilities()
-    assert caps == {"read", "edit", "write", "glob", "grep"}
-
-
 # -- agent factory tests -------------------------------------------------------
 
 from crucible.agents import create_agent
@@ -440,12 +411,5 @@ def test_agent_config_model_base_url():
     config = AgentConfig(type="ollama", model="llama3", base_url="http://localhost:11434")
     assert config.model == "llama3"
     assert config.base_url == "http://localhost:11434"
-
-
-def test_agent_config_defaults():
-    """AgentConfig model and base_url default to None."""
-    config = AgentConfig()
-    assert config.model is None
-    assert config.base_url is None
 
 

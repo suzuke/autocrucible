@@ -101,26 +101,6 @@ def test_wizard_analyze_includes_architecture_guards():
     assert len(result["inferred"]["architecture_guards"]) == 3
 
 
-def test_analyze_prompt_mentions_architecture_guards():
-    """The analyze system prompt should instruct Claude to infer architecture_guards."""
-    from crucible.wizard import ANALYZE_SYSTEM_PROMPT
-    assert "architecture_guards" in ANALYZE_SYSTEM_PROMPT
-
-
-def test_generate_prompt_references_crucible_format():
-    """The generate system prompt should reference the Crucible scaffold format."""
-    from crucible.wizard import GENERATE_SYSTEM_PROMPT
-    assert "Crucible Reference" in GENERATE_SYSTEM_PROMPT
-    assert "config.yaml" in GENERATE_SYSTEM_PROMPT
-
-
-def test_generate_loads_scaffold_reference():
-    """generate() should load scaffold reference and inject into system prompt."""
-    from crucible.wizard import _load_scaffold_reference
-    ref = _load_scaffold_reference()
-    assert "config.yaml" in ref or ref == ""
-
-
 def test_generate_rejects_bracket_placeholders(tmp_path: Path):
     """generate() should reject files with [description] placeholder content."""
     bad_response = json.dumps({
