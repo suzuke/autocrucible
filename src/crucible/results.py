@@ -19,7 +19,9 @@ def results_filename(tag: str) -> str:
 class UsageInfo:
     input_tokens: int | None = None
     output_tokens: int | None = None
-    estimated_cost_usd: float | None = None
+    cache_read_input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    total_cost_usd: float | None = None
 
 
 @dataclass

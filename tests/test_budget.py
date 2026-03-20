@@ -9,7 +9,7 @@ class TestBudgetGuardNoConfig:
     def test_always_ok(self):
         guard = BudgetGuard(None)
         assert guard.check(None) == "ok"
-        assert guard.check(UsageInfo(estimated_cost_usd=100.0)) == "ok"
+        assert guard.check(UsageInfo(total_cost_usd=100.0)) == "ok"
 
     def test_percent_used_zero(self):
         guard = BudgetGuard(None)
@@ -19,14 +19,14 @@ class TestBudgetGuardNoConfig:
 class TestAccumulate:
     def test_with_valid_usage(self):
         guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
-        guard.accumulate(UsageInfo(input_tokens=100, output_tokens=50, estimated_cost_usd=0.5))
+        guard.accumulate(UsageInfo(input_tokens=100, output_tokens=50, total_cost_usd=0.5))
         assert guard.total_cost == 0.5
         # iteration_count removed — only total_cost is tracked
 
     def test_multiple_accumulations(self):
         guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
-        guard.accumulate(UsageInfo(estimated_cost_usd=0.3))
-        guard.accumulate(UsageInfo(estimated_cost_usd=0.7))
+        guard.accumulate(UsageInfo(total_cost_usd=0.3))
+        guard.accumulate(UsageInfo(total_cost_usd=0.7))
         assert guard.total_cost == 1.0
         # iteration_count removed — only total_cost is tracked
 
@@ -38,7 +38,7 @@ class TestAccumulate:
 
     def test_with_none_cost_field(self):
         guard = BudgetGuard(BudgetConfig(max_cost_usd=10.0))
-        guard.accumulate(UsageInfo(input_tokens=100, output_tokens=50, estimated_cost_usd=None))
+        guard.accumulate(UsageInfo(input_tokens=100, output_tokens=50, total_cost_usd=None))
         assert guard.total_cost == 0.0
         # iteration_count removed — only total_cost is tracked
 
@@ -51,12 +51,12 @@ class TestCheckExceeded:
 
     def test_per_iter_exceeds_max(self):
         guard = BudgetGuard(BudgetConfig(max_cost_per_iter_usd=0.5))
-        usage = UsageInfo(estimated_cost_usd=0.8)
+        usage = UsageInfo(total_cost_usd=0.8)
         assert guard.check(usage) == "exceeded"
 
     def test_per_iter_within_limit(self):
         guard = BudgetGuard(BudgetConfig(max_cost_per_iter_usd=1.0))
-        usage = UsageInfo(estimated_cost_usd=0.5)
+        usage = UsageInfo(total_cost_usd=0.5)
         assert guard.check(usage) == "ok"
 
 
@@ -85,7 +85,7 @@ class TestCheckOk:
             warn_at_percent=80,
         ))
         guard.total_cost = 3.0
-        usage = UsageInfo(estimated_cost_usd=1.0)
+        usage = UsageInfo(total_cost_usd=1.0)
         assert guard.check(usage) == "ok"
 
 
