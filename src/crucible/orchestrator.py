@@ -6,6 +6,7 @@ import logging
 import shutil
 import subprocess
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -34,6 +35,9 @@ class BeamState:
     consecutive_skips: int = 0
     fail_seq: int = 0
     iteration: int = 0
+
+
+_FATAL_MSG = "Fatal error — cannot continue. Check: claude login"
 
 
 class Orchestrator:
@@ -420,7 +424,7 @@ class Orchestrator:
                 session_count += 1
 
                 if status == "fatal":
-                    logger.error("Fatal error — cannot continue. Check: claude login")
+                    logger.error(_FATAL_MSG)
                     break
 
                 best = self.results.best(self.config.metric.direction)
@@ -461,6 +465,29 @@ class Orchestrator:
 
         except KeyboardInterrupt:
             logger.info(f"Stopped after {self._iteration} iterations.")
+
+    @contextmanager
+    def _beam_swap(self, beam: BeamState):
+        """Temporarily swap orchestrator state to a beam, restoring on exit."""
+        orig = (self.results, self.context, self._fail_seq,
+                self._consecutive_failures, self._consecutive_skips, self._iteration)
+        self._current_beam_id = beam.beam_id
+        self.results = beam.results
+        self.context = beam.context
+        self._fail_seq = beam.fail_seq
+        self._consecutive_failures = beam.consecutive_failures
+        self._consecutive_skips = beam.consecutive_skips
+        self._iteration = beam.iteration
+        try:
+            yield
+        finally:
+            beam.fail_seq = self._fail_seq
+            beam.consecutive_failures = self._consecutive_failures
+            beam.consecutive_skips = self._consecutive_skips
+            beam.iteration = self._iteration
+            (self.results, self.context, self._fail_seq,
+             self._consecutive_failures, self._consecutive_skips, self._iteration) = orig
+            self._current_beam_id = None
 
     def _run_loop_beam(self, max_iterations: int | None = None) -> None:
         """Beam search: round-robin across beam_width branches."""
@@ -508,51 +535,13 @@ class Orchestrator:
                 # Inject cross-beam context
                 beam.context._beam_summaries = other_summaries
 
-                # Swap orchestrator state to this beam
-                orig_results = self.results
-                orig_context = self.context
-                orig_fail_seq = self._fail_seq
-                orig_consec_fail = self._consecutive_failures
-                orig_consec_skip = self._consecutive_skips
-                orig_iter = self._iteration
-                self._current_beam_id = beam.beam_id
-
-                self.results = beam.results
-                self.context = beam.context
-                self._fail_seq = beam.fail_seq
-                self._consecutive_failures = beam.consecutive_failures
-                self._consecutive_skips = beam.consecutive_skips
-                self._iteration = beam.iteration
-
-                status = self.run_one_iteration()
+                with self._beam_swap(beam):
+                    status = self.run_one_iteration()
                 session_count += 1
 
                 if status == "fatal":
-                    logger.error("Fatal error — cannot continue. Check: claude login")
-                    # Restore orchestrator state before breaking
-                    self.results = orig_results
-                    self.context = orig_context
-                    self._fail_seq = orig_fail_seq
-                    self._consecutive_failures = orig_consec_fail
-                    self._consecutive_skips = orig_consec_skip
-                    self._iteration = orig_iter
-                    self._current_beam_id = None
+                    logger.error(_FATAL_MSG)
                     break
-
-                # Sync beam state back
-                beam.fail_seq = self._fail_seq
-                beam.consecutive_failures = self._consecutive_failures
-                beam.consecutive_skips = self._consecutive_skips
-                beam.iteration = self._iteration
-
-                # Restore orchestrator state
-                self.results = orig_results
-                self.context = orig_context
-                self._fail_seq = orig_fail_seq
-                self._consecutive_failures = orig_consec_fail
-                self._consecutive_skips = orig_consec_skip
-                self._iteration = orig_iter
-                self._current_beam_id = None
 
                 best = beam.results.best(self.config.metric.direction)
                 best_str = f"{best.metric_value}" if best else "N/A"

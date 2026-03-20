@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_AGENT_TIMEOUT = 600
 
-_AUTH_PATTERNS = {"not logged in", "unauthorized", "login required", "unauthenticated"}
+_AUTH_PATTERNS = frozenset({"not logged in", "unauthorized", "login required", "unauthenticated"})
 
 
 def _classify_error(msg: str) -> AgentErrorType:
