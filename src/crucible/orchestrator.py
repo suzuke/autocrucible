@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 from dataclasses import dataclass, field
 
-from crucible.agents.base import AgentInterface
+from crucible.agents.base import AgentErrorType, AgentInterface
 from crucible.budget import BudgetGuard
 from crucible.config import Config
 from crucible.context import ContextAssembler
@@ -141,7 +141,8 @@ class Orchestrator:
     def run_one_iteration(self) -> str:
         """Execute one full experiment cycle.
 
-        Returns a status string: "keep", "discard", "crash", "violation", or "skip".
+        Returns a status string: "keep", "discard", "crash", "violation",
+        "skip", "budget_exceeded", or "fatal".
         """
         self._iteration += 1
 
@@ -166,6 +167,14 @@ class Orchestrator:
             return "budget_exceeded"
         elif verdict == "warning":
             logger.warning(f"Budget at {self.budget.percent_used:.0f}%")
+
+        # Fatal error — unrecoverable, abort immediately
+        if agent_result.error_type == AgentErrorType.AUTH:
+            logger.error(
+                f"[iter {self._iteration}] Authentication error: "
+                f"{agent_result.description}"
+            )
+            return "fatal"
 
         # 3. Strip hidden files from modified list (agent may have created them on disk)
         hidden_set = set(self.config.files.hidden)
@@ -410,6 +419,10 @@ class Orchestrator:
                 status = self.run_one_iteration()
                 session_count += 1
 
+                if status == "fatal":
+                    logger.error("Fatal error — cannot continue. Check: claude login")
+                    break
+
                 best = self.results.best(self.config.metric.direction)
                 best_str = f"{best.metric_value}" if best else "N/A"
                 logger.info(f"[iter {self._iteration}] {status} | best {self.config.metric.name}: {best_str}")
@@ -513,6 +526,18 @@ class Orchestrator:
 
                 status = self.run_one_iteration()
                 session_count += 1
+
+                if status == "fatal":
+                    logger.error("Fatal error — cannot continue. Check: claude login")
+                    # Restore orchestrator state before breaking
+                    self.results = orig_results
+                    self.context = orig_context
+                    self._fail_seq = orig_fail_seq
+                    self._consecutive_failures = orig_consec_fail
+                    self._consecutive_skips = orig_consec_skip
+                    self._iteration = orig_iter
+                    self._current_beam_id = None
+                    break
 
                 # Sync beam state back
                 beam.fail_seq = self._fail_seq

@@ -20,12 +20,23 @@ from claude_agent_sdk import (
     query,
 )
 
-from crucible.agents.base import AgentInterface, AgentResult
+from crucible.agents.base import AgentErrorType, AgentInterface, AgentResult
 from crucible.results import UsageInfo
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_AGENT_TIMEOUT = 600
+
+_AUTH_PATTERNS = {"not logged in", "unauthorized", "login required", "unauthenticated"}
+
+
+def _classify_error(msg: str) -> AgentErrorType:
+    """Classify an error message into an AgentErrorType."""
+    lower = msg.lower()
+    if any(p in lower for p in _AUTH_PATTERNS):
+        return AgentErrorType.AUTH
+    return AgentErrorType.UNKNOWN
+
 
 SYSTEM_PROMPT = (
     "You are an elite performance optimization agent. "
@@ -203,7 +214,7 @@ class ClaudeCodeAgent(AgentInterface):
         except KeyboardInterrupt:
             raise
         except Exception as e:
-            return AgentResult(modified_files=[], description=f"agent error: {e}")
+            return AgentResult(modified_files=[], description=f"agent error: {e}", error_type=_classify_error(str(e)))
 
     async def _generate_edit_async(self, prompt: str, workspace: Path) -> AgentResult:
         # Strip CLAUDECODE env var to allow running inside a Claude Code session.
@@ -216,7 +227,7 @@ class ClaudeCodeAgent(AgentInterface):
                 timeout=self.timeout,
             )
         except asyncio.TimeoutError:
-            return AgentResult(modified_files=[], description="claude agent timed out")
+            return AgentResult(modified_files=[], description="claude agent timed out", error_type=AgentErrorType.TIMEOUT)
         finally:
             if saved is not None:
                 os.environ["CLAUDECODE"] = saved
@@ -259,12 +270,14 @@ class ClaudeCodeAgent(AgentInterface):
                     if message.is_error:
                         duration = time.monotonic() - start
                         agent_output = "\n".join(all_text_parts) if all_text_parts else None
+                        error_msg = message.result or "unknown"
                         return AgentResult(
                             modified_files=[],
-                            description=f"agent error: {message.result or 'unknown'}",
+                            description=f"agent error: {error_msg}",
                             duration_seconds=duration,
                             agent_output=agent_output,
                             usage=usage_info,
+                            error_type=_classify_error(error_msg),
                         )
         except TimeoutError:
             duration = time.monotonic() - start
@@ -273,6 +286,7 @@ class ClaudeCodeAgent(AgentInterface):
                 modified_files=[], description="claude agent timed out",
                 duration_seconds=duration,
                 agent_output=agent_output,
+                error_type=AgentErrorType.TIMEOUT,
             )
 
         if last_text:
