@@ -1,7 +1,7 @@
 [project]
 name = "autocrucible"
 version = "0.5.3"
-description = "Autonomous experiment platform for iterative LLM agent optimization"
+description = "Autonomous experiment platform — let LLM agents optimize anything through iterative edit-evaluate loops"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
