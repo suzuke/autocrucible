@@ -144,15 +144,34 @@ crucible new ~/my-project -e <範例名稱>
 
 | 範例 | 指標 | 方向 | 說明 |
 |------|------|------|------|
+| **演算法** | | | |
 | `optimize-sorting` | `ops_per_sec` | maximize | 純 Python 排序吞吐量優化 |
+| `optimize-pathfind` | `nodes_explored` | minimize | 網格路徑搜尋——展示 beam 搜尋策略 |
+| `optimize-hash` | `uniformity_score` | maximize | 雜湊函式均勻分佈優化 |
+| `optimize-tsp` | `total_distance` | minimize | 旅行推銷員問題——200 座城市路徑優化 |
+| **ML / 資料科學** | | | |
 | `optimize-regression` | `val_mse` | minimize | 合成回歸（非線性交互） |
 | `optimize-classifier` | `val_accuracy` | maximize | Numpy 手寫神經網路，8 類別分類 |
-| `optimize-compress` | `compression_ratio` | maximize | 無損文字壓縮（禁用 zlib/gzip） |
+| `optimize-quantize` | `score` | maximize | 訓練後量化——精度 × 壓縮率權衡 |
+| `optimize-lm` | `val_bpb` | minimize | 語言模型——最小化驗證集 bits per byte |
+| **遊戲 AI** | | | |
 | `optimize-gomoku` | `win_rate` | maximize | AlphaZero 風格五子棋 agent 訓練 |
 | `optimize-snake` | `avg_score` | maximize | 貪食蛇 AI 啟發式搜尋（無外部依賴） |
-| `optimize-monte-carlo` | `error` | minimize | Monte Carlo 積分——展示穩定性驗證功能 |
+| `optimize-2048` | `avg_score` | maximize | 2048 遊戲 AI，20 場固定種子對局 |
+| **壓縮 / 編碼** | | | |
+| `optimize-compress` | `compression_ratio` | maximize | 無損文字壓縮（禁用 zlib/gzip） |
+| `optimize-tokenizer` | `tokens_per_char` | minimize | BPE 風格 tokenizer 英文壓縮 |
 | `optimize-cipher` | `throughput` | maximize | 替換式加密——展示 restart 搜尋策略 |
-| `optimize-pathfind` | `nodes_explored` | minimize | 網格路徑搜尋——展示 beam 搜尋策略 |
+| **數值 / 科學** | | | |
+| `optimize-monte-carlo` | `error` | minimize | Monte Carlo 積分——展示穩定性驗證功能 |
+| `optimize-rl-policy` | `mean_reward` | maximize | 倒單擺控制器——強化學習策略優化 |
+| **Prompt 工程** | | | |
+| `optimize-prompt-format` | `accuracy` | maximize | 系統提示優化——格式轉換任務 |
+| `optimize-prompt-logic` | `accuracy` | maximize | 系統提示優化——邏輯推理 |
+| `optimize-prompt-math` | `accuracy` | maximize | 系統提示優化——數學應用題 |
+| **程式碼 / 文字** | | | |
+| `optimize-codegen` | `score` | maximize | 程式碼產生器——正確性 × 速度比 |
+| `optimize-regex` | `f1_score` | maximize | 正則表達式優化——Email 分類 |
 
 ### 範例展示：optimize-compress
 

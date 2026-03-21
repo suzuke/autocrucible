@@ -144,15 +144,34 @@ crucible new ~/my-project -e <example-name>
 
 | Example | Metric | Direction | Description |
 |---------|--------|-----------|-------------|
+| **Algorithms** | | | |
 | `optimize-sorting` | `ops_per_sec` | maximize | Pure Python sorting throughput optimization |
+| `optimize-pathfind` | `nodes_explored` | minimize | Grid pathfinding — showcases beam strategy |
+| `optimize-hash` | `uniformity_score` | maximize | Hash function optimization for uniform distribution |
+| `optimize-tsp` | `total_distance` | minimize | Travelling Salesman Problem — 200 cities route optimization |
+| **ML / Data Science** | | | |
 | `optimize-regression` | `val_mse` | minimize | Synthetic regression with nonlinear interactions |
 | `optimize-classifier` | `val_accuracy` | maximize | Numpy-only neural network on 8-class dataset |
-| `optimize-compress` | `compression_ratio` | maximize | Lossless text compression (no zlib/gzip allowed) |
+| `optimize-quantize` | `score` | maximize | Post-training quantization — accuracy × compression tradeoff |
+| `optimize-lm` | `val_bpb` | minimize | Language model — minimize validation bits per byte |
+| **Game AI** | | | |
 | `optimize-gomoku` | `win_rate` | maximize | AlphaZero-style Gomoku agent training |
 | `optimize-snake` | `avg_score` | maximize | Snake AI heuristic search (no dependencies) |
-| `optimize-monte-carlo` | `error` | minimize | Monte Carlo integration — showcases stability validation |
+| `optimize-2048` | `avg_score` | maximize | 2048 game-playing AI over 20 seeded games |
+| **Compression / Encoding** | | | |
+| `optimize-compress` | `compression_ratio` | maximize | Lossless text compression (no zlib/gzip allowed) |
+| `optimize-tokenizer` | `tokens_per_char` | minimize | BPE-style tokenizer compression for English text |
 | `optimize-cipher` | `throughput` | maximize | Substitution cipher — showcases restart strategy |
-| `optimize-pathfind` | `nodes_explored` | minimize | Grid pathfinding — showcases beam strategy |
+| **Numerical / Scientific** | | | |
+| `optimize-monte-carlo` | `error` | minimize | Monte Carlo integration — showcases stability validation |
+| `optimize-rl-policy` | `mean_reward` | maximize | Pendulum swing-up controller via reinforcement learning |
+| **Prompt Engineering** | | | |
+| `optimize-prompt-format` | `accuracy` | maximize | System prompt optimization for format conversion tasks |
+| `optimize-prompt-logic` | `accuracy` | maximize | System prompt optimization for logic reasoning |
+| `optimize-prompt-math` | `accuracy` | maximize | System prompt optimization for math word problems |
+| **Code / Text** | | | |
+| `optimize-codegen` | `score` | maximize | Code generator — correctness × speed ratio |
+| `optimize-regex` | `f1_score` | maximize | Regex pattern optimization for email classification |
 
 ### Demo: optimize-compress
 
