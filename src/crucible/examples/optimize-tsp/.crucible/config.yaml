@@ -1,0 +1,33 @@
+name: "optimize-tsp"
+description: "Travelling Salesman Problem — minimize total route distance across 200 cities"
+
+files:
+  editable:
+    - "solver.py"
+  readonly: []
+  hidden:
+    - "evaluate.py"
+    - "cities.py"
+
+commands:
+  run: "python3 -u evaluate.py 2>&1 | tee run.log"
+  eval: "cat run.log"
+
+metric:
+  name: "total_distance"
+  direction: "minimize"
+
+constraints:
+  timeout_seconds: 120
+  max_iterations: 50
+
+evaluation:
+  repeat: 3
+  aggregation: "median"
+
+search:
+  strategy: "restart"
+  plateau_threshold: 6
+
+agent:
+  instructions: "program.md"
