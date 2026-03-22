@@ -49,6 +49,8 @@ class Orchestrator:
         workspace: Path | str,
         tag: str,
         agent: AgentInterface,
+        *,
+        profile: bool = False,
     ) -> None:
         self.config = config
         self.workspace = Path(workspace)
@@ -103,6 +105,7 @@ class Orchestrator:
         self._current_beam_id: int | None = None
         self._beams: list[BeamState] = []
         self._current_beam_idx: int = 0
+        self._profile = profile
 
     def init(self, fork_from: tuple[str, float, str] | None = None) -> None:
         """Create the experiment branch and initialise results-{tag}.tsv.
@@ -154,9 +157,10 @@ class Orchestrator:
         if "read" not in self.agent.capabilities():
             prompt = self.context.assemble_with_files(
                 self.results, self.workspace, self.config.files.editable,
+                profile=self._profile,
             )
         else:
-            prompt = self.context.assemble(self.results)
+            prompt = self.context.assemble(self.results, profile=self._profile)
 
         # 2. Call agent (hidden files are protected via SDK can_use_tool callback)
         t0_agent = time.monotonic()
@@ -249,6 +253,8 @@ class Orchestrator:
             self.results.log(self._make_record(
                 "crash", 0.0, agent_result.description,
                 commit_hash, agent_result, total_duration,
+                agent_duration_seconds=agent_duration,
+                run_duration_seconds=run_duration,
             ))
             crash_msg = run_result.stderr_tail
             if run_result.timed_out:
@@ -273,6 +279,8 @@ class Orchestrator:
                 "keep", metric_value, agent_result.description,
                 commit_hash, agent_result, total_duration,
                 delta=delta, delta_percent=delta_percent,
+                agent_duration_seconds=agent_duration,
+                run_duration_seconds=run_duration,
             ))
             self._consecutive_failures = 0
             return "keep"
@@ -284,6 +292,8 @@ class Orchestrator:
             "discard", metric_value, agent_result.description,
             commit_hash, agent_result, total_duration,
             delta=delta, delta_percent=delta_percent,
+            agent_duration_seconds=agent_duration,
+            run_duration_seconds=run_duration,
         ))
         self._consecutive_failures += 1
         return "discard"
@@ -298,8 +308,14 @@ class Orchestrator:
         duration_seconds: float,
         delta: float | None = None,
         delta_percent: float | None = None,
+        agent_duration_seconds: float | None = None,
+        run_duration_seconds: float | None = None,
     ) -> ExperimentRecord:
         """Build an ExperimentRecord with common fields filled in."""
+        # Inject prompt_breakdown into usage if profiling
+        if self._profile and agent_result.usage and self.context._prompt_breakdown:
+            agent_result.usage.prompt_breakdown = self.context._prompt_breakdown
+
         return ExperimentRecord(
             commit=commit,
             metric_value=metric_value,
@@ -312,6 +328,8 @@ class Orchestrator:
             files_changed=[str(f) for f in agent_result.modified_files],
             diff_stats=self._get_diff_stats(commit),
             duration_seconds=duration_seconds,
+            agent_duration_seconds=agent_duration_seconds,
+            run_duration_seconds=run_duration_seconds,
             usage=agent_result.usage,
             log_dir=f"logs/iter-{self._iteration}",
             beam_id=self._current_beam_id,
@@ -430,6 +448,24 @@ class Orchestrator:
                 best = self.results.best(self.config.metric.direction)
                 best_str = f"{best.metric_value}" if best else "N/A"
                 logger.info(f"[iter {self._iteration}] {status} | best {self.config.metric.name}: {best_str}")
+
+                if self._profile and self.context._prompt_breakdown:
+                    bd = self.context._prompt_breakdown
+                    total = bd.get("total", 1)
+                    parts = []
+                    for k, v in bd.items():
+                        if k != "total" and v > 0:
+                            pct = v * 100 // total
+                            parts.append(f"{k}: {pct}%")
+                    last_records = self.results.read_all()
+                    last_usage = last_records[-1].usage if last_records else None
+                    cache_str = ""
+                    if last_usage and last_usage.cache_read_input_tokens is not None:
+                        cr = last_usage.cache_read_input_tokens or 0
+                        cc = last_usage.cache_creation_input_tokens or 0
+                        cache_pct = cr * 100 // (cr + cc) if (cr + cc) > 0 else 0
+                        cache_str = f" | cache: {cache_pct}%"
+                    logger.info(f"[profile] prompt: ~{total} tok ({', '.join(parts)}){cache_str}")
 
                 if status == "budget_exceeded":
                     logger.warning("Budget limit reached, stopping.")

@@ -15,6 +15,11 @@ PREAMBLE = (
 
 _STATUS_LABELS = {"keep": "✓ KEPT", "discard": "✗ WORSE", "crash": "💥 CRASH"}
 
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count from text. Approximation: ~4 chars per token."""
+    return len(text) // 4 if text else 0
+
 # -- Crash classification patterns (order matters: first match wins) ----------
 
 _CRASH_PATTERNS: list[tuple[str, str, str]] = [
@@ -334,17 +339,25 @@ class ContextAssembler:
 
     def assemble_with_files(
         self, log: ResultsLog, workspace: Path, editable_files: list[str],
+        *, profile: bool = False,
     ) -> str:
         """Assemble prompt with file contents inlined (for agents without read tools)."""
-        base = self.assemble(log)
+        base = self.assemble(log, profile=profile)
         parts = [base, "\n\n---\n\n## Editable File Contents\n"]
+        file_text = ""
         for fname in editable_files:
             fpath = workspace / fname
             try:
                 content = fpath.read_text()
             except (FileNotFoundError, OSError):
                 continue
-            parts.append(f"\n### {fname}\n```\n{content}\n```\n")
+            block = f"\n### {fname}\n```\n{content}\n```\n"
+            parts.append(block)
+            file_text += block
+        if profile and self._prompt_breakdown is not None:
+            file_tokens = _estimate_tokens(file_text)
+            self._prompt_breakdown["file_inline"] = file_tokens
+            self._prompt_breakdown["total"] = self._prompt_breakdown.get("total", 0) + file_tokens
         return "".join(parts)
 
     def _section_cross_beam_history(self, beam_summaries: list[dict]) -> str:
@@ -372,7 +385,10 @@ class ContextAssembler:
 
         return "\n".join(lines)
 
-    def assemble(self, log: ResultsLog, beam_summaries: list[dict] | None = None) -> str:
+    def assemble(
+        self, log: ResultsLog, beam_summaries: list[dict] | None = None,
+        *, profile: bool = False,
+    ) -> str:
         """Assemble all sections into a complete prompt."""
         if beam_summaries is None:
             beam_summaries = getattr(self, "_beam_summaries", None) or []
@@ -395,16 +411,27 @@ class ContextAssembler:
 
         plateau = _plateau_hint(real_records, self.config.search.plateau_threshold)
 
-        sections = [
-            self._section_instructions(),
-            self._section_state(real_records, best, summary),
-            self._section_cross_beam_history(beam_summaries),
-            self._section_history(real_records),
-            plateau,
-            self._section_errors(),
-            self._section_directive(),
-        ]
-        prompt = "\n\n---\n\n".join(s for s in sections if s)
+        sections_map = {
+            "instructions": self._section_instructions(),
+            "state": self._section_state(real_records, best, summary),
+            "cross_beam_history": self._section_cross_beam_history(beam_summaries),
+            "history": self._section_history(real_records),
+            "plateau_hint": plateau or "",
+            "errors": self._section_errors(),
+            "directive": self._section_directive(),
+        }
+
+        if profile:
+            self._prompt_breakdown = {
+                name: _estimate_tokens(text)
+                for name, text in sections_map.items() if text
+            }
+            self._prompt_breakdown["preamble"] = _estimate_tokens(PREAMBLE)
+            self._prompt_breakdown["total"] = sum(self._prompt_breakdown.values())
+        else:
+            self._prompt_breakdown = None
+
+        prompt = "\n\n---\n\n".join(s for s in sections_map.values() if s)
 
         # Save crash info before clearing (for requeue on skip iterations)
         self._last_crash_info = list(self._crash_info)

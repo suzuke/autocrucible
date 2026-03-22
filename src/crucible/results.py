@@ -22,6 +22,10 @@ class UsageInfo:
     cache_read_input_tokens: int | None = None
     cache_creation_input_tokens: int | None = None
     total_cost_usd: float | None = None
+    prompt_breakdown: dict[str, int] | None = None
+    sdk_duration_ms: int | None = None
+    sdk_api_duration_ms: int | None = None
+    num_turns: int | None = None
 
 
 @dataclass
@@ -37,6 +41,8 @@ class ExperimentRecord:
     files_changed: list[str] | None = None
     diff_stats: dict | None = None
     duration_seconds: float | None = None
+    agent_duration_seconds: float | None = None
+    run_duration_seconds: float | None = None
     usage: UsageInfo | None = None
     log_dir: str | None = None
     beam_id: int | None = None

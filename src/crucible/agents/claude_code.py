@@ -329,6 +329,9 @@ def _extract_usage(message: ResultMessage) -> UsageInfo | None:
         cache_read_input_tokens=u.get("cache_read_input_tokens"),
         cache_creation_input_tokens=u.get("cache_creation_input_tokens"),
         total_cost_usd=cost,
+        sdk_duration_ms=getattr(message, "duration_ms", None),
+        sdk_api_duration_ms=getattr(message, "duration_api_ms", None),
+        num_turns=getattr(message, "num_turns", None),
     )
 
 

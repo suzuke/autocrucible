@@ -412,8 +412,9 @@ def _scan_previous_runs(project: Path, current_tag: str, direction: str) -> list
 @click.option("--timeout", default=600, type=int, help="Agent timeout per iteration (seconds).")
 @click.option("--max-iterations", default=None, type=int, help="Maximum iterations to run (default: unlimited).")
 @click.option("--no-interactive", is_flag=True, default=False, help="Skip interactive prompts (start fresh).")
+@click.option("--profile", is_flag=True, default=False, help="Enable token profiling (track prompt breakdown, cache efficiency).")
 @_verbose_option
-def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterations: int | None, no_interactive: bool) -> None:
+def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterations: int | None, no_interactive: bool, profile: bool) -> None:
     """Run the experiment loop until interrupted."""
     try:
         project = Path(project_dir).resolve()
@@ -442,7 +443,7 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
         editable_files=editable,
         **override_kwargs,
     )
-    orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
+    orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent, profile=profile)
 
     # Resume if branch exists, otherwise auto-init
     if orch.git.branch_exists(tag):
@@ -791,12 +792,107 @@ def wizard(dest: str, describe: str | None) -> None:
     click.echo("  crucible run --tag run1")
 
 
+def _render_token_profile(results_path: Path, as_json: bool) -> None:
+    """Render token profiling analysis from experiment results."""
+    from crucible.results import ResultsLog
+
+    records = ResultsLog(results_path).read_all()
+    records = [r for r in records if r.status != "baseline"]
+    if not records:
+        click.echo("No iterations to analyze.")
+        return
+
+    # Per-iteration table
+    rows = []
+    section_totals: dict[str, list[int]] = {}
+    for r in records:
+        u = r.usage
+        in_tok = u.input_tokens if u else None
+        out_tok = u.output_tokens if u else None
+        cache_pct = None
+        if u and u.cache_read_input_tokens is not None:
+            cr = u.cache_read_input_tokens or 0
+            cc = u.cache_creation_input_tokens or 0
+            cache_pct = cr * 100 // (cr + cc) if (cr + cc) > 0 else 0
+        agent_s = r.agent_duration_seconds
+        run_s = r.run_duration_seconds
+        rows.append((r.iteration, in_tok, out_tok, cache_pct, agent_s, run_s, r.status))
+
+        # Accumulate breakdown
+        if u and u.prompt_breakdown:
+            for k, v in u.prompt_breakdown.items():
+                if k != "total":
+                    section_totals.setdefault(k, []).append(v)
+
+    if as_json:
+        click.echo(json_module.dumps({
+            "iterations": [
+                {
+                    "iter": it, "input_tokens": it_tok, "output_tokens": ot,
+                    "cache_hit_pct": cp, "agent_s": ag, "run_s": rs, "status": st,
+                }
+                for it, it_tok, ot, cp, ag, rs, st in rows
+            ],
+            "section_averages": {
+                k: sum(v) // len(v) for k, v in section_totals.items()
+            } if section_totals else None,
+        }))
+        return
+
+    # Header
+    click.echo(f"\nToken Profile ({len(records)} iterations)")
+    click.echo("=" * 75)
+    click.echo(f"{'Iter':>5} {'In Tok':>8} {'Out Tok':>8} {'Cache%':>7} {'Agent(s)':>9} {'Run(s)':>7} {'Status':>8}")
+    click.echo("-" * 75)
+
+    for it, in_tok, out_tok, cache_pct, agent_s, run_s, status in rows:
+        it_str = str(it or "?")
+        in_str = str(in_tok) if in_tok else "-"
+        out_str = str(out_tok) if out_tok else "-"
+        cache_str = f"{cache_pct}%" if cache_pct is not None else "-"
+        agent_str = f"{agent_s:.1f}" if agent_s else "-"
+        run_str = f"{run_s:.1f}" if run_s else "-"
+        click.echo(f"{it_str:>5} {in_str:>8} {out_str:>8} {cache_str:>7} {agent_str:>9} {run_str:>7} {status:>8}")
+
+    # Averages
+    in_tokens = [r.usage.input_tokens for r in records if r.usage and r.usage.input_tokens]
+    out_tokens = [r.usage.output_tokens for r in records if r.usage and r.usage.output_tokens]
+    if in_tokens:
+        click.echo("-" * 75)
+        click.echo(f"{'avg':>5} {sum(in_tokens)//len(in_tokens):>8} {sum(out_tokens)//len(out_tokens) if out_tokens else 0:>8}")
+
+    # Section breakdown
+    if section_totals:
+        click.echo(f"\nPrompt Breakdown (avg tokens per section):")
+        total_avg = sum(sum(v) // len(v) for v in section_totals.values())
+        sorted_sections = sorted(section_totals.items(), key=lambda x: sum(x[1]) // len(x[1]), reverse=True)
+        for name, values in sorted_sections:
+            avg = sum(values) // len(values)
+            pct = avg * 100 // total_avg if total_avg > 0 else 0
+            bar = "\u2588" * (pct // 3)
+            click.echo(f"  {name:>20}: {avg:>5} ({pct:>2}%) {bar}")
+
+    # Cache efficiency
+    cache_vals = [
+        r.usage.cache_read_input_tokens * 100 // (r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens)
+        for r in records
+        if r.usage and r.usage.cache_read_input_tokens is not None
+        and r.usage.cache_creation_input_tokens is not None
+        and (r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens) > 0
+    ]
+    if cache_vals:
+        click.echo(f"\nCache Efficiency: avg {sum(cache_vals)//len(cache_vals)}% hit rate")
+
+    click.echo()
+
+
 @main.command()
 @click.option("--tag", required=True, help="Experiment tag to analyze.")
 @click.option("--project-dir", default=".", help="Project root directory.")
 @click.option("--no-ai", is_flag=True, help="Skip AI insights (data only).")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool) -> None:
+@click.option("--tokens", is_flag=True, help="Show token profiling analysis.")
+def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool, tokens: bool) -> None:
     """Analyze a completed experiment run."""
     try:
         project = Path(project_dir).resolve()
@@ -815,6 +911,10 @@ def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool) -> None:
 
     if report.total == 0:
         raise click.ClickException("No iterations recorded for this experiment.")
+
+    if tokens:
+        _render_token_profile(results_path, as_json)
+        return
 
     if not no_ai:
         click.echo("Generating AI insights...")
