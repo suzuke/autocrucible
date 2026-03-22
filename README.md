@@ -256,5 +256,6 @@ Crucible is installed as a **global CLI tool** — it is NOT a dependency of you
 ## Documentation
 
 - [Config Reference](docs/CONFIG.md) — all YAML fields, eval convention, git strategy, guard rails
+- [Token Profiling](docs/PROFILING.md) — track prompt composition, cache efficiency, and timing per iteration
 - [FAQ](docs/FAQ.md) — local optima, single metric, parallel agents, safety, monitoring
 - [Changelog](docs/CHANGELOG.md) — version history and release notes
