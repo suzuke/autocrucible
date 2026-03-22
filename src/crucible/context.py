@@ -21,13 +21,6 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4 if text else 0
 
 
-def _format_diff_for_table(diff_text: str) -> str:
-    """Format compact diff for inline display in markdown table."""
-    # Replace newlines with ` | ` for inline display, escape pipes
-    lines = diff_text.replace("|", "\\|").splitlines()
-    return " ".join(lines)
-
-
 # -- Crash classification patterns (order matters: first match wins) ----------
 
 _CRASH_PATTERNS: list[tuple[str, str, str]] = [
@@ -254,15 +247,13 @@ class ContextAssembler:
             )
 
         lines = ["## Experiment History"]
-        lines.append("")
-        lines.append("| # | Metric | Status | Change |")
-        lines.append("|---|--------|--------|--------|")
         for i, r in enumerate(recent, 1):
             label = _STATUS_LABELS.get(r.status, r.status)
-            change = _format_diff_for_table(r.diff_text) if r.diff_text else r.description
-            lines.append(
-                f"| {i} | {r.metric_value} | {label} | {change} |"
-            )
+            lines.append(f"\n### {i}. {label} (metric={r.metric_value})")
+            if r.diff_text:
+                lines.append(f"```diff\n{r.diff_text}\n```")
+            else:
+                lines.append(r.description)
 
         # Metric trend for kept records
         kept_values = [r.metric_value for r in records if r.status == "keep"]

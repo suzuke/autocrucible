@@ -100,8 +100,8 @@ class GitManager:
         branch_name = f"{self.branch_prefix}/{tag}-beam-{beam_id}"
         self._run("checkout", branch_name)
 
-    def compact_diff(self, commit: str, max_chars: int = 200) -> str:
-        """Return a compact diff of changed lines only (no context), truncated."""
+    def compact_diff(self, commit: str) -> str:
+        """Return a compact diff of changed lines only (no context)."""
         try:
             output = self._run("diff", "--no-color", "-U0", f"{commit}~1", commit)
         except subprocess.CalledProcessError:
@@ -111,10 +111,7 @@ class GitManager:
         for line in output.splitlines():
             if line.startswith(("+", "-")) and not line.startswith(("+++", "---")):
                 lines.append(line)
-        text = "\n".join(lines)
-        if len(text) > max_chars:
-            text = text[:max_chars] + "…"
-        return text
+        return "\n".join(lines)
 
     def revert_changes(self) -> None:
         """Discard all working tree changes and remove untracked files."""
