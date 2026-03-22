@@ -3,7 +3,7 @@
 ## v0.6.0
 
 - **Token Profiling** — `crucible run --profile` tracks per-iteration token usage, prompt section breakdown, and cache hit rates. `crucible postmortem --tokens` renders analysis with bar charts and JSON output. See [docs/PROFILING.md](PROFILING.md).
-- **Diff-Based History** — Experiment history now shows actual git diffs instead of agent-generated descriptions. Failed iterations display full code diffs; successful iterations show one-line metric summaries. Reduces history bloat while improving accuracy.
+- **Diff-Based History** — Experiment history now shows actual git diffs instead of agent-generated descriptions. Failed iterations display full code diffs; successful iterations show one-line metric summaries. A/B tested: 42-62% keep rate vs 32% baseline. See [design rationale](DESIGN-DECISIONS.md#diff-based-history-v061).
 - **New Example** — `optimize-tsp`: Travelling Salesman Problem with 200 cities, restart strategy, and median-of-3 evaluation.
 - **Bug Fixes** — `UsageInfo` deserialization now filters unknown fields (forward compatibility); fixed falsy checks hiding `0`/`0.0` values in profiling output; `_make_record` no longer mutates `agent_result.usage`; cache percentage calculation deduplicated into `UsageInfo.cache_hit_percent()`.
 
