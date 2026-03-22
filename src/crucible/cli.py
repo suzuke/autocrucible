@@ -809,11 +809,7 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
         u = r.usage
         in_tok = u.input_tokens if u else None
         out_tok = u.output_tokens if u else None
-        cache_pct = None
-        if u and u.cache_read_input_tokens is not None:
-            cr = u.cache_read_input_tokens or 0
-            cc = u.cache_creation_input_tokens or 0
-            cache_pct = cr * 100 // (cr + cc) if (cr + cc) > 0 else 0
+        cache_pct = u.cache_hit_percent() if u else None
         agent_s = r.agent_duration_seconds
         run_s = r.run_duration_seconds
         rows.append((r.iteration, in_tok, out_tok, cache_pct, agent_s, run_s, r.status))
@@ -847,16 +843,16 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
 
     for it, in_tok, out_tok, cache_pct, agent_s, run_s, status in rows:
         it_str = str(it or "?")
-        in_str = str(in_tok) if in_tok else "-"
-        out_str = str(out_tok) if out_tok else "-"
+        in_str = str(in_tok) if in_tok is not None else "-"
+        out_str = str(out_tok) if out_tok is not None else "-"
         cache_str = f"{cache_pct}%" if cache_pct is not None else "-"
-        agent_str = f"{agent_s:.1f}" if agent_s else "-"
-        run_str = f"{run_s:.1f}" if run_s else "-"
+        agent_str = f"{agent_s:.1f}" if agent_s is not None else "-"
+        run_str = f"{run_s:.1f}" if run_s is not None else "-"
         click.echo(f"{it_str:>5} {in_str:>8} {out_str:>8} {cache_str:>7} {agent_str:>9} {run_str:>7} {status:>8}")
 
     # Averages
-    in_tokens = [r.usage.input_tokens for r in records if r.usage and r.usage.input_tokens]
-    out_tokens = [r.usage.output_tokens for r in records if r.usage and r.usage.output_tokens]
+    in_tokens = [r.usage.input_tokens for r in records if r.usage and r.usage.input_tokens is not None]
+    out_tokens = [r.usage.output_tokens for r in records if r.usage and r.usage.output_tokens is not None]
     if in_tokens:
         click.echo("-" * 75)
         click.echo(f"{'avg':>5} {sum(in_tokens)//len(in_tokens):>8} {sum(out_tokens)//len(out_tokens) if out_tokens else 0:>8}")
@@ -874,11 +870,8 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
 
     # Cache efficiency
     cache_vals = [
-        r.usage.cache_read_input_tokens * 100 // (r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens)
-        for r in records
-        if r.usage and r.usage.cache_read_input_tokens is not None
-        and r.usage.cache_creation_input_tokens is not None
-        and (r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens) > 0
+        cp for r in records
+        if r.usage and (cp := r.usage.cache_hit_percent()) is not None
     ]
     if cache_vals:
         click.echo(f"\nCache Efficiency: avg {sum(cache_vals)//len(cache_vals)}% hit rate")

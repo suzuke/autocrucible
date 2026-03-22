@@ -125,6 +125,12 @@ class ContextAssembler:
         self._errors: List[str] = []
         self._crash_info: List[str] = []
         self._last_crash_info: List[str] = []
+        self._prompt_breakdown: dict[str, int] | None = None
+
+    @property
+    def prompt_breakdown(self) -> dict[str, int] | None:
+        """Token breakdown by section from last assemble() call, if profiling was enabled."""
+        return self._prompt_breakdown
 
     def add_error(self, message: str) -> None:
         """Queue an error message for the next assembled prompt."""

@@ -312,9 +312,11 @@ class Orchestrator:
         run_duration_seconds: float | None = None,
     ) -> ExperimentRecord:
         """Build an ExperimentRecord with common fields filled in."""
-        # Inject prompt_breakdown into usage if profiling
-        if self._profile and agent_result.usage and self.context._prompt_breakdown:
-            agent_result.usage.prompt_breakdown = self.context._prompt_breakdown
+        usage = agent_result.usage
+        # Copy prompt_breakdown into usage without mutating agent_result
+        if self._profile and usage and self.context.prompt_breakdown:
+            from dataclasses import replace
+            usage = replace(usage, prompt_breakdown=self.context.prompt_breakdown)
 
         return ExperimentRecord(
             commit=commit,
@@ -330,7 +332,7 @@ class Orchestrator:
             duration_seconds=duration_seconds,
             agent_duration_seconds=agent_duration_seconds,
             run_duration_seconds=run_duration_seconds,
-            usage=agent_result.usage,
+            usage=usage,
             log_dir=f"logs/iter-{self._iteration}",
             beam_id=self._current_beam_id,
         )
@@ -449,8 +451,8 @@ class Orchestrator:
                 best_str = f"{best.metric_value}" if best else "N/A"
                 logger.info(f"[iter {self._iteration}] {status} | best {self.config.metric.name}: {best_str}")
 
-                if self._profile and self.context._prompt_breakdown:
-                    bd = self.context._prompt_breakdown
+                if self._profile and self.context.prompt_breakdown:
+                    bd = self.context.prompt_breakdown
                     total = bd.get("total", 1)
                     parts = []
                     for k, v in bd.items():
@@ -460,11 +462,10 @@ class Orchestrator:
                     last_records = self.results.read_all()
                     last_usage = last_records[-1].usage if last_records else None
                     cache_str = ""
-                    if last_usage and last_usage.cache_read_input_tokens is not None:
-                        cr = last_usage.cache_read_input_tokens or 0
-                        cc = last_usage.cache_creation_input_tokens or 0
-                        cache_pct = cr * 100 // (cr + cc) if (cr + cc) > 0 else 0
-                        cache_str = f" | cache: {cache_pct}%"
+                    if last_usage:
+                        cp = last_usage.cache_hit_percent()
+                        if cp is not None:
+                            cache_str = f" | cache: {cp}%"
                     logger.info(f"[profile] prompt: ~{total} tok ({', '.join(parts)}){cache_str}")
 
                 if status == "budget_exceeded":

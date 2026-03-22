@@ -27,6 +27,14 @@ class UsageInfo:
     sdk_api_duration_ms: int | None = None
     num_turns: int | None = None
 
+    def cache_hit_percent(self) -> int | None:
+        """Return cache hit percentage, or None if data unavailable."""
+        if self.cache_read_input_tokens is None or self.cache_creation_input_tokens is None:
+            return None
+        cr = self.cache_read_input_tokens or 0
+        cc = self.cache_creation_input_tokens or 0
+        return cr * 100 // (cr + cc) if (cr + cc) > 0 else 0
+
 
 @dataclass
 class ExperimentRecord:
@@ -64,7 +72,8 @@ def _deserialize_record(line: str) -> ExperimentRecord:
     d = json.loads(line)
     # Handle nested UsageInfo
     if "usage" in d and isinstance(d["usage"], dict):
-        d["usage"] = UsageInfo(**d["usage"])
+        usage_fields = {f.name for f in fields(UsageInfo)}
+        d["usage"] = UsageInfo(**{k: v for k, v in d["usage"].items() if k in usage_fields})
     return ExperimentRecord(**{
         f.name: d.get(f.name) for f in fields(ExperimentRecord)
     })
