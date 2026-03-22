@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.6.0
+
+- **Token Profiling** — `crucible run --profile` tracks per-iteration token usage, prompt section breakdown, and cache hit rates. `crucible postmortem --tokens` renders analysis with bar charts and JSON output. See [docs/PROFILING.md](PROFILING.md).
+- **Diff-Based History** — Experiment history now shows actual git diffs instead of agent-generated descriptions. Failed iterations display full code diffs; successful iterations show one-line metric summaries. Reduces history bloat while improving accuracy.
+- **New Example** — `optimize-tsp`: Travelling Salesman Problem with 200 cities, restart strategy, and median-of-3 evaluation.
+- **Bug Fixes** — `UsageInfo` deserialization now filters unknown fields (forward compatibility); fixed falsy checks hiding `0`/`0.0` values in profiling output; `_make_record` no longer mutates `agent_result.usage`; cache percentage calculation deduplicated into `UsageInfo.cache_hit_percent()`.
+
 ## v0.5.0
 
 - **Search Strategies** — `search.strategy` config key with three modes: `greedy` (default), `restart`, `beam`. Restart resets to baseline after N stagnant iterations; beam maintains K independent branches with cross-beam context sharing.
