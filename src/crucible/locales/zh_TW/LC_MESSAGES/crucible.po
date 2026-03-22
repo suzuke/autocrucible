@@ -291,7 +291,7 @@ msgstr "接下來："
 #: src/crucible/cli.py:324
 #, fuzzy
 msgid "Initialise an experiment branch and results log."
-msgstr "已在 {project} 初始化實驗 '{tag}'"
+msgstr "初始化實驗分支與結果記錄。"
 
 #: src/crucible/cli.py:325 src/crucible/cli.py:408
 msgid "Experiment tag / branch suffix."
