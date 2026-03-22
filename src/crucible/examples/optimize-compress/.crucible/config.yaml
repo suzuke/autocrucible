@@ -4,6 +4,7 @@ files:
   editable:
     - "compress.py"
   readonly:
+    - ".crucible/program.md"
     - "generate_corpus.py"
     - "corpus.txt"
   hidden:

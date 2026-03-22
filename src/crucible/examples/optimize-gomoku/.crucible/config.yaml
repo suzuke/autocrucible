@@ -4,6 +4,7 @@ files:
   editable:
     - "agent.py"
   readonly:
+    - ".crucible/program.md"
     - "game.py"
   hidden:
     - "evaluate.py"

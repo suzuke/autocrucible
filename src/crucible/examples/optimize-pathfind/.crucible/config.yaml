@@ -3,6 +3,8 @@ name: "optimize-pathfind"
 files:
   editable:
     - "pathfind.py"
+  readonly:
+    - ".crucible/program.md"
   hidden:
     - "benchmark.py"
 

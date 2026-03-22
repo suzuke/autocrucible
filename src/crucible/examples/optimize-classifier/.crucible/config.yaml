@@ -3,7 +3,8 @@ name: "optimize-classifier"
 files:
   editable:
     - "classifier.py"
-  readonly: []
+  readonly:
+    - ".crucible/program.md"
   hidden:
     - "evaluate.py"
 

@@ -4,7 +4,8 @@ description: "Travelling Salesman Problem — minimize total route distance acro
 files:
   editable:
     - "solver.py"
-  readonly: []
+  readonly:
+    - ".crucible/program.md"
   hidden:
     - "evaluate.py"
     - "cities.py"
@@ -20,6 +21,7 @@ metric:
 constraints:
   timeout_seconds: 120
   max_iterations: 50
+  max_retries: 5
 
 evaluation:
   repeat: 3

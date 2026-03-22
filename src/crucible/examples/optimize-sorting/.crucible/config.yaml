@@ -3,7 +3,8 @@ name: "optimize-sorting"
 files:
   editable:
     - "sort.py"
-  readonly: []
+  readonly:
+    - ".crucible/program.md"
   hidden:
     - "benchmark.py"
 

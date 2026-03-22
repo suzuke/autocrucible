@@ -1,3 +1,4 @@
+results-*.jsonl
 run.log
 __pycache__/
 *.pyc

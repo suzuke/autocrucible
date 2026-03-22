@@ -12,6 +12,8 @@ evaluation:
 files:
   editable:
   - estimate.py
+  readonly:
+    - ".crucible/program.md"
   hidden:
   - benchmark.py
 git:

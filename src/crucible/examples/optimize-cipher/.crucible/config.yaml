@@ -3,6 +3,8 @@ name: "optimize-cipher"
 files:
   editable:
     - "cipher.py"
+  readonly:
+    - ".crucible/program.md"
   hidden:
     - "benchmark.py"
 

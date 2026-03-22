@@ -4,6 +4,7 @@ files:
   editable:
     - "strategy.py"
   readonly:
+    - ".crucible/program.md"
     - "game.py"
     - "view.html"
   hidden:
