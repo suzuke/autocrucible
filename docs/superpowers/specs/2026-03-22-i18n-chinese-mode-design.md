@@ -19,19 +19,22 @@ All user-facing CLI output across every module:
 | Module | What to translate |
 |--------|-------------------|
 | `cli.py` | Command docstrings, `--help` text, interactive prompts, status displays, wizard questions, profile output, update messages |
-| `orchestrator.py` | Iteration status lines, stop messages, error feedback, budget warnings |
+| `orchestrator.py` | User-facing `logger.*()` messages: iteration status, stop messages, budget warnings. Note: `_ColorFormatter` pattern-matches on status keywords (`keep`/`discard`/`crash`) — these keywords stay English in the log prefix, translation applies to surrounding text only |
 | `preflight.py` | Auth errors, fix suggestions |
 | `validator.py` | Validation pass/fail messages |
-| `guardrails.py` | Violation messages |
-| `postmortem.py` | Analysis output |
+| `guardrails.py` | Only messages shown directly to the user via CLI. Violation messages fed back to the agent (via `context.py`) stay English |
+| `wizard.py` | Interactive prompts, status messages, next-steps guidance |
+| `postmortem.py` | `render_text()` output (section headers, labels). `_build_insights_prompt()` stays English (agent-facing) |
 
 ### Out of scope (keep English)
 
 | What | Why |
 |------|-----|
 | `context.py` agent prompts | Given to Claude, not the user; English performs better |
+| `postmortem.py` `_build_insights_prompt()` | Agent-facing prompt, same reason as above |
+| `guardrails.py` violation messages fed to agent | Part of error feedback loop to Claude |
 | `results.tsv` status values (`keep`/`discard`/`crash`) | Machine-readable data, must stay consistent |
-| Log prefixes (`[iter 5]`, `[beam-2]`, `[profile]`) | Technical identifiers |
+| Log prefixes (`[iter 5]`, `[beam-2]`, `[profile]`) | Technical identifiers; `_ColorFormatter` depends on them |
 | `results.tsv` headers | Data format, not UI |
 
 ## Design
@@ -39,7 +42,7 @@ All user-facing CLI output across every module:
 ### New module: `src/crucible/i18n.py`
 
 Responsibilities:
-1. Detect locale from environment
+1. Detect locale from environment (POSIX-compliant priority)
 2. Initialize gettext
 3. Export `_()` translation function
 
@@ -51,8 +54,13 @@ from pathlib import Path
 _LOCALES_DIR = Path(__file__).parent / "locales"
 
 def get_locale() -> str:
-    """Detect locale: CRUCIBLE_LANG > LANG/LC_ALL > fallback 'en'."""
-    lang = os.environ.get("CRUCIBLE_LANG") or os.environ.get("LANG", "en")
+    """Detect locale: CRUCIBLE_LANG > LC_ALL > LC_MESSAGES > LANG > 'en'."""
+    lang = (
+        os.environ.get("CRUCIBLE_LANG")
+        or os.environ.get("LC_ALL")
+        or os.environ.get("LC_MESSAGES")
+        or os.environ.get("LANG", "en")
+    )
     if lang.startswith("zh_TW") or lang.lower() == "zh-tw":
         return "zh_TW"
     return "en"
@@ -108,28 +116,25 @@ click.echo(f"Created empty project at {dest_path}")
 click.echo(_("Created empty project at {dest_path}").format(dest_path=dest_path))
 ```
 
-For Click command docstrings, use lazy evaluation or set help text explicitly:
+For Click command docstrings, use `help=` parameter:
 
 ```python
-@cli.command()
-@click.pass_context
-def status(ctx):
-    """Show summary of experiment results."""  # English stays as default
-    ...
-
-# Becomes:
 @cli.command(help=_("Show summary of experiment results."))
 @click.pass_context
 def status(ctx):
     ...
 ```
 
+Note: `_()` is evaluated at import time, which locks the locale. This is acceptable for a CLI (locale is determined once at startup). If `--lang` CLI flag is ever added, a `LazyString` wrapper would be needed.
+
 ### Locale detection logic
 
-Priority chain:
+Priority chain (POSIX-compliant):
 1. `CRUCIBLE_LANG` environment variable (explicit override)
-2. `LANG` / `LC_ALL` system locale
-3. Fallback: `en`
+2. `LC_ALL`
+3. `LC_MESSAGES`
+4. `LANG`
+5. Fallback: `en`
 
 Mapping:
 - `zh_TW*`, `zh-TW` → `zh_TW`
@@ -137,18 +142,18 @@ Mapping:
 
 ### Packaging
 
-`pyproject.toml` must include locale files in the package:
+The project uses hatchling as build backend. Include locale files via:
 
 ```toml
-[tool.setuptools.package-data]
-crucible = ["locales/**/*"]
+[tool.hatch.build.targets.wheel.force-include]
+"src/crucible/locales" = "crucible/locales"
 ```
 
 ### Development workflow
 
 1. Mark all strings with `_()`
-2. Extract template: `xgettext -o src/crucible/locales/crucible.pot src/crucible/*.py`
-3. Update .po: `msgmerge -U locales/zh_TW/LC_MESSAGES/crucible.po locales/crucible.pot`
+2. Extract template: `xgettext -L Python -o src/crucible/locales/crucible.pot $(find src/crucible -name '*.py')`
+3. Create/update .po: `msgmerge -U src/crucible/locales/zh_TW/LC_MESSAGES/crucible.po src/crucible/locales/crucible.pot`
 4. Translate strings in `crucible.po`
 5. Compile: `msgfmt -o crucible.mo crucible.po`
 6. Commit both `.po` and `.mo`
@@ -158,11 +163,13 @@ crucible = ["locales/**/*"]
 - Test `get_locale()` with mocked environment variables
 - Test that `_()` returns Chinese strings when locale is `zh_TW`
 - Test fallback to English when locale is unrecognized
-- Test that `CRUCIBLE_LANG` overrides `LANG`
+- Test that `CRUCIBLE_LANG` overrides `LANG` and `LC_ALL`
+- `conftest.py` sets `CRUCIBLE_LANG=en` to guarantee deterministic test output regardless of developer locale
 
 ## Constraints
 
 - No new dependencies (gettext is stdlib)
-- Agent-facing prompts in `context.py` stay English
+- Agent-facing prompts in `context.py`, `postmortem._build_insights_prompt()`, and guardrail violation messages fed to agent stay English
 - Machine-readable data formats unchanged
-- Existing tests must pass without modification (they run in English locale)
+- `_ColorFormatter` pattern matching on English status keywords preserved
+- Existing tests pass via `CRUCIBLE_LANG=en` in conftest
