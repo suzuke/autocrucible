@@ -247,13 +247,30 @@ class ContextAssembler:
             )
 
         lines = ["## Experiment History"]
-        for i, r in enumerate(recent, 1):
-            label = _STATUS_LABELS.get(r.status, r.status)
-            lines.append(f"\n### {i}. {label} (metric={r.metric_value})")
-            if r.diff_text:
-                lines.append(f"```diff\n{r.diff_text}\n```")
-            else:
-                lines.append(r.description)
+
+        # Kept iterations: one-line summary only (code already reflects these)
+        kept_records = [r for r in recent if r.status == "keep"]
+        if kept_records:
+            lines.append("\n**Improvements:**")
+            for r in kept_records:
+                lines.append(f"- ✓ metric={r.metric_value}")
+
+        # Failed iterations: recent 5 with full diff, older ones one-line
+        failed_records = [r for r in recent if r.status in ("discard", "crash")]
+        if failed_records:
+            lines.append("\n**Failed — do NOT repeat these changes:**")
+            older = failed_records[:-5]
+            recent_failed = failed_records[-5:]
+            for r in older:
+                label = _STATUS_LABELS.get(r.status, r.status)
+                lines.append(f"- {label} (metric={r.metric_value})")
+            for r in recent_failed:
+                label = _STATUS_LABELS.get(r.status, r.status)
+                lines.append(f"\n{label} (metric={r.metric_value})")
+                if r.diff_text:
+                    lines.append(f"```diff\n{r.diff_text}\n```")
+                else:
+                    lines.append(r.description)
 
         # Metric trend for kept records
         kept_values = [r.metric_value for r in records if r.status == "keep"]

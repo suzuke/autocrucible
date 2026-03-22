@@ -52,8 +52,11 @@ def test_assemble_with_history(tmp_path):
     log.log(ExperimentRecord(commit="aaa0003", metric_value=1.1, status="discard", description="worse activation"))
     ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
     prompt = ctx.assemble(log)
-    assert "baseline" in prompt
-    assert "better LR" in prompt
+    # Keep records shown as one-line metric summaries
+    assert "metric=1.0" in prompt
+    assert "metric=0.95" in prompt
+    # Discard records shown with description (no diff_text in these records)
+    assert "worse activation" in prompt
     assert "Best loss so far: 0.95" in prompt
 
 
@@ -64,7 +67,7 @@ def test_assemble_respects_history_limit(tmp_path):
     log = ResultsLog(tsv)
     log.init()
     for i in range(10):
-        log.log(ExperimentRecord(commit=f"aaa{i:04d}", metric_value=float(i), status="keep", description=f"exp {i}"))
+        log.log(ExperimentRecord(commit=f"aaa{i:04d}", metric_value=float(i), status="discard", description=f"exp {i}"))
     ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/test")
     prompt = ctx.assemble(log)
     assert "exp 9" in prompt
@@ -270,10 +273,10 @@ def test_assemble_baseline_not_in_history_table(tmp_path):
     log.log(ExperimentRecord(commit="def5678", metric_value=650.0, status="keep", description="first real improvement"))
     ctx = ContextAssembler(cfg, tmp_path, branch_name="crucible/run2")
     prompt = ctx.assemble(log)
-    # "Forked from" is the baseline description — should NOT be in history table
+    # "Forked from" is the baseline description — should NOT be in history
     assert "Forked from" not in prompt
-    # But the real experiment should be there
-    assert "first real improvement" in prompt
+    # The keep record should appear as a metric summary
+    assert "metric=650.0" in prompt
 
 
 # -- Plateau detection tests --------------------------------------------------
