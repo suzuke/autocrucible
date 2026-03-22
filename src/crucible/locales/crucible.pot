@@ -1,0 +1,696 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-03-22 10:35+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/crucible/validator.py:40 src/crucible/validator.py:42
+msgid "Config"
+msgstr ""
+
+#: src/crucible/validator.py:40
+msgid "config.yaml is valid"
+msgstr ""
+
+#: src/crucible/validator.py:49 src/crucible/validator.py:51
+msgid "Docker"
+msgstr ""
+
+#: src/crucible/validator.py:49
+msgid "Docker daemon is available"
+msgstr ""
+
+#: src/crucible/validator.py:52
+msgid "Docker not available but sandbox.backend is 'docker'. Install Docker or set sandbox.backend to 'none'"
+msgstr ""
+
+#: src/crucible/validator.py:60 src/crucible/validator.py:62
+#: src/crucible/validator.py:64
+msgid "Instructions"
+msgstr ""
+
+#: src/crucible/validator.py:60 src/crucible/validator.py:62
+#, python-brace-format
+msgid "{path} exists"
+msgstr ""
+
+#: src/crucible/validator.py:64
+#, python-brace-format
+msgid "{name} not found or empty"
+msgstr ""
+
+#: src/crucible/validator.py:70 src/crucible/validator.py:81
+msgid "Editable files"
+msgstr ""
+
+#: src/crucible/validator.py:70 src/crucible/validator.py:74
+#: src/crucible/validator.py:78
+#, python-brace-format
+msgid "Missing: {f}"
+msgstr ""
+
+#: src/crucible/validator.py:74
+msgid "Readonly files"
+msgstr ""
+
+#: src/crucible/validator.py:78
+msgid "Hidden files"
+msgstr ""
+
+#: src/crucible/validator.py:81
+msgid "All files exist"
+msgstr ""
+
+#: src/crucible/validator.py:89 src/crucible/validator.py:93
+msgid "Artifacts"
+msgstr ""
+
+#: src/crucible/validator.py:90
+#, python-brace-format
+msgid "Artifacts overlap with other file categories: {overlap}"
+msgstr ""
+
+#: src/crucible/validator.py:94
+#, python-brace-format
+msgid "Persistent dirs: {dirs}"
+msgstr ""
+
+#: src/crucible/validator.py:101 src/crucible/validator.py:103
+#: src/crucible/validator.py:105
+msgid "Run command"
+msgstr ""
+
+#: src/crucible/validator.py:101
+msgid "Executed successfully"
+msgstr ""
+
+#: src/crucible/validator.py:103
+#, python-brace-format
+msgid "Timed out ({timeout}s)"
+msgstr ""
+
+#: src/crucible/validator.py:105
+#, python-brace-format
+msgid "Exit code {code}"
+msgstr ""
+
+#: src/crucible/validator.py:110 src/crucible/validator.py:112
+msgid "Eval/metric"
+msgstr ""
+
+#: src/crucible/validator.py:112
+#, python-brace-format
+msgid "Could not parse '{name}' from eval output"
+msgstr ""
+
+#: src/crucible/validator.py:118 src/crucible/validator.py:123
+#: src/crucible/validator.py:129
+msgid "Stability"
+msgstr ""
+
+#: src/crucible/validator.py:119
+#, python-brace-format
+msgid "evaluation.repeat={repeat} already configured — skipping check"
+msgstr ""
+
+#: src/crucible/validator.py:124
+#, python-brace-format
+msgid "CV={cv:.1f}%  mean={mean:.4f}  stdev={stdev:.4f} ✓ stable"
+msgstr ""
+
+#: src/crucible/validator.py:130
+#, python-brace-format
+msgid "CV={cv:.1f}% ⚠ unstable — auto-set evaluation.repeat=3 in config.yaml"
+msgstr ""
+
+#: src/crucible/postmortem.py:175
+#, python-brace-format
+msgid "(AI analysis unavailable: {error})"
+msgstr ""
+
+#: src/crucible/postmortem.py:181
+msgid "No iterations recorded."
+msgstr ""
+
+#: src/crucible/postmortem.py:186
+msgid "## Summary"
+msgstr ""
+
+#: src/crucible/postmortem.py:188
+#, python-brace-format
+msgid "  Best: {best}"
+msgstr ""
+
+#: src/crucible/postmortem.py:191
+#, python-brace-format
+msgid "  Kept: {kept}/{total} ({pct}%)  |  Discarded: {discarded}  |  Crashed: {crashed}"
+msgstr ""
+
+#: src/crucible/postmortem.py:199
+msgid "## Metric Trend"
+msgstr ""
+
+#: src/crucible/postmortem.py:232
+msgid "## Failure Streaks"
+msgstr ""
+
+#: src/crucible/postmortem.py:236
+#, python-brace-format
+msgid "  iter {start}-{end}: {length} consecutive failures"
+msgstr ""
+
+#: src/crucible/postmortem.py:243
+msgid "## Key Insights"
+msgstr ""
+
+#: src/crucible/sandbox.py:175
+#, python-brace-format
+msgid "Building Docker image {tag}..."
+msgstr ""
+
+#: src/crucible/sandbox.py:184
+#, python-brace-format
+msgid "Docker build failed: {error}"
+msgstr ""
+
+#: src/crucible/sandbox.py:185
+#, python-brace-format
+msgid "Docker image build failed: {error}"
+msgstr ""
+
+#: src/crucible/wizard.py:84
+msgid "Could not load scaffold reference — wizard may produce incorrect formats"
+msgstr ""
+
+#: src/crucible/wizard.py:328
+#, python-brace-format
+msgid "Claude call failed: {error}"
+msgstr ""
+
+#: src/crucible/wizard.py:365
+#, python-brace-format
+msgid "Claude returned non-JSON: {text}"
+msgstr ""
+
+#: src/crucible/wizard.py:399
+msgid "Generated file '{path}' contains placeholder content ({content!r}). Claude failed to produce real code. Try running the wizard again."
+msgstr ""
+
+#: src/crucible/wizard.py:410
+#, python-brace-format
+msgid "Path traversal detected: '{path}' resolves outside destination directory"
+msgstr ""
+
+#: src/crucible/cli.py:141 src/crucible/cli.py:147
+msgid "Enable debug logging."
+msgstr ""
+
+#: src/crucible/cli.py:161
+msgid "Example name to copy from."
+msgstr ""
+
+#: src/crucible/cli.py:162
+msgid "List available examples."
+msgstr ""
+
+#: src/crucible/cli.py:169
+#, python-brace-format
+msgid "Examples directory not found: {ex_dir}"
+msgstr ""
+
+#: src/crucible/cli.py:172
+msgid "No examples found."
+msgstr ""
+
+#: src/crucible/cli.py:173
+msgid "Available examples:"
+msgstr ""
+
+#: src/crucible/cli.py:275
+#, python-brace-format
+msgid "Created empty project at {dest_path}"
+msgstr ""
+
+#: src/crucible/cli.py:276
+msgid "Edit .crucible/config.yaml and program.md, then run:"
+msgstr ""
+
+#: src/crucible/cli.py:287
+#, python-brace-format
+msgid "Example '{example}' not found. Available: {available}"
+msgstr ""
+
+#: src/crucible/cli.py:293
+#, python-brace-format
+msgid "Destination '{dest_path}' is not empty."
+msgstr ""
+
+#: src/crucible/cli.py:318
+#, python-brace-format
+msgid "Created project from example '{example}' at {dest_path}"
+msgstr ""
+
+#: src/crucible/cli.py:319 src/crucible/cli.py:792
+msgid "Next steps:"
+msgstr ""
+
+#: src/crucible/cli.py:327 src/crucible/cli.py:411
+msgid "Experiment tag / branch suffix."
+msgstr ""
+
+#: src/crucible/cli.py:328 src/crucible/cli.py:412 src/crucible/cli.py:542
+#: src/crucible/cli.py:614 src/crucible/cli.py:651 src/crucible/cli.py:700
+#: src/crucible/cli.py:888
+msgid "Project root directory."
+msgstr ""
+
+#: src/crucible/cli.py:335 src/crucible/cli.py:458
+msgid "No git repo found — initializing..."
+msgstr ""
+
+#: src/crucible/cli.py:344 src/crucible/cli.py:467
+msgid "Git repo initialized with initial commit."
+msgstr ""
+
+#: src/crucible/cli.py:369 src/crucible/cli.py:521
+#, python-brace-format
+msgid "Running setup: {cmd}"
+msgstr ""
+
+#: src/crucible/cli.py:372 src/crucible/cli.py:524
+#, python-brace-format
+msgid "Setup command failed with exit code {code}"
+msgstr ""
+
+#: src/crucible/cli.py:374 src/crucible/cli.py:525
+#, python-brace-format
+msgid "Initialised experiment '{tag}' in {project}"
+msgstr ""
+
+#: src/crucible/cli.py:413
+msgid "Claude model to use (e.g. sonnet, opus)."
+msgstr ""
+
+#: src/crucible/cli.py:414
+msgid "Agent timeout per iteration (seconds)."
+msgstr ""
+
+#: src/crucible/cli.py:415
+msgid "Maximum iterations to run (default: unlimited)."
+msgstr ""
+
+#: src/crucible/cli.py:416
+msgid "Skip interactive prompts (start fresh)."
+msgstr ""
+
+#: src/crucible/cli.py:417
+msgid "Enable token profiling (track prompt breakdown, cache efficiency)."
+msgstr ""
+
+#: src/crucible/cli.py:454
+#, python-brace-format
+msgid "Resuming experiment '{tag}' ({count} previous iterations)"
+msgstr ""
+
+#: src/crucible/cli.py:474
+msgid "Found previous experiments:"
+msgstr ""
+
+#: src/crucible/cli.py:481
+#, python-brace-format
+msgid "  {n}) Start fresh"
+msgstr ""
+
+#: src/crucible/cli.py:483
+msgid "Fork from"
+msgstr ""
+
+#: src/crucible/cli.py:495
+#, python-brace-format
+msgid "Forking from {tag} best ({metric} @ {commit})..."
+msgstr ""
+
+#: src/crucible/cli.py:508
+msgid "Syncing environment..."
+msgstr ""
+
+#: src/crucible/cli.py:531
+msgid "Tip: Run 'crucible validate' first to check if your metric needs repeat runs (stochastic experiments may benefit from evaluation.repeat: 3)."
+msgstr ""
+
+#: src/crucible/cli.py:535
+msgid "Press Ctrl+C to stop gracefully."
+msgstr ""
+
+#: src/crucible/cli.py:537 src/crucible/orchestrator.py:595
+msgid "Stopped."
+msgstr ""
+
+#: src/crucible/cli.py:541 src/crucible/cli.py:649
+msgid "Experiment tag."
+msgstr ""
+
+#: src/crucible/cli.py:543 src/crucible/cli.py:652 src/crucible/cli.py:701
+#: src/crucible/cli.py:890
+msgid "Output as JSON."
+msgstr ""
+
+#: src/crucible/cli.py:554 src/crucible/cli.py:659 src/crucible/cli.py:904
+#, python-brace-format
+msgid "No {filename} found. Run 'init --tag {tag}' first."
+msgstr ""
+
+#: src/crucible/cli.py:595
+#, python-brace-format
+msgid "Experiment: {name}"
+msgstr ""
+
+#: src/crucible/cli.py:596
+#, python-brace-format
+msgid "Total: {total}  Kept: {kept}  Discarded: {discarded}  Crashed: {crashed}"
+msgstr ""
+
+#: src/crucible/cli.py:598
+#, python-brace-format
+msgid "Best {metric}: {value} (commit {commit})"
+msgstr ""
+
+#: src/crucible/cli.py:605
+#, python-brace-format
+msgid "Cost: ${cost:.2f} / ${budget:.2f} ({pct:.0f}%) — {iters} iterations"
+msgstr ""
+
+#: src/crucible/cli.py:608
+#, python-brace-format
+msgid "Cost: ${cost:.2f} — {iters} iterations"
+msgstr ""
+
+#: src/crucible/cli.py:610
+msgid "Cost: unknown (agent backend does not report usage)"
+msgstr ""
+
+#: src/crucible/cli.py:615
+msgid "Check metric stability."
+msgstr ""
+
+#: src/crucible/cli.py:616
+msgid "Number of runs for stability check."
+msgstr ""
+
+#: src/crucible/cli.py:637
+#, python-brace-format
+msgid "  [PASS] Metric stability: CV = {cv:.1f}% over {runs} runs"
+msgstr ""
+
+#: src/crucible/cli.py:639
+#, python-brace-format
+msgid "  [WARN] Metric stability: CV = {cv:.1f}% over {runs} runs"
+msgstr ""
+
+#: src/crucible/cli.py:641
+#, python-brace-format
+msgid "         Values: {values}"
+msgstr ""
+
+#: src/crucible/cli.py:642
+msgid "         Consider: fix random seeds or increase sample size"
+msgstr ""
+
+#: src/crucible/cli.py:645
+msgid "Validation failed."
+msgstr ""
+
+#: src/crucible/cli.py:650
+msgid "Number of recent results to show."
+msgstr ""
+
+#: src/crucible/cli.py:653
+msgid "Output format."
+msgstr ""
+
+#: src/crucible/cli.py:678
+msgid "No results yet."
+msgstr ""
+
+#: src/crucible/cli.py:689
+msgid "Commit"
+msgstr ""
+
+#: src/crucible/cli.py:689
+msgid "Metric"
+msgstr ""
+
+#: src/crucible/cli.py:689 src/crucible/cli.py:845
+msgid "Status"
+msgstr ""
+
+#: src/crucible/cli.py:689
+msgid "Description"
+msgstr ""
+
+#: src/crucible/cli.py:715
+#, python-brace-format
+msgid "No {filename} found for tag '{tag}'."
+msgstr ""
+
+#: src/crucible/cli.py:750
+msgid "Experiment description (skip interactive prompt)."
+msgstr ""
+
+#: src/crucible/cli.py:758
+msgid "What do you want to optimize? Describe your experiment"
+msgstr ""
+
+#: src/crucible/cli.py:760
+msgid "Analyzing your description..."
+msgstr ""
+
+#: src/crucible/cli.py:765
+#, python-brace-format
+msgid "Analysis failed: {error}"
+msgstr ""
+
+#: src/crucible/cli.py:776
+msgid "Choose"
+msgstr ""
+
+#: src/crucible/cli.py:780
+msgid "Generating experiment..."
+msgstr ""
+
+#: src/crucible/cli.py:786
+#, python-brace-format
+msgid "Generation failed: {error}"
+msgstr ""
+
+#: src/crucible/cli.py:790
+#, python-brace-format
+msgid "Created experiment at {dest_path}"
+msgstr ""
+
+#: src/crucible/cli.py:791
+#, python-brace-format
+msgid "Summary: {summary}"
+msgstr ""
+
+#: src/crucible/cli.py:806
+msgid "No iterations to analyze."
+msgstr ""
+
+#: src/crucible/cli.py:843
+#, python-brace-format
+msgid "Token Profile ({count} iterations)"
+msgstr ""
+
+#: src/crucible/cli.py:845
+msgid "Iter"
+msgstr ""
+
+#: src/crucible/cli.py:845
+msgid "In Tok"
+msgstr ""
+
+#: src/crucible/cli.py:845
+msgid "Out Tok"
+msgstr ""
+
+#: src/crucible/cli.py:845
+msgid "Cache%"
+msgstr ""
+
+#: src/crucible/cli.py:845
+msgid "Agent(s)"
+msgstr ""
+
+#: src/crucible/cli.py:845
+msgid "Run(s)"
+msgstr ""
+
+#: src/crucible/cli.py:866
+msgid "Prompt Breakdown (avg tokens per section):"
+msgstr ""
+
+#: src/crucible/cli.py:881
+#, python-brace-format
+msgid "Cache Efficiency: avg {pct}% hit rate"
+msgstr ""
+
+#: src/crucible/cli.py:887
+msgid "Experiment tag to analyze."
+msgstr ""
+
+#: src/crucible/cli.py:889
+msgid "Skip AI insights (data only)."
+msgstr ""
+
+#: src/crucible/cli.py:891
+msgid "Show token profiling analysis."
+msgstr ""
+
+#: src/crucible/cli.py:910
+msgid "No iterations recorded for this experiment."
+msgstr ""
+
+#: src/crucible/cli.py:917
+msgid "Generating AI insights..."
+msgstr ""
+
+#: src/crucible/cli.py:958
+msgid "Check for updates without installing."
+msgstr ""
+
+#: src/crucible/cli.py:965
+msgid "Failed to check PyPI for updates. Check your network connection."
+msgstr ""
+
+#: src/crucible/cli.py:968
+#, python-brace-format
+msgid "Already up to date (v{version})."
+msgstr ""
+
+#: src/crucible/cli.py:972
+#, python-brace-format
+msgid "Update available: v{current} → v{latest}"
+msgstr ""
+
+#: src/crucible/cli.py:973
+msgid "Run 'crucible update' to install."
+msgstr ""
+
+#: src/crucible/cli.py:979
+msgid "uv is required for updates. Install it: https://docs.astral.sh/uv/"
+msgstr ""
+
+#: src/crucible/cli.py:982
+#, python-brace-format
+msgid "Updating autocrucible... v{current} → v{latest}"
+msgstr ""
+
+#: src/crucible/cli.py:989
+#, python-brace-format
+msgid "Update failed: {error}"
+msgstr ""
+
+#: src/crucible/cli.py:991
+#, python-brace-format
+msgid "Updated to v{version} ✓"
+msgstr ""
+
+#: src/crucible/orchestrator.py:41
+msgid "Fatal error — cannot continue. Check: claude login"
+msgstr ""
+
+#: src/crucible/orchestrator.py:175
+msgid "Budget exceeded — stopping"
+msgstr ""
+
+#: src/crucible/orchestrator.py:178
+#, python-brace-format
+msgid "Budget at {pct:.0f}%"
+msgstr ""
+
+#: src/crucible/orchestrator.py:360
+msgid "Installing updated requirements..."
+msgstr ""
+
+#: src/crucible/orchestrator.py:440
+#, python-brace-format
+msgid "Reached max iterations ({n}), stopping."
+msgstr ""
+
+#: src/crucible/orchestrator.py:473
+msgid "Budget limit reached, stopping."
+msgstr ""
+
+#: src/crucible/orchestrator.py:482
+#, python-brace-format
+msgid "{n} consecutive failures, stopping."
+msgstr ""
+
+#: src/crucible/orchestrator.py:485
+#, python-brace-format
+msgid "{n} consecutive skips, stopping."
+msgstr ""
+
+#: src/crucible/orchestrator.py:505
+#, python-brace-format
+msgid "Stopped after {n} iterations."
+msgstr ""
+
+#: src/crucible/orchestrator.py:544
+msgid "All beams exhausted consecutive failures — stopping."
+msgstr ""
+
+#: src/crucible/orchestrator.py:549
+msgid "No beams initialized — falling back to serial loop."
+msgstr ""
+
+#: src/crucible/preflight.py:21
+msgid ""
+"claude CLI not found on PATH.\n"
+"Install: npm install -g @anthropic-ai/claude-code\n"
+"Then authenticate: claude login"
+msgstr ""
+
+#: src/crucible/preflight.py:34
+#, python-brace-format
+msgid ""
+"claude CLI found but not working.\n"
+"Error: {error}\n"
+"Try: claude login"
+msgstr ""
+
+#: src/crucible/preflight.py:47
+msgid "Warning: claude auth status timed out, skipping auth check"
+msgstr ""
+
+#: src/crucible/preflight.py:56
+msgid ""
+"claude CLI is not logged in.\n"
+"Run: claude login"
+msgstr ""
+
+#: src/crucible/preflight.py:64
+msgid "Warning: claude CLI too old to check auth status; consider updating. Proceeding anyway."
+msgstr ""
+
+#: src/crucible/preflight.py:70
+#, python-brace-format
+msgid ""
+"Cannot determine claude auth status.\n"
+"Output: {output}\n"
+"Try: claude login"
+msgstr ""
