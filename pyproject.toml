@@ -41,6 +41,7 @@ packages = ["src/crucible"]
 
 [tool.hatch.build.targets.wheel.force-include]
 ".claude/skills/crucible-setup/SKILL.md" = "crucible/data/scaffold_reference.md"
+"src/crucible/locales" = "crucible/locales"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
