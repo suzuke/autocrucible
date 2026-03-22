@@ -112,6 +112,15 @@ crucible validate --stability --runs 5    # check metric variance
 crucible -v run --tag run1   # debug-level output
 ```
 
+### Token profiling
+
+```bash
+crucible run --tag run1 --profile                # track token usage per iteration
+crucible postmortem --tag run1 --tokens           # analyze after run
+```
+
+Shows prompt section breakdown, cache hit rates, and per-iteration timing. See [docs/PROFILING.md](docs/PROFILING.md) for details.
+
 ## How It Works
 
 ```
@@ -258,4 +267,5 @@ Crucible is installed as a **global CLI tool** — it is NOT a dependency of you
 - [Config Reference](docs/CONFIG.md) — all YAML fields, eval convention, git strategy, guard rails
 - [Token Profiling](docs/PROFILING.md) — track prompt composition, cache efficiency, and timing per iteration
 - [FAQ](docs/FAQ.md) — local optima, single metric, parallel agents, safety, monitoring
+- [Token Profiling](docs/PROFILING.md) — understand token usage, prompt breakdown, and cache efficiency
 - [Changelog](docs/CHANGELOG.md) — version history and release notes
