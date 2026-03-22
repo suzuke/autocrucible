@@ -143,10 +143,9 @@ _verbose_option = click.option(
 )
 
 
-@click.group()
+@click.group(help=_("crucible — automated experiment loop."))
 @click.option("--verbose", "-v", is_flag=True, default=False, help=_("Enable debug logging."))
 def main(verbose: bool) -> None:
-    """crucible — automated experiment loop."""  # noqa: kept as fallback
     handler = logging.StreamHandler()
     handler.setFormatter(_ColorFormatter())
     handler.addFilter(_NoEmptyFilter())
@@ -156,12 +155,11 @@ def main(verbose: bool) -> None:
     )
 
 
-@main.command()
+@main.command(help=_("Create a new experiment project (from an example or empty scaffold)."))
 @click.argument("dest", type=click.Path())
 @click.option("--example", "-e", default=None, help=_("Example name to copy from."))
 @click.option("--list", "list_examples", is_flag=True, help=_("List available examples."))
 def new(dest: str, example: str | None, list_examples: bool) -> None:
-    """Create a new experiment project (from an example or empty scaffold)."""  # noqa: fallback
     ex_dir = _examples_dir()
 
     if list_examples or (example is None and dest == "."):
@@ -323,11 +321,10 @@ if __name__ == "__main__":
     click.echo("  crucible run --tag run1    # auto-inits if needed")
 
 
-@main.command()
+@main.command(help=_("Initialise an experiment branch and results log."))
 @click.option("--tag", required=True, help=_("Experiment tag / branch suffix."))
 @click.option("--project-dir", default=".", help=_("Project root directory."))
 def init(tag: str, project_dir: str) -> None:
-    """Initialise an experiment branch and results log."""  # noqa: fallback
     project = Path(project_dir).resolve()
 
     # Auto-initialize git repo if needed
@@ -407,7 +404,7 @@ def _scan_previous_runs(project: Path, current_tag: str, direction: str) -> list
     return previous
 
 
-@main.command()
+@main.command(help=_("Run the experiment loop until interrupted."))
 @click.option("--tag", required=True, help=_("Experiment tag / branch suffix."))
 @click.option("--project-dir", default=".", help=_("Project root directory."))
 @click.option("--model", default=None, help=_("Claude model to use (e.g. sonnet, opus)."))
@@ -417,7 +414,6 @@ def _scan_previous_runs(project: Path, current_tag: str, direction: str) -> list
 @click.option("--profile", is_flag=True, default=False, help=_("Enable token profiling (track prompt breakdown, cache efficiency)."))
 @_verbose_option
 def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterations: int | None, no_interactive: bool, profile: bool) -> None:
-    """Run the experiment loop until interrupted."""  # noqa: fallback
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -537,12 +533,11 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
     click.echo(_("Stopped."))
 
 
-@main.command()
+@main.command(help=_("Show summary of experiment results."))
 @click.option("--tag", required=True, help=_("Experiment tag."))
 @click.option("--project-dir", default=".", help=_("Project root directory."))
 @click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
 def status(tag: str, project_dir: str, as_json: bool) -> None:
-    """Show summary of experiment results."""  # noqa: fallback
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -610,12 +605,11 @@ def status(tag: str, project_dir: str, as_json: bool) -> None:
         click.echo(_("Cost: unknown (agent backend does not report usage)"))
 
 
-@main.command()
+@main.command(help=_("Validate project configuration and run a test execution."))
 @click.option("--project-dir", default=".", help=_("Project root directory."))
 @click.option("--stability", is_flag=True, help=_("Check metric stability."))
 @click.option("--runs", default=5, help=_("Number of runs for stability check."))
 def validate(project_dir: str, stability: bool, runs: int) -> None:
-    """Validate project configuration and run a test execution."""  # noqa: fallback
     from crucible.validator import validate_project
 
     project = Path(project_dir).resolve()
@@ -645,14 +639,13 @@ def validate(project_dir: str, stability: bool, runs: int) -> None:
         raise click.ClickException(_("Validation failed."))
 
 
-@main.command()
+@main.command(help=_("Show recent experiment results."))
 @click.option("--tag", required=True, help=_("Experiment tag."))
 @click.option("--last", default=10, help=_("Number of recent results to show."))
 @click.option("--project-dir", default=".", help=_("Project root directory."))
 @click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
 @click.option("--format", "fmt", type=click.Choice(["table", "jsonl"]), default="table", help=_("Output format."))
 def history(tag: str, last: int, project_dir: str, as_json: bool, fmt: str) -> None:
-    """Show recent experiment results."""  # noqa: fallback
     project = Path(project_dir).resolve()
     results = ResultsLog(project / results_filename(tag))
     if not results.path.exists():
@@ -695,12 +688,11 @@ def history(tag: str, last: int, project_dir: str, as_json: bool, fmt: str) -> N
         click.echo(f"{r.commit:<10} {r.metric_value:>10.4f} {r.status:<10} {desc}")
 
 
-@main.command()
+@main.command(help=_("Compare two experiment runs side by side."))
 @click.argument("tags", nargs=2)
 @click.option("--project-dir", default=".", help=_("Project root directory."))
 @click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
 def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
-    """Compare two experiment runs side by side."""  # noqa: fallback
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -745,11 +737,10 @@ def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
         click.echo(f"{label:>16} {str(va):>{col_w}} {str(vb):>{col_w}}")
 
 
-@main.command()
+@main.command(help=_("Generate a new experiment from a natural language description."))
 @click.argument("dest", type=click.Path())
 @click.option("--describe", default=None, help=_("Experiment description (skip interactive prompt)."))
 def wizard(dest: str, describe: str | None) -> None:
-    """Generate a new experiment from a natural language description."""  # noqa: fallback
     from crucible.wizard import ExperimentWizard
 
     if describe is not None:
@@ -883,14 +874,13 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
     click.echo()
 
 
-@main.command()
+@main.command(help=_("Analyze a completed experiment run."))
 @click.option("--tag", required=True, help=_("Experiment tag to analyze."))
 @click.option("--project-dir", default=".", help=_("Project root directory."))
 @click.option("--no-ai", is_flag=True, help=_("Skip AI insights (data only)."))
 @click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
 @click.option("--tokens", is_flag=True, help=_("Show token profiling analysis."))
 def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool, tokens: bool) -> None:
-    """Analyze a completed experiment run."""  # noqa: fallback
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -954,10 +944,9 @@ def _get_latest_version() -> str | None:
         return None
 
 
-@main.command()
+@main.command(help=_("Update crucible to the latest version."))
 @click.option("--check", is_flag=True, help=_("Check for updates without installing."))
 def update(check: bool) -> None:
-    """Update crucible to the latest version."""  # noqa: fallback
     current = _get_current_version()
 
     latest = _get_latest_version()

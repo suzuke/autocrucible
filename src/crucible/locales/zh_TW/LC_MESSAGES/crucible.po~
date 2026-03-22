@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: feat-i 18n\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-22 10:56+0800\n"
+"POT-Creation-Date: 2026-03-22 10:35+0800\n"
 "PO-Revision-Date: 2026-03-22 10:35+0800\n"
 "Last-Translator: Automatically generated\n"
 "Language-Team: none\n"
@@ -201,7 +201,8 @@ msgstr "Docker image 建置失敗：{error}"
 #: src/crucible/wizard.py:84
 msgid ""
 "Could not load scaffold reference — wizard may produce incorrect formats"
-msgstr "無法載入 scaffold 參考資料 — wizard 可能產生錯誤格式"
+msgstr ""
+"無法載入 scaffold 參考資料 — wizard 可能產生錯誤格式"
 
 #: src/crucible/wizard.py:328
 #, python-brace-format
@@ -218,457 +219,413 @@ msgid ""
 "Generated file '{path}' contains placeholder content ({content!r}). Claude "
 "failed to produce real code. Try running the wizard again."
 msgstr ""
-"產生的檔案 '{path}' 包含佔位內容（{content!r}）。Claude 未能產生實際程式碼，"
-"請重新執行 wizard。"
+"產生的檔案 '{path}' 包含佔位內容（{content!r}）。Claude "
+"未能產生實際程式碼，請重新執行 wizard。"
 
 #: src/crucible/wizard.py:410
 #, python-brace-format
 msgid ""
 "Path traversal detected: '{path}' resolves outside destination directory"
-msgstr "偵測到路徑穿越：'{path}' 指向目標目錄之外"
+msgstr ""
+"偵測到路徑穿越：'{path}' 指向目標目錄之外"
 
 #: src/crucible/cli.py:141 src/crucible/cli.py:147
 msgid "Enable debug logging."
 msgstr "啟用除錯日誌。"
 
-#: src/crucible/cli.py:146
-msgid "crucible — automated experiment loop."
-msgstr "crucible — 自動化實驗迴圈。"
-
-#: src/crucible/cli.py:158
-msgid "Create a new experiment project (from an example or empty scaffold)."
-msgstr "建立新的實驗專案（從範例或空白骨架）。"
-
-#: src/crucible/cli.py:160
+#: src/crucible/cli.py:161
 msgid "Example name to copy from."
 msgstr "要複製的範例名稱。"
 
-#: src/crucible/cli.py:161
+#: src/crucible/cli.py:162
 msgid "List available examples."
 msgstr "列出可用範例。"
 
-#: src/crucible/cli.py:167
+#: src/crucible/cli.py:169
 #, python-brace-format
 msgid "Examples directory not found: {ex_dir}"
 msgstr "找不到範例目錄：{ex_dir}"
 
-#: src/crucible/cli.py:170
+#: src/crucible/cli.py:172
 msgid "No examples found."
 msgstr "找不到範例。"
 
-#: src/crucible/cli.py:171
+#: src/crucible/cli.py:173
 msgid "Available examples:"
 msgstr "可用範例："
 
-#: src/crucible/cli.py:273
+#: src/crucible/cli.py:275
 #, python-brace-format
 msgid "Created empty project at {dest_path}"
 msgstr "已在 {dest_path} 建立空專案"
 
-#: src/crucible/cli.py:274
+#: src/crucible/cli.py:276
 msgid "Edit .crucible/config.yaml and program.md, then run:"
 msgstr "編輯 .crucible/config.yaml 和 program.md，然後執行："
 
-#: src/crucible/cli.py:285
+#: src/crucible/cli.py:287
 #, python-brace-format
 msgid "Example '{example}' not found. Available: {available}"
 msgstr "找不到範例 '{example}'。可用：{available}"
 
-#: src/crucible/cli.py:291
+#: src/crucible/cli.py:293
 #, python-brace-format
 msgid "Destination '{dest_path}' is not empty."
 msgstr "目標路徑 '{dest_path}' 非空。"
 
-#: src/crucible/cli.py:316
+#: src/crucible/cli.py:318
 #, python-brace-format
 msgid "Created project from example '{example}' at {dest_path}"
 msgstr "已從範例 '{example}' 在 {dest_path} 建立專案"
 
-#: src/crucible/cli.py:317 src/crucible/cli.py:783
+#: src/crucible/cli.py:319 src/crucible/cli.py:792
 msgid "Next steps:"
 msgstr "接下來："
 
-#: src/crucible/cli.py:324
-#, fuzzy
-msgid "Initialise an experiment branch and results log."
-msgstr "已在 {project} 初始化實驗 '{tag}'"
-
-#: src/crucible/cli.py:325 src/crucible/cli.py:408
+#: src/crucible/cli.py:327 src/crucible/cli.py:411
 msgid "Experiment tag / branch suffix."
 msgstr "實驗 tag / branch 後綴。"
 
-#: src/crucible/cli.py:326 src/crucible/cli.py:409 src/crucible/cli.py:538
-#: src/crucible/cli.py:609 src/crucible/cli.py:645 src/crucible/cli.py:693
-#: src/crucible/cli.py:879
+#: src/crucible/cli.py:328 src/crucible/cli.py:412 src/crucible/cli.py:542
+#: src/crucible/cli.py:614 src/crucible/cli.py:651 src/crucible/cli.py:700
+#: src/crucible/cli.py:888
 msgid "Project root directory."
 msgstr "專案根目錄。"
 
-#: src/crucible/cli.py:332 src/crucible/cli.py:454
+#: src/crucible/cli.py:335 src/crucible/cli.py:458
 msgid "No git repo found — initializing..."
 msgstr "找不到 git 儲存庫 — 初始化中..."
 
-#: src/crucible/cli.py:341 src/crucible/cli.py:463
+#: src/crucible/cli.py:344 src/crucible/cli.py:467
 msgid "Git repo initialized with initial commit."
 msgstr "已初始化 git 儲存庫並建立初始 commit。"
 
-#: src/crucible/cli.py:366 src/crucible/cli.py:517
+#: src/crucible/cli.py:369 src/crucible/cli.py:521
 #, python-brace-format
 msgid "Running setup: {cmd}"
 msgstr "執行 setup：{cmd}"
 
-#: src/crucible/cli.py:369 src/crucible/cli.py:520
+#: src/crucible/cli.py:372 src/crucible/cli.py:524
 #, python-brace-format
 msgid "Setup command failed with exit code {code}"
 msgstr "Setup 命令失敗，exit code {code}"
 
-#: src/crucible/cli.py:371 src/crucible/cli.py:521
+#: src/crucible/cli.py:374 src/crucible/cli.py:525
 #, python-brace-format
 msgid "Initialised experiment '{tag}' in {project}"
 msgstr "已在 {project} 初始化實驗 '{tag}'"
 
-#: src/crucible/cli.py:407
-msgid "Run the experiment loop until interrupted."
-msgstr "執行實驗迴圈直到中斷。"
-
-#: src/crucible/cli.py:410
+#: src/crucible/cli.py:413
 msgid "Claude model to use (e.g. sonnet, opus)."
 msgstr "使用的 Claude 模型（如 sonnet、opus）。"
 
-#: src/crucible/cli.py:411
+#: src/crucible/cli.py:414
 msgid "Agent timeout per iteration (seconds)."
 msgstr "每次迭代的 agent 逾時秒數。"
 
-#: src/crucible/cli.py:412
+#: src/crucible/cli.py:415
 msgid "Maximum iterations to run (default: unlimited)."
 msgstr "最大迭代次數（預設：無限制）。"
 
-#: src/crucible/cli.py:413
+#: src/crucible/cli.py:416
 msgid "Skip interactive prompts (start fresh)."
 msgstr "跳過互動提示（直接開始）。"
 
-#: src/crucible/cli.py:414
+#: src/crucible/cli.py:417
 msgid "Enable token profiling (track prompt breakdown, cache efficiency)."
 msgstr "啟用 token profiling（追蹤 prompt 組成與 cache 效率）。"
 
-#: src/crucible/cli.py:450
+#: src/crucible/cli.py:454
 #, python-brace-format
 msgid "Resuming experiment '{tag}' ({count} previous iterations)"
 msgstr "恢復實驗 '{tag}'（先前 {count} 次迭代）"
 
-#: src/crucible/cli.py:470
+#: src/crucible/cli.py:474
 msgid "Found previous experiments:"
 msgstr "發現先前的實驗："
 
-#: src/crucible/cli.py:477
+#: src/crucible/cli.py:481
 #, python-brace-format
 msgid "  {n}) Start fresh"
 msgstr "  {n}) 全新開始"
 
-#: src/crucible/cli.py:479
+#: src/crucible/cli.py:483
 msgid "Fork from"
 msgstr "從此 fork"
 
-#: src/crucible/cli.py:491
+#: src/crucible/cli.py:495
 #, python-brace-format
 msgid "Forking from {tag} best ({metric} @ {commit})..."
 msgstr "正在從 {tag} 最佳結果 fork（{metric} @ {commit}）..."
 
-#: src/crucible/cli.py:504
+#: src/crucible/cli.py:508
 msgid "Syncing environment..."
 msgstr "同步環境中..."
 
-#: src/crucible/cli.py:527
+#: src/crucible/cli.py:531
 msgid ""
 "Tip: Run 'crucible validate' first to check if your metric needs repeat runs "
 "(stochastic experiments may benefit from evaluation.repeat: 3)."
 msgstr ""
-"提示：先執行 'crucible validate' 檢查 metric 是否需要重複執行（隨機實驗可能適"
-"合設定 evaluation.repeat: 3）。"
+"提示：先執行 'crucible validate' 檢查 metric 是否需要重複執行"
+"（隨機實驗可能適合設定 evaluation.repeat: 3）。"
 
-#: src/crucible/cli.py:531
+#: src/crucible/cli.py:535
 msgid "Press Ctrl+C to stop gracefully."
 msgstr "按 Ctrl+C 優雅停止。"
 
-#: src/crucible/cli.py:533 src/crucible/orchestrator.py:595
+#: src/crucible/cli.py:537 src/crucible/orchestrator.py:595
 msgid "Stopped."
 msgstr "已停止。"
 
-#: src/crucible/cli.py:536
-msgid "Show summary of experiment results."
-msgstr "顯示實驗結果摘要。"
-
-#: src/crucible/cli.py:537 src/crucible/cli.py:643
+#: src/crucible/cli.py:541 src/crucible/cli.py:649
 msgid "Experiment tag."
 msgstr "實驗 tag。"
 
-#: src/crucible/cli.py:539 src/crucible/cli.py:646 src/crucible/cli.py:694
-#: src/crucible/cli.py:881
+#: src/crucible/cli.py:543 src/crucible/cli.py:652 src/crucible/cli.py:701
+#: src/crucible/cli.py:890
 msgid "Output as JSON."
 msgstr "以 JSON 格式輸出。"
 
-#: src/crucible/cli.py:549 src/crucible/cli.py:652 src/crucible/cli.py:894
+#: src/crucible/cli.py:554 src/crucible/cli.py:659 src/crucible/cli.py:904
 #, python-brace-format
 msgid "No {filename} found. Run 'init --tag {tag}' first."
 msgstr "找不到 {filename}。請先執行 'init --tag {tag}'。"
 
-#: src/crucible/cli.py:590
+#: src/crucible/cli.py:595
 #, python-brace-format
 msgid "Experiment: {name}"
 msgstr "實驗：{name}"
 
-#: src/crucible/cli.py:591
+#: src/crucible/cli.py:596
 #, python-brace-format
 msgid ""
 "Total: {total}  Kept: {kept}  Discarded: {discarded}  Crashed: {crashed}"
 msgstr ""
 "總計：{total}  Kept: {kept}  Discarded: {discarded}  Crashed: {crashed}"
 
-#: src/crucible/cli.py:593
+#: src/crucible/cli.py:598
 #, python-brace-format
 msgid "Best {metric}: {value} (commit {commit})"
 msgstr "最佳 {metric}：{value}（commit {commit}）"
 
-#: src/crucible/cli.py:600
+#: src/crucible/cli.py:605
 #, python-brace-format
 msgid "Cost: ${cost:.2f} / ${budget:.2f} ({pct:.0f}%) — {iters} iterations"
 msgstr "花費：${cost:.2f} / ${budget:.2f}（{pct:.0f}%）— {iters} 次迭代"
 
-#: src/crucible/cli.py:603
+#: src/crucible/cli.py:608
 #, python-brace-format
 msgid "Cost: ${cost:.2f} — {iters} iterations"
 msgstr "花費：${cost:.2f} — {iters} 次迭代"
 
-#: src/crucible/cli.py:605
+#: src/crucible/cli.py:610
 msgid "Cost: unknown (agent backend does not report usage)"
 msgstr "花費：未知（agent 後端未回報用量）"
 
-#: src/crucible/cli.py:608
-msgid "Validate project configuration and run a test execution."
-msgstr "驗證專案設定並執行測試。"
-
-#: src/crucible/cli.py:610
+#: src/crucible/cli.py:615
 msgid "Check metric stability."
 msgstr "檢查 metric 穩定性。"
 
-#: src/crucible/cli.py:611
+#: src/crucible/cli.py:616
 msgid "Number of runs for stability check."
 msgstr "穩定性檢查的執行次數。"
 
-#: src/crucible/cli.py:631
+#: src/crucible/cli.py:637
 #, python-brace-format
 msgid "  [PASS] Metric stability: CV = {cv:.1f}% over {runs} runs"
 msgstr "  [PASS] Metric 穩定性：CV = {cv:.1f}%（{runs} 次執行）"
 
-#: src/crucible/cli.py:633
+#: src/crucible/cli.py:639
 #, python-brace-format
 msgid "  [WARN] Metric stability: CV = {cv:.1f}% over {runs} runs"
 msgstr "  [WARN] Metric 穩定性：CV = {cv:.1f}%（{runs} 次執行）"
 
-#: src/crucible/cli.py:635
+#: src/crucible/cli.py:641
 #, python-brace-format
 msgid "         Values: {values}"
 msgstr "         數值：{values}"
 
-#: src/crucible/cli.py:636
+#: src/crucible/cli.py:642
 msgid "         Consider: fix random seeds or increase sample size"
 msgstr "         建議：固定 random seed 或增加樣本數"
 
-#: src/crucible/cli.py:639
+#: src/crucible/cli.py:645
 msgid "Validation failed."
 msgstr "驗證失敗。"
 
-#: src/crucible/cli.py:642
-msgid "Show recent experiment results."
-msgstr "顯示近期實驗結果。"
-
-#: src/crucible/cli.py:644
+#: src/crucible/cli.py:650
 msgid "Number of recent results to show."
 msgstr "顯示最近結果的筆數。"
 
-#: src/crucible/cli.py:647
+#: src/crucible/cli.py:653
 msgid "Output format."
 msgstr "輸出格式。"
 
-#: src/crucible/cli.py:671
+#: src/crucible/cli.py:678
 msgid "No results yet."
 msgstr "尚無結果。"
 
-#: src/crucible/cli.py:682
+#: src/crucible/cli.py:689
 msgid "Commit"
 msgstr "Commit"
 
-#: src/crucible/cli.py:682
+#: src/crucible/cli.py:689
 msgid "Metric"
 msgstr "Metric"
 
-#: src/crucible/cli.py:682 src/crucible/cli.py:836
+#: src/crucible/cli.py:689 src/crucible/cli.py:845
 msgid "Status"
 msgstr "Status"
 
-#: src/crucible/cli.py:682
+#: src/crucible/cli.py:689
 msgid "Description"
 msgstr "描述"
 
-#: src/crucible/cli.py:691
-msgid "Compare two experiment runs side by side."
-msgstr "並排比較兩個實驗結果。"
-
-#: src/crucible/cli.py:707
+#: src/crucible/cli.py:715
 #, python-brace-format
 msgid "No {filename} found for tag '{tag}'."
 msgstr "找不到 tag '{tag}' 的 {filename}。"
 
-#: src/crucible/cli.py:740
-msgid "Generate a new experiment from a natural language description."
-msgstr "從自然語言描述產生新實驗。"
-
-#: src/crucible/cli.py:742
+#: src/crucible/cli.py:750
 msgid "Experiment description (skip interactive prompt)."
 msgstr "實驗描述（跳過互動提示）。"
 
-#: src/crucible/cli.py:749
+#: src/crucible/cli.py:758
 msgid "What do you want to optimize? Describe your experiment"
 msgstr "你想優化什麼？描述你的實驗"
 
-#: src/crucible/cli.py:751
+#: src/crucible/cli.py:760
 msgid "Analyzing your description..."
 msgstr "正在分析你的描述..."
 
-#: src/crucible/cli.py:756
+#: src/crucible/cli.py:765
 #, python-brace-format
 msgid "Analysis failed: {error}"
 msgstr "分析失敗：{error}"
 
-#: src/crucible/cli.py:767
+#: src/crucible/cli.py:776
 msgid "Choose"
 msgstr "請選擇"
 
-#: src/crucible/cli.py:771
+#: src/crucible/cli.py:780
 msgid "Generating experiment..."
 msgstr "正在產生實驗..."
 
-#: src/crucible/cli.py:777
+#: src/crucible/cli.py:786
 #, python-brace-format
 msgid "Generation failed: {error}"
 msgstr "產生失敗：{error}"
 
-#: src/crucible/cli.py:781
+#: src/crucible/cli.py:790
 #, python-brace-format
 msgid "Created experiment at {dest_path}"
 msgstr "已在 {dest_path} 建立實驗"
 
-#: src/crucible/cli.py:782
+#: src/crucible/cli.py:791
 #, python-brace-format
 msgid "Summary: {summary}"
 msgstr "摘要：{summary}"
 
-#: src/crucible/cli.py:797
+#: src/crucible/cli.py:806
 msgid "No iterations to analyze."
 msgstr "沒有可分析的迭代。"
 
-#: src/crucible/cli.py:834
+#: src/crucible/cli.py:843
 #, python-brace-format
 msgid "Token Profile ({count} iterations)"
 msgstr "Token Profile（{count} 次迭代）"
 
-#: src/crucible/cli.py:836
+#: src/crucible/cli.py:845
 msgid "Iter"
 msgstr "Iter"
 
-#: src/crucible/cli.py:836
+#: src/crucible/cli.py:845
 msgid "In Tok"
 msgstr "In Tok"
 
-#: src/crucible/cli.py:836
+#: src/crucible/cli.py:845
 msgid "Out Tok"
 msgstr "Out Tok"
 
-#: src/crucible/cli.py:836
+#: src/crucible/cli.py:845
 msgid "Cache%"
 msgstr "Cache%"
 
-#: src/crucible/cli.py:836
+#: src/crucible/cli.py:845
 msgid "Agent(s)"
 msgstr "Agent(s)"
 
-#: src/crucible/cli.py:836
+#: src/crucible/cli.py:845
 msgid "Run(s)"
 msgstr "Run(s)"
 
-#: src/crucible/cli.py:857
+#: src/crucible/cli.py:866
 msgid "Prompt Breakdown (avg tokens per section):"
 msgstr "Prompt 組成（每區段平均 token 數）："
 
-#: src/crucible/cli.py:872
+#: src/crucible/cli.py:881
 #, python-brace-format
 msgid "Cache Efficiency: avg {pct}% hit rate"
 msgstr "Cache 效率：平均 {pct}% 命中率"
 
-#: src/crucible/cli.py:877
-msgid "Analyze a completed experiment run."
-msgstr "分析已完成的實驗。"
-
-#: src/crucible/cli.py:878
+#: src/crucible/cli.py:887
 msgid "Experiment tag to analyze."
 msgstr "要分析的實驗 tag。"
 
-#: src/crucible/cli.py:880
+#: src/crucible/cli.py:889
 msgid "Skip AI insights (data only)."
 msgstr "跳過 AI 洞察（僅顯示資料）。"
 
-#: src/crucible/cli.py:882
+#: src/crucible/cli.py:891
 msgid "Show token profiling analysis."
 msgstr "顯示 token profiling 分析。"
 
-#: src/crucible/cli.py:900
+#: src/crucible/cli.py:910
 msgid "No iterations recorded for this experiment."
 msgstr "此實驗尚無迭代紀錄。"
 
-#: src/crucible/cli.py:907
+#: src/crucible/cli.py:917
 msgid "Generating AI insights..."
 msgstr "正在產生 AI 洞察..."
 
-#: src/crucible/cli.py:947
-msgid "Update crucible to the latest version."
-msgstr "更新 crucible 到最新版本。"
-
-#: src/crucible/cli.py:948
+#: src/crucible/cli.py:958
 msgid "Check for updates without installing."
 msgstr "僅檢查更新，不安裝。"
 
-#: src/crucible/cli.py:954
+#: src/crucible/cli.py:965
 msgid "Failed to check PyPI for updates. Check your network connection."
 msgstr "無法從 PyPI 檢查更新。請確認網路連線。"
 
-#: src/crucible/cli.py:957
+#: src/crucible/cli.py:968
 #, python-brace-format
 msgid "Already up to date (v{version})."
 msgstr "已是最新版本（v{version}）。"
 
-#: src/crucible/cli.py:961
+#: src/crucible/cli.py:972
 #, python-brace-format
 msgid "Update available: v{current} → v{latest}"
 msgstr "有可用更新：v{current} → v{latest}"
 
-#: src/crucible/cli.py:962
+#: src/crucible/cli.py:973
 msgid "Run 'crucible update' to install."
 msgstr "執行 'crucible update' 安裝。"
 
-#: src/crucible/cli.py:968
+#: src/crucible/cli.py:979
 msgid "uv is required for updates. Install it: https://docs.astral.sh/uv/"
 msgstr "更新需要 uv。安裝方式：https://docs.astral.sh/uv/"
 
-#: src/crucible/cli.py:971
+#: src/crucible/cli.py:982
 #, python-brace-format
 msgid "Updating autocrucible... v{current} → v{latest}"
 msgstr "正在更新 autocrucible... v{current} → v{latest}"
 
-#: src/crucible/cli.py:978
+#: src/crucible/cli.py:989
 #, python-brace-format
 msgid "Update failed: {error}"
 msgstr "更新失敗：{error}"
 
-#: src/crucible/cli.py:980
+#: src/crucible/cli.py:991
 #, python-brace-format
 msgid "Updated to v{version} ✓"
 msgstr "已更新至 v{version} ✓"
@@ -759,7 +716,9 @@ msgstr ""
 msgid ""
 "Warning: claude CLI too old to check auth status; consider updating. "
 "Proceeding anyway."
-msgstr "警告：claude CLI 版本過舊，無法檢查認證狀態；建議更新。仍繼續執行。"
+msgstr ""
+"警告：claude CLI 版本過舊，無法檢查認證狀態；建議更新。"
+"仍繼續執行。"
 
 #: src/crucible/preflight.py:70
 #, python-brace-format

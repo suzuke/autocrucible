@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-22 10:35+0800\n"
+"POT-Creation-Date: 2026-03-22 10:56+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -218,393 +218,437 @@ msgstr ""
 msgid "Enable debug logging."
 msgstr ""
 
-#: src/crucible/cli.py:161
+#: src/crucible/cli.py:146
+msgid "crucible — automated experiment loop."
+msgstr ""
+
+#: src/crucible/cli.py:158
+msgid "Create a new experiment project (from an example or empty scaffold)."
+msgstr ""
+
+#: src/crucible/cli.py:160
 msgid "Example name to copy from."
 msgstr ""
 
-#: src/crucible/cli.py:162
+#: src/crucible/cli.py:161
 msgid "List available examples."
 msgstr ""
 
-#: src/crucible/cli.py:169
+#: src/crucible/cli.py:167
 #, python-brace-format
 msgid "Examples directory not found: {ex_dir}"
 msgstr ""
 
-#: src/crucible/cli.py:172
+#: src/crucible/cli.py:170
 msgid "No examples found."
 msgstr ""
 
-#: src/crucible/cli.py:173
+#: src/crucible/cli.py:171
 msgid "Available examples:"
 msgstr ""
 
-#: src/crucible/cli.py:275
+#: src/crucible/cli.py:273
 #, python-brace-format
 msgid "Created empty project at {dest_path}"
 msgstr ""
 
-#: src/crucible/cli.py:276
+#: src/crucible/cli.py:274
 msgid "Edit .crucible/config.yaml and program.md, then run:"
 msgstr ""
 
-#: src/crucible/cli.py:287
+#: src/crucible/cli.py:285
 #, python-brace-format
 msgid "Example '{example}' not found. Available: {available}"
 msgstr ""
 
-#: src/crucible/cli.py:293
+#: src/crucible/cli.py:291
 #, python-brace-format
 msgid "Destination '{dest_path}' is not empty."
 msgstr ""
 
-#: src/crucible/cli.py:318
+#: src/crucible/cli.py:316
 #, python-brace-format
 msgid "Created project from example '{example}' at {dest_path}"
 msgstr ""
 
-#: src/crucible/cli.py:319 src/crucible/cli.py:792
+#: src/crucible/cli.py:317 src/crucible/cli.py:783
 msgid "Next steps:"
 msgstr ""
 
-#: src/crucible/cli.py:327 src/crucible/cli.py:411
+#: src/crucible/cli.py:324
+msgid "Initialise an experiment branch and results log."
+msgstr ""
+
+#: src/crucible/cli.py:325 src/crucible/cli.py:408
 msgid "Experiment tag / branch suffix."
 msgstr ""
 
-#: src/crucible/cli.py:328 src/crucible/cli.py:412 src/crucible/cli.py:542
-#: src/crucible/cli.py:614 src/crucible/cli.py:651 src/crucible/cli.py:700
-#: src/crucible/cli.py:888
+#: src/crucible/cli.py:326 src/crucible/cli.py:409 src/crucible/cli.py:538
+#: src/crucible/cli.py:609 src/crucible/cli.py:645 src/crucible/cli.py:693
+#: src/crucible/cli.py:879
 msgid "Project root directory."
 msgstr ""
 
-#: src/crucible/cli.py:335 src/crucible/cli.py:458
+#: src/crucible/cli.py:332 src/crucible/cli.py:454
 msgid "No git repo found — initializing..."
 msgstr ""
 
-#: src/crucible/cli.py:344 src/crucible/cli.py:467
+#: src/crucible/cli.py:341 src/crucible/cli.py:463
 msgid "Git repo initialized with initial commit."
 msgstr ""
 
-#: src/crucible/cli.py:369 src/crucible/cli.py:521
+#: src/crucible/cli.py:366 src/crucible/cli.py:517
 #, python-brace-format
 msgid "Running setup: {cmd}"
 msgstr ""
 
-#: src/crucible/cli.py:372 src/crucible/cli.py:524
+#: src/crucible/cli.py:369 src/crucible/cli.py:520
 #, python-brace-format
 msgid "Setup command failed with exit code {code}"
 msgstr ""
 
-#: src/crucible/cli.py:374 src/crucible/cli.py:525
+#: src/crucible/cli.py:371 src/crucible/cli.py:521
 #, python-brace-format
 msgid "Initialised experiment '{tag}' in {project}"
 msgstr ""
 
-#: src/crucible/cli.py:413
+#: src/crucible/cli.py:407
+msgid "Run the experiment loop until interrupted."
+msgstr ""
+
+#: src/crucible/cli.py:410
 msgid "Claude model to use (e.g. sonnet, opus)."
 msgstr ""
 
-#: src/crucible/cli.py:414
+#: src/crucible/cli.py:411
 msgid "Agent timeout per iteration (seconds)."
 msgstr ""
 
-#: src/crucible/cli.py:415
+#: src/crucible/cli.py:412
 msgid "Maximum iterations to run (default: unlimited)."
 msgstr ""
 
-#: src/crucible/cli.py:416
+#: src/crucible/cli.py:413
 msgid "Skip interactive prompts (start fresh)."
 msgstr ""
 
-#: src/crucible/cli.py:417
+#: src/crucible/cli.py:414
 msgid "Enable token profiling (track prompt breakdown, cache efficiency)."
 msgstr ""
 
-#: src/crucible/cli.py:454
+#: src/crucible/cli.py:450
 #, python-brace-format
 msgid "Resuming experiment '{tag}' ({count} previous iterations)"
 msgstr ""
 
-#: src/crucible/cli.py:474
+#: src/crucible/cli.py:470
 msgid "Found previous experiments:"
 msgstr ""
 
-#: src/crucible/cli.py:481
+#: src/crucible/cli.py:477
 #, python-brace-format
 msgid "  {n}) Start fresh"
 msgstr ""
 
-#: src/crucible/cli.py:483
+#: src/crucible/cli.py:479
 msgid "Fork from"
 msgstr ""
 
-#: src/crucible/cli.py:495
+#: src/crucible/cli.py:491
 #, python-brace-format
 msgid "Forking from {tag} best ({metric} @ {commit})..."
 msgstr ""
 
-#: src/crucible/cli.py:508
+#: src/crucible/cli.py:504
 msgid "Syncing environment..."
 msgstr ""
 
-#: src/crucible/cli.py:531
+#: src/crucible/cli.py:527
 msgid "Tip: Run 'crucible validate' first to check if your metric needs repeat runs (stochastic experiments may benefit from evaluation.repeat: 3)."
 msgstr ""
 
-#: src/crucible/cli.py:535
+#: src/crucible/cli.py:531
 msgid "Press Ctrl+C to stop gracefully."
 msgstr ""
 
-#: src/crucible/cli.py:537 src/crucible/orchestrator.py:595
+#: src/crucible/cli.py:533 src/crucible/orchestrator.py:595
 msgid "Stopped."
 msgstr ""
 
-#: src/crucible/cli.py:541 src/crucible/cli.py:649
+#: src/crucible/cli.py:536
+msgid "Show summary of experiment results."
+msgstr ""
+
+#: src/crucible/cli.py:537 src/crucible/cli.py:643
 msgid "Experiment tag."
 msgstr ""
 
-#: src/crucible/cli.py:543 src/crucible/cli.py:652 src/crucible/cli.py:701
-#: src/crucible/cli.py:890
+#: src/crucible/cli.py:539 src/crucible/cli.py:646 src/crucible/cli.py:694
+#: src/crucible/cli.py:881
 msgid "Output as JSON."
 msgstr ""
 
-#: src/crucible/cli.py:554 src/crucible/cli.py:659 src/crucible/cli.py:904
+#: src/crucible/cli.py:549 src/crucible/cli.py:652 src/crucible/cli.py:894
 #, python-brace-format
 msgid "No {filename} found. Run 'init --tag {tag}' first."
 msgstr ""
 
-#: src/crucible/cli.py:595
+#: src/crucible/cli.py:590
 #, python-brace-format
 msgid "Experiment: {name}"
 msgstr ""
 
-#: src/crucible/cli.py:596
+#: src/crucible/cli.py:591
 #, python-brace-format
 msgid "Total: {total}  Kept: {kept}  Discarded: {discarded}  Crashed: {crashed}"
 msgstr ""
 
-#: src/crucible/cli.py:598
+#: src/crucible/cli.py:593
 #, python-brace-format
 msgid "Best {metric}: {value} (commit {commit})"
 msgstr ""
 
-#: src/crucible/cli.py:605
+#: src/crucible/cli.py:600
 #, python-brace-format
 msgid "Cost: ${cost:.2f} / ${budget:.2f} ({pct:.0f}%) — {iters} iterations"
 msgstr ""
 
-#: src/crucible/cli.py:608
+#: src/crucible/cli.py:603
 #, python-brace-format
 msgid "Cost: ${cost:.2f} — {iters} iterations"
 msgstr ""
 
-#: src/crucible/cli.py:610
+#: src/crucible/cli.py:605
 msgid "Cost: unknown (agent backend does not report usage)"
 msgstr ""
 
-#: src/crucible/cli.py:615
+#: src/crucible/cli.py:608
+msgid "Validate project configuration and run a test execution."
+msgstr ""
+
+#: src/crucible/cli.py:610
 msgid "Check metric stability."
 msgstr ""
 
-#: src/crucible/cli.py:616
+#: src/crucible/cli.py:611
 msgid "Number of runs for stability check."
 msgstr ""
 
-#: src/crucible/cli.py:637
+#: src/crucible/cli.py:631
 #, python-brace-format
 msgid "  [PASS] Metric stability: CV = {cv:.1f}% over {runs} runs"
 msgstr ""
 
-#: src/crucible/cli.py:639
+#: src/crucible/cli.py:633
 #, python-brace-format
 msgid "  [WARN] Metric stability: CV = {cv:.1f}% over {runs} runs"
 msgstr ""
 
-#: src/crucible/cli.py:641
+#: src/crucible/cli.py:635
 #, python-brace-format
 msgid "         Values: {values}"
 msgstr ""
 
-#: src/crucible/cli.py:642
+#: src/crucible/cli.py:636
 msgid "         Consider: fix random seeds or increase sample size"
 msgstr ""
 
-#: src/crucible/cli.py:645
+#: src/crucible/cli.py:639
 msgid "Validation failed."
 msgstr ""
 
-#: src/crucible/cli.py:650
+#: src/crucible/cli.py:642
+msgid "Show recent experiment results."
+msgstr ""
+
+#: src/crucible/cli.py:644
 msgid "Number of recent results to show."
 msgstr ""
 
-#: src/crucible/cli.py:653
+#: src/crucible/cli.py:647
 msgid "Output format."
 msgstr ""
 
-#: src/crucible/cli.py:678
+#: src/crucible/cli.py:671
 msgid "No results yet."
 msgstr ""
 
-#: src/crucible/cli.py:689
+#: src/crucible/cli.py:682
 msgid "Commit"
 msgstr ""
 
-#: src/crucible/cli.py:689
+#: src/crucible/cli.py:682
 msgid "Metric"
 msgstr ""
 
-#: src/crucible/cli.py:689 src/crucible/cli.py:845
+#: src/crucible/cli.py:682 src/crucible/cli.py:836
 msgid "Status"
 msgstr ""
 
-#: src/crucible/cli.py:689
+#: src/crucible/cli.py:682
 msgid "Description"
 msgstr ""
 
-#: src/crucible/cli.py:715
+#: src/crucible/cli.py:691
+msgid "Compare two experiment runs side by side."
+msgstr ""
+
+#: src/crucible/cli.py:707
 #, python-brace-format
 msgid "No {filename} found for tag '{tag}'."
 msgstr ""
 
-#: src/crucible/cli.py:750
+#: src/crucible/cli.py:740
+msgid "Generate a new experiment from a natural language description."
+msgstr ""
+
+#: src/crucible/cli.py:742
 msgid "Experiment description (skip interactive prompt)."
 msgstr ""
 
-#: src/crucible/cli.py:758
+#: src/crucible/cli.py:749
 msgid "What do you want to optimize? Describe your experiment"
 msgstr ""
 
-#: src/crucible/cli.py:760
+#: src/crucible/cli.py:751
 msgid "Analyzing your description..."
 msgstr ""
 
-#: src/crucible/cli.py:765
+#: src/crucible/cli.py:756
 #, python-brace-format
 msgid "Analysis failed: {error}"
 msgstr ""
 
-#: src/crucible/cli.py:776
+#: src/crucible/cli.py:767
 msgid "Choose"
 msgstr ""
 
-#: src/crucible/cli.py:780
+#: src/crucible/cli.py:771
 msgid "Generating experiment..."
 msgstr ""
 
-#: src/crucible/cli.py:786
+#: src/crucible/cli.py:777
 #, python-brace-format
 msgid "Generation failed: {error}"
 msgstr ""
 
-#: src/crucible/cli.py:790
+#: src/crucible/cli.py:781
 #, python-brace-format
 msgid "Created experiment at {dest_path}"
 msgstr ""
 
-#: src/crucible/cli.py:791
+#: src/crucible/cli.py:782
 #, python-brace-format
 msgid "Summary: {summary}"
 msgstr ""
 
-#: src/crucible/cli.py:806
+#: src/crucible/cli.py:797
 msgid "No iterations to analyze."
 msgstr ""
 
-#: src/crucible/cli.py:843
+#: src/crucible/cli.py:834
 #, python-brace-format
 msgid "Token Profile ({count} iterations)"
 msgstr ""
 
-#: src/crucible/cli.py:845
+#: src/crucible/cli.py:836
 msgid "Iter"
 msgstr ""
 
-#: src/crucible/cli.py:845
+#: src/crucible/cli.py:836
 msgid "In Tok"
 msgstr ""
 
-#: src/crucible/cli.py:845
+#: src/crucible/cli.py:836
 msgid "Out Tok"
 msgstr ""
 
-#: src/crucible/cli.py:845
+#: src/crucible/cli.py:836
 msgid "Cache%"
 msgstr ""
 
-#: src/crucible/cli.py:845
+#: src/crucible/cli.py:836
 msgid "Agent(s)"
 msgstr ""
 
-#: src/crucible/cli.py:845
+#: src/crucible/cli.py:836
 msgid "Run(s)"
 msgstr ""
 
-#: src/crucible/cli.py:866
+#: src/crucible/cli.py:857
 msgid "Prompt Breakdown (avg tokens per section):"
 msgstr ""
 
-#: src/crucible/cli.py:881
+#: src/crucible/cli.py:872
 #, python-brace-format
 msgid "Cache Efficiency: avg {pct}% hit rate"
 msgstr ""
 
-#: src/crucible/cli.py:887
+#: src/crucible/cli.py:877
+msgid "Analyze a completed experiment run."
+msgstr ""
+
+#: src/crucible/cli.py:878
 msgid "Experiment tag to analyze."
 msgstr ""
 
-#: src/crucible/cli.py:889
+#: src/crucible/cli.py:880
 msgid "Skip AI insights (data only)."
 msgstr ""
 
-#: src/crucible/cli.py:891
+#: src/crucible/cli.py:882
 msgid "Show token profiling analysis."
 msgstr ""
 
-#: src/crucible/cli.py:910
+#: src/crucible/cli.py:900
 msgid "No iterations recorded for this experiment."
 msgstr ""
 
-#: src/crucible/cli.py:917
+#: src/crucible/cli.py:907
 msgid "Generating AI insights..."
 msgstr ""
 
-#: src/crucible/cli.py:958
+#: src/crucible/cli.py:947
+msgid "Update crucible to the latest version."
+msgstr ""
+
+#: src/crucible/cli.py:948
 msgid "Check for updates without installing."
 msgstr ""
 
-#: src/crucible/cli.py:965
+#: src/crucible/cli.py:954
 msgid "Failed to check PyPI for updates. Check your network connection."
 msgstr ""
 
-#: src/crucible/cli.py:968
+#: src/crucible/cli.py:957
 #, python-brace-format
 msgid "Already up to date (v{version})."
 msgstr ""
 
-#: src/crucible/cli.py:972
+#: src/crucible/cli.py:961
 #, python-brace-format
 msgid "Update available: v{current} → v{latest}"
 msgstr ""
 
-#: src/crucible/cli.py:973
+#: src/crucible/cli.py:962
 msgid "Run 'crucible update' to install."
 msgstr ""
 
-#: src/crucible/cli.py:979
+#: src/crucible/cli.py:968
 msgid "uv is required for updates. Install it: https://docs.astral.sh/uv/"
 msgstr ""
 
-#: src/crucible/cli.py:982
+#: src/crucible/cli.py:971
 #, python-brace-format
 msgid "Updating autocrucible... v{current} → v{latest}"
 msgstr ""
 
-#: src/crucible/cli.py:989
+#: src/crucible/cli.py:978
 #, python-brace-format
 msgid "Update failed: {error}"
 msgstr ""
 
-#: src/crucible/cli.py:991
+#: src/crucible/cli.py:980
 #, python-brace-format
 msgid "Updated to v{version} ✓"
 msgstr ""
