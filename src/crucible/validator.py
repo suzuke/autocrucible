@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List
 
 from crucible.config import ConfigError, load_config
+from crucible.i18n import _
 from crucible.runner import ExperimentRunner
 
 
@@ -36,48 +37,48 @@ def validate_project(project_root: Path) -> List[CheckResult]:
     # 1. Config syntax + required fields
     try:
         config = load_config(project_root)
-        results.append(CheckResult("Config", True, "config.yaml is valid"))
+        results.append(CheckResult(_("Config"), True, _("config.yaml is valid")))
     except ConfigError as e:
-        results.append(CheckResult("Config", False, str(e)))
+        results.append(CheckResult(_("Config"), False, str(e)))
         return results  # can't continue without config
 
     # Check Docker availability if sandbox configured
     if config.sandbox and config.sandbox.backend == "docker":
         from crucible.sandbox import check_docker_available
         if check_docker_available():
-            results.append(CheckResult("Docker", True, "Docker daemon is available"))
+            results.append(CheckResult(_("Docker"), True, _("Docker daemon is available")))
         else:
-            results.append(CheckResult("Docker", False,
-                "Docker not available but sandbox.backend is 'docker'. "
-                "Install Docker or set sandbox.backend to 'none'"))
+            results.append(CheckResult(_("Docker"), False,
+                _("Docker not available but sandbox.backend is 'docker'. "
+                  "Install Docker or set sandbox.backend to 'none'")))
 
     # 2. Instructions file exists
     instructions_name = config.agent.instructions or "program.md"
     crucible_path = project_root / ".crucible" / instructions_name
     root_path = project_root / instructions_name
     if crucible_path.exists() and crucible_path.read_text().strip():
-        results.append(CheckResult("Instructions", True, f"{crucible_path} exists"))
+        results.append(CheckResult(_("Instructions"), True, _("{path} exists").format(path=crucible_path)))
     elif root_path.exists() and root_path.read_text().strip():
-        results.append(CheckResult("Instructions", True, f"{root_path} exists"))
+        results.append(CheckResult(_("Instructions"), True, _("{path} exists").format(path=root_path)))
     else:
-        results.append(CheckResult("Instructions", False, f"{instructions_name} not found or empty"))
+        results.append(CheckResult(_("Instructions"), False, _("{name} not found or empty").format(name=instructions_name)))
 
     # 3. Editable/readonly files exist
     all_ok = True
     for f in config.files.editable:
         if not (project_root / f).exists():
-            results.append(CheckResult("Editable files", False, f"Missing: {f}"))
+            results.append(CheckResult(_("Editable files"), False, _("Missing: {f}").format(f=f)))
             all_ok = False
     for f in config.files.readonly:
         if not (project_root / f).exists():
-            results.append(CheckResult("Readonly files", False, f"Missing: {f}"))
+            results.append(CheckResult(_("Readonly files"), False, _("Missing: {f}").format(f=f)))
             all_ok = False
     for f in config.files.hidden:
         if not (project_root / f).exists():
-            results.append(CheckResult("Hidden files", False, f"Missing: {f}"))
+            results.append(CheckResult(_("Hidden files"), False, _("Missing: {f}").format(f=f)))
             all_ok = False
     if all_ok:
-        results.append(CheckResult("Editable files", True, "All files exist"))
+        results.append(CheckResult(_("Editable files"), True, _("All files exist")))
 
     # Check artifacts don't overlap with other file categories
     if config.files.artifacts:
@@ -85,47 +86,48 @@ def validate_project(project_root: Path) -> List[CheckResult]:
         overlap = set(config.files.artifacts) & other_files
         if overlap:
             results.append(CheckResult(
-                "Artifacts", False,
-                f"Artifacts overlap with other file categories: {', '.join(sorted(overlap))}"
+                _("Artifacts"), False,
+                _("Artifacts overlap with other file categories: {overlap}").format(overlap=", ".join(sorted(overlap)))
             ))
         else:
-            results.append(CheckResult("Artifacts", True,
-                f"Persistent dirs: {', '.join(config.files.artifacts)}"))
+            results.append(CheckResult(_("Artifacts"), True,
+                _("Persistent dirs: {dirs}").format(dirs=", ".join(config.files.artifacts))))
 
     # 4. Run command executes
     runner = ExperimentRunner(workspace=project_root)
     validate_timeout = min(config.constraints.timeout_seconds, 120)
     run_result = runner.execute(config.commands.run, timeout=validate_timeout)
     if run_result.exit_code == 0 and not run_result.timed_out:
-        results.append(CheckResult("Run command", True, "Executed successfully"))
+        results.append(CheckResult(_("Run command"), True, _("Executed successfully")))
     elif run_result.timed_out:
-        results.append(CheckResult("Run command", False, f"Timed out ({validate_timeout}s)"))
+        results.append(CheckResult(_("Run command"), False, _("Timed out ({timeout}s)").format(timeout=validate_timeout)))
     else:
-        results.append(CheckResult("Run command", False, f"Exit code {run_result.exit_code}"))
+        results.append(CheckResult(_("Run command"), False, _("Exit code {code}").format(code=run_result.exit_code)))
 
     # 5. Eval command parses metric
     metric_value = runner.parse_metric(config.commands.eval, config.metric.name)
     if metric_value is not None:
-        results.append(CheckResult("Eval/metric", True, f"{config.metric.name}: {metric_value}"))
+        results.append(CheckResult(_("Eval/metric"), True, f"{config.metric.name}: {metric_value}"))
     else:
-        results.append(CheckResult("Eval/metric", False, f"Could not parse '{config.metric.name}' from eval output"))
+        results.append(CheckResult(_("Eval/metric"), False, _("Could not parse '{name}' from eval output").format(name=config.metric.name)))
 
     # 6. Stability check (auto-fixes evaluation.repeat if unstable)
     stability = run_stability_check_and_update(project_root, config, runs=3)
     if stability.reason == "repeat already configured":
         results.append(CheckResult(
-            "Stability", True,
-            f"evaluation.repeat={config.evaluation.repeat} already configured — skipping check"
+            _("Stability"), True,
+            _("evaluation.repeat={repeat} already configured — skipping check").format(repeat=config.evaluation.repeat)
         ))
     elif stability.stable:
         results.append(CheckResult(
-            "Stability", True,
-            f"CV={stability.cv:.1f}%  mean={stability.mean:.4f}  stdev={stability.stdev:.4f} ✓ stable"
+            _("Stability"), True,
+            _("CV={cv:.1f}%  mean={mean:.4f}  stdev={stdev:.4f} ✓ stable").format(
+                cv=stability.cv, mean=stability.mean, stdev=stability.stdev)
         ))
     else:
         results.append(CheckResult(
-            "Stability", True,
-            f"CV={stability.cv:.1f}% ⚠ unstable — auto-set evaluation.repeat=3 in config.yaml"
+            _("Stability"), True,
+            _("CV={cv:.1f}% ⚠ unstable — auto-set evaluation.repeat=3 in config.yaml").format(cv=stability.cv)
         ))
 
     return results

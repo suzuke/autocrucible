@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from crucible.config import SandboxConfig
+from crucible.i18n import _
 from crucible.runner import ExperimentRunner, RunResult, run_with_repeat
 
 logger = logging.getLogger(__name__)
@@ -171,7 +172,7 @@ class SandboxRunner:
                 "RUN pip install --no-cache-dir .\n"
             )
 
-        logger.info(f"Building Docker image {tag}...")
+        logger.info(_("Building Docker image {tag}...").format(tag=tag))
         result = subprocess.run(
             ["docker", "build", "-t", tag, "-f-", "."],
             input=dockerfile,
@@ -180,8 +181,8 @@ class SandboxRunner:
             text=True,
         )
         if result.returncode != 0:
-            logger.error(f"Docker build failed: {result.stderr[-500:]}")
-            raise RuntimeError(f"Docker image build failed: {result.stderr[-200:]}")
+            logger.error(_("Docker build failed: {error}").format(error=result.stderr[-500:]))
+            raise RuntimeError(_("Docker image build failed: {error}").format(error=result.stderr[-200:]))
 
         self._cached_hash = dep_hash
         return tag

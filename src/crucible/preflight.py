@@ -8,6 +8,8 @@ import subprocess
 
 import click
 
+from crucible.i18n import _
+
 
 def check_claude_cli() -> None:
     """Verify that the claude CLI is installed, responsive, and logged in.
@@ -16,9 +18,9 @@ def check_claude_cli() -> None:
     """
     if not shutil.which("claude"):
         raise click.ClickException(
-            "claude CLI not found on PATH.\n"
-            "Install: npm install -g @anthropic-ai/claude-code\n"
-            "Then authenticate: claude login"
+            _("claude CLI not found on PATH.\n"
+              "Install: npm install -g @anthropic-ai/claude-code\n"
+              "Then authenticate: claude login")
         )
 
     result = subprocess.run(
@@ -29,9 +31,9 @@ def check_claude_cli() -> None:
     )
     if result.returncode != 0:
         raise click.ClickException(
-            "claude CLI found but not working.\n"
-            f"Error: {result.stderr.strip()}\n"
-            "Try: claude login"
+            _("claude CLI found but not working.\n"
+              "Error: {error}\n"
+              "Try: claude login").format(error=result.stderr.strip())
         )
 
     # Check login status
@@ -42,7 +44,7 @@ def check_claude_cli() -> None:
         )
     except subprocess.TimeoutExpired:
         click.echo(
-            "Warning: claude auth status timed out, skipping auth check",
+            _("Warning: claude auth status timed out, skipping auth check"),
             err=True,
         )
         return
@@ -51,21 +53,21 @@ def check_claude_cli() -> None:
         data = json.loads(auth.stdout)
         if not data.get("loggedIn"):
             raise click.ClickException(
-                "claude CLI is not logged in.\n"
-                "Run: claude login"
+                _("claude CLI is not logged in.\n"
+                  "Run: claude login")
             )
     except json.JSONDecodeError:
         if auth.returncode != 0:
             stderr = auth.stderr.strip() or auth.stdout.strip()
             if "unknown command" in stderr.lower():
                 click.echo(
-                    "Warning: claude CLI too old to check auth status; "
-                    "consider updating. Proceeding anyway.",
+                    _("Warning: claude CLI too old to check auth status; "
+                      "consider updating. Proceeding anyway."),
                     err=True,
                 )
             else:
                 raise click.ClickException(
-                    "Cannot determine claude auth status.\n"
-                    f"Output: {stderr}\n"
-                    "Try: claude login"
+                    _("Cannot determine claude auth status.\n"
+                      "Output: {output}\n"
+                      "Try: claude login").format(output=stderr)
                 )

@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from crucible.i18n import _
 from crucible.results import ResultsLog
 
 logger = logging.getLogger(__name__)
@@ -171,30 +172,31 @@ def _call_claude_for_insights(prompt: str) -> str:
         return asyncio.run(_call_claude_async(prompt))
     except Exception as e:
         logger.warning(f"AI insights failed: {e}")
-        return f"(AI analysis unavailable: {e})"
+        return _("(AI analysis unavailable: {error})").format(error=e)
 
 
 def render_text(report: PostmortemReport) -> str:
     """Render a PostmortemReport as a human-readable terminal string."""
     if report.total == 0:
-        return "No iterations recorded."
+        return _("No iterations recorded.")
 
     lines: list[str] = []
 
     # Summary
-    lines.append("## Summary")
+    lines.append(_("## Summary"))
     best_str = f"{report.best_metric} ({report.best_commit})" if report.best_metric is not None else "N/A"
-    lines.append(f"  Best: {best_str}")
+    lines.append(_("  Best: {best}").format(best=best_str))
     kept_pct = int(100 * report.kept / report.total) if report.total else 0
     lines.append(
-        f"  Kept: {report.kept}/{report.total} ({kept_pct}%)  |  "
-        f"Discarded: {report.discarded}  |  Crashed: {report.crashed}"
+        _("  Kept: {kept}/{total} ({pct}%)  |  Discarded: {discarded}  |  Crashed: {crashed}").format(
+            kept=report.kept, total=report.total, pct=kept_pct,
+            discarded=report.discarded, crashed=report.crashed)
     )
     lines.append("")
 
     # Metric Trend
     if report.trend:
-        lines.append("## Metric Trend")
+        lines.append(_("## Metric Trend"))
         max_metric = max(
             (t["metric"] for t in report.trend if t["metric"] is not None and t["metric"] > 0),
             default=1.0,
@@ -227,17 +229,18 @@ def render_text(report: PostmortemReport) -> str:
 
     # Failure Streaks
     if report.failure_streaks:
-        lines.append("## Failure Streaks")
+        lines.append(_("## Failure Streaks"))
         for s in report.failure_streaks:
             end = s["start"] + s["length"] - 1
             lines.append(
-                f"  iter {s['start']}-{end}: {s['length']} consecutive failures"
+                _("  iter {start}-{end}: {length} consecutive failures").format(
+                    start=s["start"], end=end, length=s["length"])
             )
         lines.append("")
 
     # AI Insights
     if report.ai_insights:
-        lines.append("## Key Insights")
+        lines.append(_("## Key Insights"))
         lines.append(f"  {report.ai_insights}")
         lines.append("")
 

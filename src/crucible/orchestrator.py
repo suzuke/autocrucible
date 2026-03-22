@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from crucible.agents.base import AgentErrorType, AgentInterface
 from crucible.budget import BudgetGuard
 from crucible.config import Config
+from crucible.i18n import _
 from crucible.context import ContextAssembler
 from crucible.git_manager import GitManager
 from crucible.guardrails import GuardRails
@@ -37,7 +38,7 @@ class BeamState:
     iteration: int = 0
 
 
-_FATAL_MSG = "Fatal error — cannot continue. Check: claude login"
+_FATAL_MSG = _("Fatal error — cannot continue. Check: claude login")
 
 
 class Orchestrator:
@@ -171,10 +172,10 @@ class Orchestrator:
         self.budget.accumulate(agent_result.usage)
         verdict = self.budget.check(agent_result.usage)
         if verdict == "exceeded":
-            logger.warning("Budget exceeded — stopping")
+            logger.warning(_("Budget exceeded — stopping"))
             return "budget_exceeded"
         elif verdict == "warning":
-            logger.warning(f"Budget at {self.budget.percent_used:.0f}%")
+            logger.warning(_("Budget at {pct:.0f}%").format(pct=self.budget.percent_used))
 
         # Fatal error — unrecoverable, abort immediately
         if agent_result.error_type == AgentErrorType.AUTH:
@@ -356,7 +357,7 @@ class Orchestrator:
         req = self.workspace / "requirements.txt"
         if not req.exists():
             return
-        logger.info("Installing updated requirements...")
+        logger.info(_("Installing updated requirements..."))
         env = self.runner._make_env()
         result = subprocess.run(
             ["python3", "-m", "pip", "install", "-r", str(req)],
@@ -436,7 +437,7 @@ class Orchestrator:
         try:
             while True:
                 if max_iterations is not None and session_count >= max_iterations:
-                    logger.info(f"Reached max iterations ({max_iterations}), stopping.")
+                    logger.info(_("Reached max iterations ({n}), stopping.").format(n=max_iterations))
                     break
 
                 logger.info(f"--- iter {self._iteration + 1} ---")
@@ -469,7 +470,7 @@ class Orchestrator:
                     logger.info(f"[profile] prompt: ~{total} tok ({', '.join(parts)}){cache_str}")
 
                 if status == "budget_exceeded":
-                    logger.warning("Budget limit reached, stopping.")
+                    logger.warning(_("Budget limit reached, stopping."))
                     break
 
                 if status in ("skip", "violation"):
@@ -478,10 +479,10 @@ class Orchestrator:
                     self._consecutive_skips = 0
 
                 if self._consecutive_failures >= max_retries:
-                    logger.warning(f"[iter {self._iteration}] {max_retries} consecutive failures, stopping.")
+                    logger.warning(f"[iter {self._iteration}] " + _("{n} consecutive failures, stopping.").format(n=max_retries))
                     break
                 if self._consecutive_skips >= max_retries:
-                    logger.warning(f"[iter {self._iteration}] {max_retries} consecutive skips, stopping.")
+                    logger.warning(f"[iter {self._iteration}] " + _("{n} consecutive skips, stopping.").format(n=max_retries))
                     break
 
                 # Restart strategy: reset to baseline on plateau
@@ -501,7 +502,7 @@ class Orchestrator:
                         self._consecutive_failures = 0
 
         except KeyboardInterrupt:
-            logger.info(f"Stopped after {self._iteration} iterations.")
+            logger.info(_("Stopped after {n} iterations.").format(n=self._iteration))
 
     @contextmanager
     def _beam_swap(self, beam: BeamState):
@@ -540,12 +541,12 @@ class Orchestrator:
 
                 # All beams exhausted?
                 if self._beams and all(b.consecutive_failures >= max_retries for b in self._beams):
-                    logger.info("All beams exhausted consecutive failures — stopping.")
+                    logger.info(_("All beams exhausted consecutive failures — stopping."))
                     break
 
                 # Pick next beam (round-robin, skip exhausted beams)
                 if not self._beams:
-                    logger.warning("No beams initialized — falling back to serial loop.")
+                    logger.warning(_("No beams initialized — falling back to serial loop."))
                     self._run_loop_serial(max_iterations)
                     return
 
@@ -591,4 +592,4 @@ class Orchestrator:
                     break
 
         except KeyboardInterrupt:
-            logger.info("Stopped.")
+            logger.info(_("Stopped."))

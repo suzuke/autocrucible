@@ -10,6 +10,8 @@ from pathlib import Path
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, query
 
+from crucible.i18n import _
+
 logger = logging.getLogger(__name__)
 
 ANALYZE_SYSTEM_PROMPT = """\
@@ -79,7 +81,7 @@ def _load_scaffold_reference() -> str:
             full_text = repo_skill.read_text()
 
     if not full_text:
-        logger.warning("Could not load scaffold reference — wizard may produce incorrect formats")
+        logger.warning(_("Could not load scaffold reference — wizard may produce incorrect formats"))
         return ""
 
     # Extract only the sections the wizard needs
@@ -323,7 +325,7 @@ def _call_claude(prompt: str, system_prompt: str = "") -> str:
         raw = asyncio.run(_call_claude_async(prompt, system_prompt))
         return _extract_json(raw)
     except Exception as e:
-        logger.error(f"Claude call failed: {e}")
+        logger.error(_("Claude call failed: {error}").format(error=e))
         raise
 
 
@@ -360,7 +362,7 @@ class ExperimentWizard:
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            logger.error(f"Claude returned non-JSON: {raw[:200]}")
+            logger.error(_("Claude returned non-JSON: {text}").format(text=raw[:200]))
             raise
 
     def generate(self, description: str, decisions: dict, dest: Path) -> str:
@@ -394,9 +396,9 @@ class ExperimentWizard:
             stripped = content.strip()
             if placeholder_re.match(stripped) or len(stripped) < 20:
                 raise ValueError(
-                    f"Generated file '{rel_path}' contains placeholder content "
-                    f"({stripped[:50]!r}). Claude failed to produce real code. "
-                    f"Try running the wizard again."
+                    _("Generated file '{path}' contains placeholder content "
+                      "({content!r}). Claude failed to produce real code. "
+                      "Try running the wizard again.").format(path=rel_path, content=stripped[:50])
                 )
 
         # Write each file
@@ -405,8 +407,8 @@ class ExperimentWizard:
             full_path = (dest / rel_path).resolve()
             if not full_path.is_relative_to(dest_resolved):
                 raise ValueError(
-                    f"Path traversal detected: '{rel_path}' resolves outside "
-                    f"destination directory"
+                    _("Path traversal detected: '{path}' resolves outside "
+                      "destination directory").format(path=rel_path)
                 )
             full_path.parent.mkdir(parents=True, exist_ok=True)
             full_path.write_text(content)
