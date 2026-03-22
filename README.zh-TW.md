@@ -77,6 +77,15 @@ uv run crucible --help  # 從原始碼執行
 uv run pytest           # 執行測試
 ```
 
+## 語言
+
+Crucible 會自動偵測系統語系。手動切換：
+
+```bash
+export CRUCIBLE_LANG=zh-TW   # 繁體中文
+export CRUCIBLE_LANG=en       # English（預設）
+```
+
 ## 快速開始
 
 ```bash

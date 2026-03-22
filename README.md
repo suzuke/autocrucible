@@ -77,6 +77,15 @@ uv run crucible --help  # run from source
 uv run pytest           # run tests
 ```
 
+## Language / 語言
+
+Crucible auto-detects your system locale. To override:
+
+```bash
+export CRUCIBLE_LANG=zh-TW   # Traditional Chinese
+export CRUCIBLE_LANG=en       # English (default)
+```
+
 ## Quick Start
 
 ```bash
