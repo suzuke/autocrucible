@@ -52,13 +52,6 @@ crucible run --tag study1
 
 ### 核心類：PipelineOrchestrator
 
-**關鍵整合細節：**
-
-1. **`load_config()` 驗證**：research mode 跳過 top-level `files.editable`、`commands.*`、`metric.*` 的 `_require()` 檢查，改為驗證每步的這些欄位。Top-level 欄位用 placeholder 預設值填充（空 list、空 string），讓 `Config` dataclass 保持 valid。
-2. **Branch 建立**：`PipelineOrchestrator` 自行呼叫 `git.create_branch(tag)` 一次。每步建立 `Orchestrator` 時跳過 `init()` 的 branch creation，改用 `resume()` 或新增的 `init_step()` 方法（只初始化 results log + setup，不建 branch）。
-3. **Results 檔案**：`results_filename()` 新增 `step_name` 參數：`results_filename(tag, step_name=None)` → `results-{tag}-{step_name}.jsonl`。
-4. **Agent 建立**：複製 cli.py 的 `create_agent()` 呼叫模式，傳入 `config.agent` + `hidden_files` + `editable_files` kwargs。
-
 ```python
 class PipelineOrchestrator:
     """串聯多個 Orchestrator 實例，每步是一個獨立的優化迴圈。"""
@@ -200,6 +193,13 @@ class PipelineOrchestrator:
             idx = next((i for i, s in enumerate(steps) if s.step == from_step), None)
             if idx is None:
                 raise ConfigError(f"Unknown step: {from_step}")
+            # 驗證前置步驟已完成
+            for prev in steps[:idx]:
+                if not self.git.tag_exists(f"step/{self.tag}/{prev.step}"):
+                    raise ConfigError(
+                        f"Step '{from_step}' requires '{prev.step}' "
+                        f"to be completed first (no tag found)"
+                    )
             return steps[idx:]
         return steps
 ```
