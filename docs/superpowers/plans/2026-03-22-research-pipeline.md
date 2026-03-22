@@ -231,7 +231,11 @@ def load_config(project_root: Path) -> Config:
             raise ConfigError("mode 'research' requires a 'pipeline' section")
         _validate_pipeline(raw["pipeline"])
 
-    # ... rest unchanged until search validation ...
+    # Direction validation — only for optimize mode (research mode has per-step metrics)
+    if mode == "optimize":
+        direction = raw["metric"]["direction"]
+        if direction not in ("minimize", "maximize"):
+            raise ConfigError(f"metric.direction must be 'minimize' or 'maximize', got '{direction}'")
 
     search_data = raw.get("search", {})
     strategy = search_data.get("strategy", "greedy")
@@ -242,23 +246,56 @@ def load_config(project_root: Path) -> Config:
     if mode == "research" and strategy == "beam":
         raise ConfigError("beam search strategy is not supported with mode 'research'")
 
-    # ... rest of field extraction unchanged ...
+    files_data = raw.get("files", {})
+    commands_data = raw.get("commands", {})
+    metric_data = raw.get("metric", {})
+    constraints_data = raw.get("constraints", {})
+    git_data = raw.get("git", {})
 
     # Build pipeline config if present
     pipeline = _build_pipeline(raw.get("pipeline")) if raw.get("pipeline") else None
 
-    # For research mode, fill placeholder top-level fields
-    if mode == "research":
-        files_data = raw.get("files", {})
-        commands_data = raw.get("commands", {})
-        metric_data = raw.get("metric", {})
-    else:
-        files_data = raw.get("files", {})
-        commands_data = raw.get("commands", {})
-        metric_data = raw.get("metric", {})
-
-    # ... rest of Config construction ...
-    # Add mode=mode, pipeline=pipeline to the return
+    # For research mode, commands/metric may be empty at top level — use safe .get()
+    return Config(
+        name=raw["name"],
+        description=raw.get("description", ""),
+        mode=mode,
+        pipeline=pipeline,
+        files=FilesConfig(
+            editable=files_data.get("editable", []),
+            readonly=files_data.get("readonly", []),
+            hidden=files_data.get("hidden", []),
+            artifacts=files_data.get("artifacts", []),
+        ),
+        commands=CommandsConfig(
+            run=commands_data.get("run", ""),
+            eval=commands_data.get("eval", ""),
+            setup=commands_data.get("setup"),
+        ),
+        metric=MetricConfig(
+            name=metric_data.get("name", ""),
+            direction=metric_data.get("direction", ""),
+        ),
+        constraints=ConstraintsConfig(
+            timeout_seconds=constraints_data.get("timeout_seconds", 600),
+            max_retries=constraints_data.get("max_retries", 3),
+            budget=_build_budget(constraints_data.get("budget")),
+            plateau_threshold=constraints_data.get("plateau_threshold", 8),
+            allow_install=constraints_data.get("allow_install", False),
+            max_iterations=constraints_data.get("max_iterations"),
+        ),
+        agent=_build_agent(raw.get("agent", {})),
+        git=GitConfig(
+            branch_prefix=git_data.get("branch_prefix", "crucible"),
+            tag_failed=git_data.get("tag_failed", True),
+        ),
+        evaluation=_build_evaluation(raw.get("evaluation", {})),
+        sandbox=_build_sandbox(raw.get("sandbox")),
+        search=_build_search(
+            raw.get("search", {}),
+            raw.get("constraints", {}),
+        ),
+    )
 ```
 
 Add helper functions:
@@ -654,6 +691,9 @@ Add after `resume()` method in `src/crucible/orchestrator.py:148`:
         if needed:
             lines.extend(needed)
             gitignore.write_text("\n".join(lines) + "\n")
+            self.git.commit("chore: gitignore generated files")
+        # Note: setup command for pipeline steps is handled by
+        # PipelineOrchestrator (same as CLI handles it for optimize mode)
 
     def resume_step(self) -> None:
         """Resume a pipeline step from existing results (no branch checkout)."""
@@ -891,6 +931,15 @@ class PipelineOrchestrator:
                 logger.info(f"  Resuming from iteration {orch._iteration}")
             else:
                 orch.init_step()
+                # Run setup command if configured for this step
+                if step_cfg.commands.setup:
+                    import subprocess as sp
+                    result = sp.run(
+                        step_cfg.commands.setup, shell=True,
+                        cwd=self.workspace,
+                    )
+                    if result.returncode != 0:
+                        raise ConfigError(f"Setup command failed for step '{step_cfg.step}'")
 
             orch.run_loop(max_iterations=step_cfg.max_iterations)
 
@@ -1356,7 +1405,7 @@ def test_run_dispatches_to_pipeline_for_research_mode(tmp_path):
     runner = CliRunner()
     # This should attempt to use PipelineOrchestrator
     # We patch it to avoid actually running
-    with patch("crucible.cli.PipelineOrchestrator") as mock_po:
+    with patch("crucible.pipeline.PipelineOrchestrator") as mock_po:
         mock_result = MagicMock()
         mock_result.completed = True
         mock_result.step_results = {}
@@ -1647,3 +1696,12 @@ git commit -m "chore: i18n and lint cleanup for pipeline mode"
 git log --oneline feat/research-pipeline..HEAD  # should show all pipeline commits
 uv run pytest -v                                 # all pass
 ```
+
+---
+
+### Deferred (not in scope for v1)
+
+- `history` command `--step` filter — minor UX, add when pipeline is proven in use
+- Token profiling per step — works automatically via existing `--profile` flag per orchestrator instance; per-step aggregation in `postmortem` deferred
+- `lock_outputs: false` test — add when the feature is actually needed
+- `from_step` resume test — covered by prerequisite validation test; full e2e deferred
