@@ -48,6 +48,7 @@ class ExperimentRecord:
     delta_percent: float | None = None
     files_changed: list[str] | None = None
     diff_stats: dict | None = None
+    diff_text: str | None = None
     duration_seconds: float | None = None
     agent_duration_seconds: float | None = None
     run_duration_seconds: float | None = None

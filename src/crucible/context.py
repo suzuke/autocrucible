@@ -20,6 +20,14 @@ def _estimate_tokens(text: str) -> int:
     """Estimate token count from text. Approximation: ~4 chars per token."""
     return len(text) // 4 if text else 0
 
+
+def _format_diff_for_table(diff_text: str) -> str:
+    """Format compact diff for inline display in markdown table."""
+    # Replace newlines with ` | ` for inline display, escape pipes
+    lines = diff_text.replace("|", "\\|").splitlines()
+    return " ".join(lines)
+
+
 # -- Crash classification patterns (order matters: first match wins) ----------
 
 _CRASH_PATTERNS: list[tuple[str, str, str]] = [
@@ -247,12 +255,13 @@ class ContextAssembler:
 
         lines = ["## Experiment History"]
         lines.append("")
-        lines.append("| # | Metric | Status | Description |")
-        lines.append("|---|--------|--------|-------------|")
+        lines.append("| # | Metric | Status | Change |")
+        lines.append("|---|--------|--------|--------|")
         for i, r in enumerate(recent, 1):
             label = _STATUS_LABELS.get(r.status, r.status)
+            change = _format_diff_for_table(r.diff_text) if r.diff_text else r.description
             lines.append(
-                f"| {i} | {r.metric_value} | {label} | {r.description} |"
+                f"| {i} | {r.metric_value} | {label} | {change} |"
             )
 
         # Metric trend for kept records
@@ -262,27 +271,6 @@ class ContextAssembler:
             if first != 0:
                 pct = ((last - first) / abs(first)) * 100
                 lines.append(f"\n**Metric trend: {first} → {last} ({pct:+.1f}%)**")
-
-        # Actionable lessons
-        kept = [r.description for r in records if r.status == "keep"][-5:]
-        discarded = [r.description for r in records if r.status == "discard"][-5:]
-        crashed = [r.description for r in records if r.status == "crash"][-5:]
-
-        if kept or discarded or crashed:
-            lines.append("")
-            lines.append("### Key Lessons")
-            if kept:
-                lines.append(
-                    f"**✓ WORKED — build on these:** {'; '.join(kept)}"
-                )
-            if discarded:
-                lines.append(
-                    f"**✗ FAILED — do NOT repeat:** {'; '.join(discarded)}"
-                )
-            if crashed:
-                lines.append(
-                    f"**💥 CRASHED — avoid entirely:** {'; '.join(crashed)}"
-                )
 
         # Tiered strategy based on consecutive failures
         lines.append("")

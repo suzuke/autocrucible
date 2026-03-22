@@ -207,6 +207,7 @@ class Orchestrator:
         # 7. Git commit
         self.git.commit(agent_result.description)
         commit_hash = self.git.head()
+        diff_text = self.git.compact_diff(commit_hash)
 
         # Install updated requirements if allow_install is enabled
         # Docker mode: skip pip install here — _hash_deps() will detect the change
@@ -256,6 +257,7 @@ class Orchestrator:
                 commit_hash, agent_result, total_duration,
                 agent_duration_seconds=agent_duration,
                 run_duration_seconds=run_duration,
+                diff_text=diff_text,
             ))
             crash_msg = run_result.stderr_tail
             if run_result.timed_out:
@@ -282,6 +284,7 @@ class Orchestrator:
                 delta=delta, delta_percent=delta_percent,
                 agent_duration_seconds=agent_duration,
                 run_duration_seconds=run_duration,
+                diff_text=diff_text,
             ))
             self._consecutive_failures = 0
             return "keep"
@@ -295,6 +298,7 @@ class Orchestrator:
             delta=delta, delta_percent=delta_percent,
             agent_duration_seconds=agent_duration,
             run_duration_seconds=run_duration,
+            diff_text=diff_text,
         ))
         self._consecutive_failures += 1
         return "discard"
@@ -311,6 +315,7 @@ class Orchestrator:
         delta_percent: float | None = None,
         agent_duration_seconds: float | None = None,
         run_duration_seconds: float | None = None,
+        diff_text: str | None = None,
     ) -> ExperimentRecord:
         """Build an ExperimentRecord with common fields filled in."""
         usage = agent_result.usage
@@ -330,6 +335,7 @@ class Orchestrator:
             delta_percent=delta_percent,
             files_changed=[str(f) for f in agent_result.modified_files],
             diff_stats=self._get_diff_stats(commit),
+            diff_text=diff_text,
             duration_seconds=duration_seconds,
             agent_duration_seconds=agent_duration_seconds,
             run_duration_seconds=run_duration_seconds,
