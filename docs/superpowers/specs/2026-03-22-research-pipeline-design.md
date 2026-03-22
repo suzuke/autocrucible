@@ -52,6 +52,13 @@ crucible run --tag study1
 
 ### 核心類：PipelineOrchestrator
 
+**關鍵整合細節：**
+
+1. **`load_config()` 驗證**：research mode 跳過 top-level `files.editable`、`commands.*`、`metric.*` 的 `_require()` 檢查，改為驗證每步的這些欄位。Top-level 欄位用 placeholder 預設值填充（空 list、空 string），讓 `Config` dataclass 保持 valid。
+2. **Branch 建立**：`PipelineOrchestrator` 自行呼叫 `git.create_branch(tag)` 一次。每步建立 `Orchestrator` 時跳過 `init()` 的 branch creation，改用 `resume()` 或新增的 `init_step()` 方法（只初始化 results log + setup，不建 branch）。
+3. **Results 檔案**：`results_filename()` 新增 `step_name` 參數：`results_filename(tag, step_name=None)` → `results-{tag}-{step_name}.jsonl`。
+4. **Agent 建立**：複製 cli.py 的 `create_agent()` 呼叫模式，傳入 `config.agent` + `hidden_files` + `editable_files` kwargs。
+
 ```python
 class PipelineOrchestrator:
     """串聯多個 Orchestrator 實例，每步是一個獨立的優化迴圈。"""
@@ -63,48 +70,77 @@ class PipelineOrchestrator:
         self.tag = tag
         self.force_continue = force_continue
         self.step_results: dict[str, StepResult] = {}
+        self.git = GitManager(
+            workspace=workspace,
+            branch_prefix=config.git.branch_prefix,
+            tag_failed=config.git.tag_failed,
+        )
 
     def run_pipeline(self, from_step: str | None = None,
                      only_step: str | None = None) -> PipelineResult:
         """執行 pipeline 的全部或部分步驟。"""
         steps = self._resolve_steps(from_step, only_step)
 
+        # 建 branch（只做一次）
+        if not self.git.branch_exists(self.tag):
+            self.git.create_branch(self.tag)
+        else:
+            self.git.checkout_branch(self.tag)
+
         for i, step_cfg in enumerate(steps):
             # 1. 計算有效 config（累加前步 readonly）
             merged = self._merge_step_config(step_cfg, i)
 
-            # 2. 建立 agent + orchestrator
-            agent = create_agent(merged, self.workspace)
+            # 2. 建立 agent（複製 cli.py 的模式）
+            agent = ClaudeCodeAgent(
+                timeout=merged.constraints.timeout_seconds,
+                model=merged.agent.model,
+                system_prompt_file=merged.agent.system_prompt,
+                hidden_files=merged.files.hidden,
+                editable_files=merged.files.editable,
+                language=merged.agent.language,
+            )
+
+            # 3. 建立 orchestrator（傳入 step-specific results path）
             orch = Orchestrator(merged, self.workspace, self.tag, agent)
+            # 覆蓋 results path 為 step-specific
+            orch.results = ResultsLog(
+                self.workspace / results_filename(self.tag, step_cfg.step)
+            )
 
-            # 3. init or resume
+            # 4. init_step()（不建 branch，只初始化 results + context）
             if self._step_has_progress(step_cfg.step):
-                orch.resume()
+                orch.resume_step()  # 讀取既有 results，續跑
             else:
-                orch.init()
+                orch.init_step()    # 初始化 results log，跑 setup
 
-            # 4. 跑迴圈
+            # 5. 跑迴圈
             orch.run_loop(max_iterations=step_cfg.max_iterations)
 
-            # 5. 檢查 gate
+            # 6. 檢查 gate
             best = orch.results.best(merged.metric.direction)
-            if step_cfg.gate and best:
-                passed = self._check_gate(best.metric_value,
-                                          step_cfg.gate,
-                                          merged.metric.direction)
-                if not passed and not self.force_continue:
-                    # 停止，報告哪一步失敗
-                    return PipelineResult(stopped_at=step_cfg.step,
-                                          reason="gate_failed")
+            if step_cfg.gate is not None:
+                if best is None:
+                    # 所有迭代都 crash，沒有有效結果 → gate 失敗
+                    if not self.force_continue:
+                        return PipelineResult(stopped_at=step_cfg.step,
+                                              reason="no_successful_iterations")
+                else:
+                    passed = self._check_gate(best.metric_value,
+                                              step_cfg.gate,
+                                              merged.metric.direction)
+                    if not passed and not self.force_continue:
+                        return PipelineResult(stopped_at=step_cfg.step,
+                                              reason="gate_failed")
 
-            # 6. 打 tag 鎖定
-            orch.git.tag_step(self.tag, step_cfg.step)
+            # 7. 打 tag 鎖定（force 覆蓋，支援 rerun）
+            self.git.tag_step(self.tag, step_cfg.step, force=True)
 
-            # 7. 記錄該步結果
+            # 8. 記錄該步結果
             self.step_results[step_cfg.step] = StepResult(
                 metric=best.metric_value if best else None,
                 iterations=orch._iteration,
-                status="passed",
+                status="passed" if best else "no_results",
             )
 
         return PipelineResult(completed=True, step_results=self.step_results)
@@ -123,8 +159,10 @@ class PipelineOrchestrator:
         if step.max_iterations:
             merged.constraints.max_iterations = step.max_iterations
         if step.agent:
-            # 部分覆蓋（model、system_prompt 等）
-            _merge_agent_config(merged.agent, step.agent)
+            for field in ["model", "system_prompt", "language", "base_url"]:
+                val = getattr(step.agent, field, None)
+                if val is not None:
+                    setattr(merged.agent, field, val)
 
         # 累加前步 editable 為 readonly（pre-registration 鎖定）
         if self.config.pipeline.lock_outputs:
@@ -135,7 +173,58 @@ class PipelineOrchestrator:
                         merged.files.readonly.append(f)
 
         return merged
+
+    def _step_has_progress(self, step_name: str) -> bool:
+        """檢查該步是否有既有 results 檔案（resume 用）。"""
+        results_path = self.workspace / results_filename(self.tag, step_name)
+        return results_path.exists() and results_path.stat().st_size > 0
+
+    def _resolve_steps(self, from_step, only_step):
+        """解析要跑哪些步驟。驗證 prerequisites。"""
+        steps = self.config.pipeline.steps
+        if only_step:
+            # --step: 只跑一步，但仍累加前步 readonly
+            match = [s for s in steps if s.step == only_step]
+            if not match:
+                raise ConfigError(f"Unknown step: {only_step}")
+            # 驗證前置步驟已完成（有 tag）
+            idx = next(i for i, s in enumerate(steps) if s.step == only_step)
+            for prev in steps[:idx]:
+                if not self.git.tag_exists(f"step/{self.tag}/{prev.step}"):
+                    raise ConfigError(
+                        f"Step '{only_step}' requires '{prev.step}' "
+                        f"to be completed first (no tag found)"
+                    )
+            return match
+        if from_step:
+            idx = next((i for i, s in enumerate(steps) if s.step == from_step), None)
+            if idx is None:
+                raise ConfigError(f"Unknown step: {from_step}")
+            return steps[idx:]
+        return steps
 ```
+
+### Orchestrator 小幅修改
+
+為了支援 pipeline，`Orchestrator` 需新增兩個薄方法（不改現有邏輯）：
+
+```python
+# orchestrator.py 新增
+
+def init_step(self):
+    """Pipeline 用：初始化 results log + 跑 setup command，但不建 branch。"""
+    self.results.init()
+    self._run_setup_command()
+    # 不呼叫 git.create_branch()
+
+def resume_step(self):
+    """Pipeline 用：從既有 results 續跑，不切 branch。"""
+    records = self.results.read_all()
+    if records:
+        self._iteration = records[-1].iteration
+```
+
+這讓 "不動 orchestrator.py" 的承諾改為 "只加兩個不影響現有行為的薄方法"。
 
 ### 新增 Dataclasses
 
@@ -184,11 +273,15 @@ class Config:
 
 ### Config 驗證
 
-- `mode: research` 時必須有 `pipeline` 欄位
+**optimize mode**（預設）：現有 `_require()` 邏輯不變，完全不看 pipeline 欄位。
+
+**research mode**：
+- 跳過 top-level `files.editable`、`commands.run`、`commands.eval`、`metric.name`、`metric.direction` 的 require 檢查
+- 改為驗證 `pipeline` 欄位存在，且每步都有這些必填欄位
+- Top-level `files`/`commands`/`metric` 用 placeholder 預設值填充，讓 `Config` dataclass valid
 - 每步 `step` 名稱不可重複
-- `gate` 值必須合理（maximize 時 0-1 之間等）
 - 每步至少一個 editable 檔案
-- `mode: optimize`（預設）完全不看 pipeline 欄位
+- `search.strategy: beam` + `mode: research` → 拒絕（v1 不支援）
 
 ## Immutability 機制
 
@@ -205,7 +298,8 @@ class Config:
 - 每步完成打 tag：`step/{tag}/{step_name}`
 - 可用 `git show step/{tag}/hypothesize:hypothesis.md` 查看鎖定時的檔案內容
 - 失敗 commit 仍用現有 `failed/{tag}/{seq}` 機制
-- `git_manager.py` 新增 `tag_step(tag, step_name)` 方法
+- `git_manager.py` 新增 `tag_step(tag, step_name, force=True)` 和 `tag_exists(tag_name)` 方法
+- Re-run 時 `tag_step` 用 `-f` 覆蓋既有 tag
 
 ## Context 傳遞
 
@@ -226,10 +320,11 @@ class Config:
 
 ## Results 與 Profiling
 
-- 每步獨立 results 檔案：`results-{tag}-{step_name}.jsonl`
+- `results_filename(tag, step_name=None)` → 有 step_name 時返回 `results-{tag}-{step_name}.jsonl`，否則 `results-{tag}.jsonl`（向後相容）
 - `ExperimentRecord` 加 `step_name: str | None = None`
-- `postmortem` 支援 `--step` 篩選
+- `history` 命令支援 `--step` 篩選
 - Token profiling 按步驟分開
+- 既有 `.gitignore` pattern `results-*.jsonl` 自動涵蓋新格式
 
 ## CLI 介面
 
@@ -323,9 +418,11 @@ search:
 | `results.py` | 修改 | `ExperimentRecord` 加 `step_name` 欄位 | ~5 |
 | `test_pipeline.py` | **新增** | pipeline 專屬測試 | ~150 |
 
-**不動的模組**：orchestrator.py, agents/, guardrails.py, runner.py
+| `orchestrator.py` | 修改 | 新增 `init_step()` + `resume_step()` 薄方法 | ~15 |
 
-**總計**：~435 行新增/修改
+**不動的模組**：agents/, guardrails.py, runner.py
+
+**總計**：~450 行新增/修改
 
 ## 向後相容
 
