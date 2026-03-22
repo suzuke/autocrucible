@@ -15,6 +15,7 @@ import json as json_module
 import click
 
 from crucible.config import ConfigError, load_config
+from crucible.i18n import _
 from crucible.preflight import check_claude_cli
 from crucible.results import ResultsLog, results_filename
 
@@ -137,15 +138,15 @@ def _verbose_callback(ctx: click.Context, param: click.Parameter, value: bool) -
 
 _verbose_option = click.option(
     "--verbose", "-v", is_flag=True, default=False,
-    help="Enable debug logging.", expose_value=False,
+    help=_("Enable debug logging."), expose_value=False,
     is_eager=True, callback=_verbose_callback,
 )
 
 
 @click.group()
-@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
+@click.option("--verbose", "-v", is_flag=True, default=False, help=_("Enable debug logging."))
 def main(verbose: bool) -> None:
-    """crucible — automated experiment loop."""
+    """crucible — automated experiment loop."""  # noqa: kept as fallback
     handler = logging.StreamHandler()
     handler.setFormatter(_ColorFormatter())
     handler.addFilter(_NoEmptyFilter())
@@ -157,19 +158,19 @@ def main(verbose: bool) -> None:
 
 @main.command()
 @click.argument("dest", type=click.Path())
-@click.option("--example", "-e", default=None, help="Example name to copy from.")
-@click.option("--list", "list_examples", is_flag=True, help="List available examples.")
+@click.option("--example", "-e", default=None, help=_("Example name to copy from."))
+@click.option("--list", "list_examples", is_flag=True, help=_("List available examples."))
 def new(dest: str, example: str | None, list_examples: bool) -> None:
-    """Create a new experiment project (from an example or empty scaffold)."""
+    """Create a new experiment project (from an example or empty scaffold)."""  # noqa: fallback
     ex_dir = _examples_dir()
 
     if list_examples or (example is None and dest == "."):
         if not ex_dir.exists():
-            raise click.ClickException(f"Examples directory not found: {ex_dir}")
+            raise click.ClickException(_("Examples directory not found: {ex_dir}").format(ex_dir=ex_dir))
         examples = sorted(p.name for p in ex_dir.iterdir() if p.is_dir())
         if not examples:
-            raise click.ClickException("No examples found.")
-        click.echo("Available examples:")
+            raise click.ClickException(_("No examples found."))
+        click.echo(_("Available examples:"))
         for e in examples:
             click.echo(f"  - {e}")
         return
@@ -271,8 +272,8 @@ if __name__ == "__main__":
 ''')
         (dest_path / ".gitignore").write_text("results-*.jsonl\nrun.log\n__pycache__/\n*.pyc\n.venv/\nuv.lock\n")
         _write_pyproject(dest_path, "my-experiment")
-        click.echo(f"Created empty project at {dest_path}")
-        click.echo("Edit .crucible/config.yaml and program.md, then run:")
+        click.echo(_("Created empty project at {dest_path}").format(dest_path=dest_path))
+        click.echo(_("Edit .crucible/config.yaml and program.md, then run:"))
         click.echo(f"  cd {dest_path}")
         click.echo("  uv sync          # install experiment dependencies")
         click.echo("  crucible init --tag run1   # auto git-init if needed")
@@ -283,12 +284,13 @@ if __name__ == "__main__":
     if not src.exists():
         examples = sorted(p.name for p in ex_dir.iterdir() if p.is_dir())
         raise click.ClickException(
-            f"Example '{example}' not found. Available: {', '.join(examples)}"
+            _("Example '{example}' not found. Available: {available}").format(
+                example=example, available=", ".join(examples))
         )
 
     dest_path = Path(dest).resolve()
     if dest_path.exists() and any(dest_path.iterdir()):
-        raise click.ClickException(f"Destination '{dest_path}' is not empty.")
+        raise click.ClickException(_("Destination '{dest_path}' is not empty.").format(dest_path=dest_path))
 
     shutil.copytree(src, dest_path, dirs_exist_ok=True)
 
@@ -313,8 +315,8 @@ if __name__ == "__main__":
             gi_text += f"{entry}\n"
     gi.write_text(gi_text)
 
-    click.echo(f"Created project from example '{example}' at {dest_path}")
-    click.echo("Next steps:")
+    click.echo(_("Created project from example '{example}' at {dest_path}").format(example=example, dest_path=dest_path))
+    click.echo(_("Next steps:"))
     click.echo(f"  cd {dest_path}")
     if extra_deps:
         click.echo("  uv sync          # install experiment dependencies")
@@ -322,15 +324,15 @@ if __name__ == "__main__":
 
 
 @main.command()
-@click.option("--tag", required=True, help="Experiment tag / branch suffix.")
-@click.option("--project-dir", default=".", help="Project root directory.")
+@click.option("--tag", required=True, help=_("Experiment tag / branch suffix."))
+@click.option("--project-dir", default=".", help=_("Project root directory."))
 def init(tag: str, project_dir: str) -> None:
-    """Initialise an experiment branch and results log."""
+    """Initialise an experiment branch and results log."""  # noqa: fallback
     project = Path(project_dir).resolve()
 
     # Auto-initialize git repo if needed
     if not (project / ".git").exists():
-        click.echo("No git repo found — initializing...")
+        click.echo(_("No git repo found — initializing..."))
         subprocess.run(["git", "init"], cwd=project, check=True,
                        capture_output=True)
         subprocess.run(["git", "add", "-A"], cwd=project, check=True,
@@ -339,7 +341,7 @@ def init(tag: str, project_dir: str) -> None:
             ["git", "commit", "-m", "initial"],
             cwd=project, check=True, capture_output=True,
         )
-        click.echo("Git repo initialized with initial commit.")
+        click.echo(_("Git repo initialized with initial commit."))
 
     try:
         config = load_config(project)
@@ -364,12 +366,12 @@ def init(tag: str, project_dir: str) -> None:
 
     # Run setup command if configured
     if config.commands.setup:
-        click.echo(f"Running setup: {config.commands.setup}")
+        click.echo(_("Running setup: {cmd}").format(cmd=config.commands.setup))
         result = subprocess.run(config.commands.setup, shell=True, cwd=project)
         if result.returncode != 0:
-            raise click.ClickException(f"Setup command failed with exit code {result.returncode}")
+            raise click.ClickException(_("Setup command failed with exit code {code}").format(code=result.returncode))
 
-    click.echo(f"Initialised experiment '{tag}' in {project}")
+    click.echo(_("Initialised experiment '{tag}' in {project}").format(tag=tag, project=project))
 
 
 def _scan_previous_runs(project: Path, current_tag: str, direction: str) -> list[dict]:
@@ -406,16 +408,16 @@ def _scan_previous_runs(project: Path, current_tag: str, direction: str) -> list
 
 
 @main.command()
-@click.option("--tag", required=True, help="Experiment tag / branch suffix.")
-@click.option("--project-dir", default=".", help="Project root directory.")
-@click.option("--model", default=None, help="Claude model to use (e.g. sonnet, opus).")
-@click.option("--timeout", default=600, type=int, help="Agent timeout per iteration (seconds).")
-@click.option("--max-iterations", default=None, type=int, help="Maximum iterations to run (default: unlimited).")
-@click.option("--no-interactive", is_flag=True, default=False, help="Skip interactive prompts (start fresh).")
-@click.option("--profile", is_flag=True, default=False, help="Enable token profiling (track prompt breakdown, cache efficiency).")
+@click.option("--tag", required=True, help=_("Experiment tag / branch suffix."))
+@click.option("--project-dir", default=".", help=_("Project root directory."))
+@click.option("--model", default=None, help=_("Claude model to use (e.g. sonnet, opus)."))
+@click.option("--timeout", default=600, type=int, help=_("Agent timeout per iteration (seconds)."))
+@click.option("--max-iterations", default=None, type=int, help=_("Maximum iterations to run (default: unlimited)."))
+@click.option("--no-interactive", is_flag=True, default=False, help=_("Skip interactive prompts (start fresh)."))
+@click.option("--profile", is_flag=True, default=False, help=_("Enable token profiling (track prompt breakdown, cache efficiency)."))
 @_verbose_option
 def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterations: int | None, no_interactive: bool, profile: bool) -> None:
-    """Run the experiment loop until interrupted."""
+    """Run the experiment loop until interrupted."""  # noqa: fallback
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -449,11 +451,11 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
     if orch.git.branch_exists(tag):
         orch.resume()
         existing = orch.results.read_all()
-        click.echo(f"Resuming experiment '{tag}' ({len(existing)} previous iterations)")
+        click.echo(_("Resuming experiment '{tag}' ({count} previous iterations)").format(tag=tag, count=len(existing)))
     else:
         # Auto-init: git repo + branch + results + setup
         if not (project / ".git").exists():
-            click.echo("No git repo found — initializing...")
+            click.echo(_("No git repo found — initializing..."))
             subprocess.run(["git", "init"], cwd=project, check=True,
                            capture_output=True)
             subprocess.run(["git", "add", "-A"], cwd=project, check=True,
@@ -462,23 +464,23 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
                 ["git", "commit", "-m", "initial"],
                 cwd=project, check=True, capture_output=True,
             )
-            click.echo("Git repo initialized with initial commit.")
+            click.echo(_("Git repo initialized with initial commit."))
 
         # Check for previous runs to fork from
         fork_from = None
         if not no_interactive:
             previous = _scan_previous_runs(project, tag, config.metric.direction)
             if previous:
-                click.echo("\nFound previous experiments:")
+                click.echo("\n" + _("Found previous experiments:"))
                 for i, prev in enumerate(previous, 1):
                     click.echo(
                         f"  {i}) {prev['tag']}  — best: {prev['best_metric']} "
                         f"(commit {prev['best_commit']}, {prev['iterations']} iters, "
                         f"{prev['kept']} kept)"
                     )
-                click.echo(f"  {len(previous) + 1}) Start fresh")
+                click.echo(_("  {n}) Start fresh").format(n=len(previous) + 1))
                 choice = click.prompt(
-                    "Fork from",
+                    _("Fork from"),
                     type=int,
                     default=len(previous) + 1,
                 )
@@ -490,8 +492,9 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
                         selected["tag"],
                     )
                     click.echo(
-                        f"Forking from {selected['tag']} best "
-                        f"({selected['best_metric']} @ {selected['best_commit']})..."
+                        _("Forking from {tag} best ({metric} @ {commit})...").format(
+                            tag=selected["tag"], metric=selected["best_metric"],
+                            commit=selected["best_commit"])
                     )
 
         orch.init(fork_from=fork_from)
@@ -502,7 +505,7 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
         # This ensures a fresh run doesn't inherit packages from a previous run
         is_docker = config.sandbox and config.sandbox.backend != "none"
         if not is_docker and (project / ".venv").exists():
-            click.echo("Syncing environment...")
+            click.echo(_("Syncing environment..."))
             sync_cmd = "uv sync" if (project / "pyproject.toml").exists() else None
             if not sync_cmd and (project / "requirements.txt").exists():
                 sync_cmd = "python3 -m pip install -r requirements.txt"
@@ -515,31 +518,31 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
                 subprocess.run(sync_cmd, shell=True, cwd=project, env=env, capture_output=True)
 
         if config.commands.setup:
-            click.echo(f"Running setup: {config.commands.setup}")
+            click.echo(_("Running setup: {cmd}").format(cmd=config.commands.setup))
             result = subprocess.run(config.commands.setup, shell=True, cwd=project)
             if result.returncode != 0:
-                raise click.ClickException(f"Setup command failed with exit code {result.returncode}")
-        click.echo(f"Initialised experiment '{tag}' in {project}")
+                raise click.ClickException(_("Setup command failed with exit code {code}").format(code=result.returncode))
+        click.echo(_("Initialised experiment '{tag}' in {project}").format(tag=tag, project=project))
 
     # Hint: suggest validate if repeat=1 and not yet validated
     validated_marker = project / ".crucible" / ".validated"
     if config.evaluation.repeat == 1 and not validated_marker.exists():
         click.echo(
-            "Tip: Run 'crucible validate' first to check if your metric needs "
-            "repeat runs (stochastic experiments may benefit from evaluation.repeat: 3)."
+            _("Tip: Run 'crucible validate' first to check if your metric needs "
+              "repeat runs (stochastic experiments may benefit from evaluation.repeat: 3).")
         )
 
-    click.echo("Press Ctrl+C to stop gracefully.")
+    click.echo(_("Press Ctrl+C to stop gracefully."))
     orch.run_loop(max_iterations=max_iterations)
-    click.echo("Stopped.")
+    click.echo(_("Stopped."))
 
 
 @main.command()
-@click.option("--tag", required=True, help="Experiment tag.")
-@click.option("--project-dir", default=".", help="Project root directory.")
-@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.option("--tag", required=True, help=_("Experiment tag."))
+@click.option("--project-dir", default=".", help=_("Project root directory."))
+@click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
 def status(tag: str, project_dir: str, as_json: bool) -> None:
-    """Show summary of experiment results."""
+    """Show summary of experiment results."""  # noqa: fallback
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -548,7 +551,7 @@ def status(tag: str, project_dir: str, as_json: bool) -> None:
 
     results = ResultsLog(project / results_filename(tag))
     if not results.path.exists():
-        raise click.ClickException(f"No {results_filename(tag)} found. Run 'init --tag {tag}' first.")
+        raise click.ClickException(_("No {filename} found. Run 'init --tag {tag}' first.").format(filename=results_filename(tag), tag=tag))
 
     summary = results.summary()
     best = results.best(config.metric.direction)
@@ -589,29 +592,30 @@ def status(tag: str, project_dir: str, as_json: bool) -> None:
         click.echo(json_module.dumps(data))
         return
 
-    click.echo(f"Experiment: {config.name}")
-    click.echo(f"Total: {summary['total']}  Kept: {summary['kept']}  "
-               f"Discarded: {summary['discarded']}  Crashed: {summary['crashed']}")
+    click.echo(_("Experiment: {name}").format(name=config.name))
+    click.echo(_("Total: {total}  Kept: {kept}  Discarded: {discarded}  Crashed: {crashed}").format(**summary))
     if best is not None:
-        click.echo(f"Best {config.metric.name}: {best.metric_value} (commit {best.commit})")
+        click.echo(_("Best {metric}: {value} (commit {commit})").format(
+            metric=config.metric.name, value=best.metric_value, commit=best.commit))
 
     # Cost line
     if total_cost is not None:
         if budget_max:
             pct = total_cost / budget_max * 100
-            click.echo(f"Cost: ${total_cost:.2f} / ${budget_max:.2f} ({pct:.0f}%) — {num_iterations} iterations")
+            click.echo(_("Cost: ${cost:.2f} / ${budget:.2f} ({pct:.0f}%) — {iters} iterations").format(
+                cost=total_cost, budget=budget_max, pct=pct, iters=num_iterations))
         else:
-            click.echo(f"Cost: ${total_cost:.2f} — {num_iterations} iterations")
+            click.echo(_("Cost: ${cost:.2f} — {iters} iterations").format(cost=total_cost, iters=num_iterations))
     else:
-        click.echo("Cost: unknown (agent backend does not report usage)")
+        click.echo(_("Cost: unknown (agent backend does not report usage)"))
 
 
 @main.command()
-@click.option("--project-dir", default=".", help="Project root directory.")
-@click.option("--stability", is_flag=True, help="Check metric stability.")
-@click.option("--runs", default=5, help="Number of runs for stability check.")
+@click.option("--project-dir", default=".", help=_("Project root directory."))
+@click.option("--stability", is_flag=True, help=_("Check metric stability."))
+@click.option("--runs", default=5, help=_("Number of runs for stability check."))
 def validate(project_dir: str, stability: bool, runs: int) -> None:
-    """Validate project configuration and run a test execution."""
+    """Validate project configuration and run a test execution."""  # noqa: fallback
     from crucible.validator import validate_project
 
     project = Path(project_dir).resolve()
@@ -630,29 +634,29 @@ def validate(project_dir: str, stability: bool, runs: int) -> None:
         config = load_config(project)
         result = check_stability(project, config, runs=runs)
         if result.stable:
-            click.echo(f"  [PASS] Metric stability: CV = {result.cv:.1f}% over {runs} runs")
+            click.echo(_("  [PASS] Metric stability: CV = {cv:.1f}% over {runs} runs").format(cv=result.cv, runs=runs))
         else:
-            click.echo(f"  [WARN] Metric stability: CV = {result.cv:.1f}% over {runs} runs")
+            click.echo(_("  [WARN] Metric stability: CV = {cv:.1f}% over {runs} runs").format(cv=result.cv, runs=runs))
             if result.values:
-                click.echo(f"         Values: {result.values}")
-            click.echo("         Consider: fix random seeds or increase sample size")
+                click.echo(_("         Values: {values}").format(values=result.values))
+            click.echo(_("         Consider: fix random seeds or increase sample size"))
 
     if not all_passed:
-        raise click.ClickException("Validation failed.")
+        raise click.ClickException(_("Validation failed."))
 
 
 @main.command()
-@click.option("--tag", required=True, help="Experiment tag.")
-@click.option("--last", default=10, help="Number of recent results to show.")
-@click.option("--project-dir", default=".", help="Project root directory.")
-@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-@click.option("--format", "fmt", type=click.Choice(["table", "jsonl"]), default="table", help="Output format.")
+@click.option("--tag", required=True, help=_("Experiment tag."))
+@click.option("--last", default=10, help=_("Number of recent results to show."))
+@click.option("--project-dir", default=".", help=_("Project root directory."))
+@click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
+@click.option("--format", "fmt", type=click.Choice(["table", "jsonl"]), default="table", help=_("Output format."))
 def history(tag: str, last: int, project_dir: str, as_json: bool, fmt: str) -> None:
-    """Show recent experiment results."""
+    """Show recent experiment results."""  # noqa: fallback
     project = Path(project_dir).resolve()
     results = ResultsLog(project / results_filename(tag))
     if not results.path.exists():
-        raise click.ClickException(f"No {results_filename(tag)} found. Run 'init --tag {tag}' first.")
+        raise click.ClickException(_("No {filename} found. Run 'init --tag {tag}' first.").format(filename=results_filename(tag), tag=tag))
 
     records = results.read_last(last)
 
@@ -671,7 +675,7 @@ def history(tag: str, last: int, project_dir: str, as_json: bool, fmt: str) -> N
         return
 
     if not records:
-        click.echo("No results yet.")
+        click.echo(_("No results yet."))
         return
 
     # Determine available width for description
@@ -682,7 +686,7 @@ def history(tag: str, last: int, project_dir: str, as_json: bool, fmt: str) -> N
     fixed_cols = 10 + 1 + 10 + 1 + 10 + 1  # commit + metric + status + spaces
     desc_width = max(20, term_width - fixed_cols)
 
-    click.echo(f"{'Commit':<10} {'Metric':>10} {'Status':<10} Description")
+    click.echo(f"{_('Commit'):<10} {_('Metric'):>10} {_('Status'):<10} {_('Description')}")
     click.echo("-" * min(term_width, 120))
     for r in records:
         desc = r.description
@@ -693,10 +697,10 @@ def history(tag: str, last: int, project_dir: str, as_json: bool, fmt: str) -> N
 
 @main.command()
 @click.argument("tags", nargs=2)
-@click.option("--project-dir", default=".", help="Project root directory.")
-@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
+@click.option("--project-dir", default=".", help=_("Project root directory."))
+@click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
 def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
-    """Compare two experiment runs side by side."""
+    """Compare two experiment runs side by side."""  # noqa: fallback
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -708,7 +712,7 @@ def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
     for tag in tags:
         results_path = project / results_filename(tag)
         if not results_path.exists():
-            raise click.ClickException(f"No {results_filename(tag)} found for tag '{tag}'.")
+            raise click.ClickException(_("No {filename} found for tag '{tag}'.").format(filename=results_filename(tag), tag=tag))
         results = ResultsLog(results_path)
         records = results.read_all()
         kept = [r for r in records if r.status == "keep"]
@@ -743,22 +747,22 @@ def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
 
 @main.command()
 @click.argument("dest", type=click.Path())
-@click.option("--describe", default=None, help="Experiment description (skip interactive prompt).")
+@click.option("--describe", default=None, help=_("Experiment description (skip interactive prompt)."))
 def wizard(dest: str, describe: str | None) -> None:
-    """Generate a new experiment from a natural language description."""
+    """Generate a new experiment from a natural language description."""  # noqa: fallback
     from crucible.wizard import ExperimentWizard
 
     if describe is not None:
         description = describe
     else:
-        description = click.prompt("What do you want to optimize? Describe your experiment")
+        description = click.prompt(_("What do you want to optimize? Describe your experiment"))
 
-    click.echo("Analyzing your description...")
+    click.echo(_("Analyzing your description..."))
     wiz = ExperimentWizard()
     try:
         result = wiz.analyze(description)
     except Exception as e:
-        raise click.ClickException(f"Analysis failed: {e}")
+        raise click.ClickException(_("Analysis failed: {error}").format(error=e))
 
     inferred = result.get("inferred", {})
     uncertain = result.get("uncertain", [])
@@ -769,23 +773,23 @@ def wizard(dest: str, describe: str | None) -> None:
         click.echo(f"\n{item['question']}")
         for i, choice in enumerate(choices, 1):
             click.echo(f"  {i}. {choice['label']} — {choice['explanation']}")
-        pick = click.prompt("Choose", type=int, default=1)
+        pick = click.prompt(_("Choose"), type=int, default=1)
         idx = max(0, min(pick - 1, len(choices) - 1))
         decisions[item["param"]] = choices[idx]["label"]
 
-    click.echo("Generating experiment...")
+    click.echo(_("Generating experiment..."))
     dest_path = Path(dest).resolve()
     dest_path.mkdir(parents=True, exist_ok=True)
     try:
         summary = wiz.generate(description, decisions, dest_path)
     except Exception as e:
-        raise click.ClickException(f"Generation failed: {e}")
+        raise click.ClickException(_("Generation failed: {error}").format(error=e))
 
     _write_pyproject(dest_path, inferred.get("name", "my-experiment"))
 
-    click.echo(f"\nCreated experiment at {dest_path}")
-    click.echo(f"Summary: {summary}")
-    click.echo("\nNext steps:")
+    click.echo("\n" + _("Created experiment at {dest_path}").format(dest_path=dest_path))
+    click.echo(_("Summary: {summary}").format(summary=summary))
+    click.echo("\n" + _("Next steps:"))
     click.echo(f"  cd {dest_path}")
     click.echo("  uv sync")
     click.echo("  crucible init --tag run1")
@@ -799,7 +803,7 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
     records = ResultsLog(results_path).read_all()
     records = [r for r in records if r.status != "baseline"]
     if not records:
-        click.echo("No iterations to analyze.")
+        click.echo(_("No iterations to analyze."))
         return
 
     # Per-iteration table
@@ -836,9 +840,9 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
         return
 
     # Header
-    click.echo(f"\nToken Profile ({len(records)} iterations)")
+    click.echo("\n" + _("Token Profile ({count} iterations)").format(count=len(records)))
     click.echo("=" * 75)
-    click.echo(f"{'Iter':>5} {'In Tok':>8} {'Out Tok':>8} {'Cache%':>7} {'Agent(s)':>9} {'Run(s)':>7} {'Status':>8}")
+    click.echo(f"{_('Iter'):>5} {_('In Tok'):>8} {_('Out Tok'):>8} {_('Cache%'):>7} {_('Agent(s)'):>9} {_('Run(s)'):>7} {_('Status'):>8}")
     click.echo("-" * 75)
 
     for it, in_tok, out_tok, cache_pct, agent_s, run_s, status in rows:
@@ -859,7 +863,7 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
 
     # Section breakdown
     if section_totals:
-        click.echo(f"\nPrompt Breakdown (avg tokens per section):")
+        click.echo("\n" + _("Prompt Breakdown (avg tokens per section):"))
         total_avg = sum(sum(v) // len(v) for v in section_totals.values())
         sorted_sections = sorted(section_totals.items(), key=lambda x: sum(x[1]) // len(x[1]), reverse=True)
         for name, values in sorted_sections:
@@ -874,19 +878,19 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
         if r.usage and (cp := r.usage.cache_hit_percent()) is not None
     ]
     if cache_vals:
-        click.echo(f"\nCache Efficiency: avg {sum(cache_vals)//len(cache_vals)}% hit rate")
+        click.echo("\n" + _("Cache Efficiency: avg {pct}% hit rate").format(pct=sum(cache_vals)//len(cache_vals)))
 
     click.echo()
 
 
 @main.command()
-@click.option("--tag", required=True, help="Experiment tag to analyze.")
-@click.option("--project-dir", default=".", help="Project root directory.")
-@click.option("--no-ai", is_flag=True, help="Skip AI insights (data only).")
-@click.option("--json", "as_json", is_flag=True, help="Output as JSON.")
-@click.option("--tokens", is_flag=True, help="Show token profiling analysis.")
+@click.option("--tag", required=True, help=_("Experiment tag to analyze."))
+@click.option("--project-dir", default=".", help=_("Project root directory."))
+@click.option("--no-ai", is_flag=True, help=_("Skip AI insights (data only)."))
+@click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
+@click.option("--tokens", is_flag=True, help=_("Show token profiling analysis."))
 def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool, tokens: bool) -> None:
-    """Analyze a completed experiment run."""
+    """Analyze a completed experiment run."""  # noqa: fallback
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -897,20 +901,20 @@ def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool, tokens: b
 
     results_path = project / results_filename(tag)
     if not results_path.exists():
-        raise click.ClickException(f"No {results_filename(tag)} found. Run 'init --tag {tag}' first.")
+        raise click.ClickException(_("No {filename} found. Run 'init --tag {tag}' first.").format(filename=results_filename(tag), tag=tag))
 
     analyzer = PostmortemAnalyzer.from_path(results_path, direction=config.metric.direction)
     report = analyzer.analyze()
 
     if report.total == 0:
-        raise click.ClickException("No iterations recorded for this experiment.")
+        raise click.ClickException(_("No iterations recorded for this experiment."))
 
     if tokens:
         _render_token_profile(results_path, as_json)
         return
 
     if not no_ai:
-        click.echo("Generating AI insights...")
+        click.echo(_("Generating AI insights..."))
         analyzer.add_ai_insights(report)
 
     if as_json:
@@ -951,37 +955,37 @@ def _get_latest_version() -> str | None:
 
 
 @main.command()
-@click.option("--check", is_flag=True, help="Check for updates without installing.")
+@click.option("--check", is_flag=True, help=_("Check for updates without installing."))
 def update(check: bool) -> None:
-    """Update crucible to the latest version."""
+    """Update crucible to the latest version."""  # noqa: fallback
     current = _get_current_version()
 
     latest = _get_latest_version()
     if latest is None:
-        raise click.ClickException("Failed to check PyPI for updates. Check your network connection.")
+        raise click.ClickException(_("Failed to check PyPI for updates. Check your network connection."))
 
     if latest == current:
-        click.echo(f"Already up to date (v{current}).")
+        click.echo(_("Already up to date (v{version}).").format(version=current))
         return
 
     if check:
-        click.echo(f"Update available: v{current} → v{latest}")
-        click.echo("Run 'crucible update' to install.")
+        click.echo(_("Update available: v{current} → v{latest}").format(current=current, latest=latest))
+        click.echo(_("Run 'crucible update' to install."))
         return
 
     # Check that uv is available
     if shutil.which("uv") is None:
         raise click.ClickException(
-            "uv is required for updates. Install it: https://docs.astral.sh/uv/"
+            _("uv is required for updates. Install it: https://docs.astral.sh/uv/")
         )
 
-    click.echo(f"Updating autocrucible... v{current} → v{latest}")
+    click.echo(_("Updating autocrucible... v{current} → v{latest}").format(current=current, latest=latest))
     result = subprocess.run(
         ["uv", "tool", "upgrade", "autocrucible"],
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        raise click.ClickException(f"Update failed: {result.stderr.strip()}")
+        raise click.ClickException(_("Update failed: {error}").format(error=result.stderr.strip()))
 
-    click.echo(f"Updated to v{latest} ✓")
+    click.echo(_("Updated to v{version} ✓").format(version=latest))
