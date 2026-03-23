@@ -105,7 +105,7 @@ def validate_project(project_root: Path) -> List[CheckResult]:
         results.append(CheckResult(_("Run command"), False, _("Exit code {code}").format(code=run_result.exit_code)))
 
     # 5. Eval command parses metric
-    metric_value = runner.parse_metric(config.commands.eval, config.metric.name)
+    metric_value = runner.parse_metric(config.commands.eval, config.metric.name, timeout=validate_timeout)
     if metric_value is not None:
         results.append(CheckResult(_("Eval/metric"), True, f"{config.metric.name}: {metric_value}"))
     else:

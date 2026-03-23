@@ -40,6 +40,21 @@ def test_parse_metric_missing(tmp_path):
     assert value is None
 
 
+def test_parse_metric_custom_timeout(tmp_path):
+    """parse_metric respects the timeout parameter."""
+    runner = ExperimentRunner(workspace=tmp_path)
+    # Command that takes longer than default 30s timeout but within custom timeout
+    value = runner.parse_metric("echo 'score: 42.5'", "score", timeout=5)
+    assert value == pytest.approx(42.5)
+
+
+def test_parse_metric_timeout_exceeded(tmp_path):
+    """parse_metric returns None when command exceeds timeout."""
+    runner = ExperimentRunner(workspace=tmp_path)
+    value = runner.parse_metric("sleep 10 && echo 'score: 42.5'", "score", timeout=1)
+    assert value is None
+
+
 def test_stderr_tail(tmp_path):
     runner = ExperimentRunner(workspace=tmp_path)
     result = runner.execute("python3 -c 'raise ValueError(\"boom\")'", timeout=10)

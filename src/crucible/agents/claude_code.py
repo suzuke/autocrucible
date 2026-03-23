@@ -191,14 +191,26 @@ class ClaudeCodeAgent(AgentInterface):
         self.language = language
 
     def get_system_prompt(self, workspace: Path) -> str:
-        """Return system prompt: custom file content or default."""
+        """Return system prompt: custom file content or default.
+
+        system_prompt_file can be either:
+        - A filename (e.g. "system_prompt.md") — read from .crucible/
+        - Inline prompt text (contains newlines or doesn't look like a filename)
+        """
         if self.system_prompt_file:
-            prompt_path = workspace / ".crucible" / self.system_prompt_file
-            if prompt_path.exists():
-                prompt = prompt_path.read_text().strip()
-                if self.language:
-                    prompt += f"\n\nWrite ALL your summaries and descriptions in {self.language}."
-                return prompt
+            # Detect inline content: contains newline or is longer than a reasonable filename
+            if "\n" in self.system_prompt_file or len(self.system_prompt_file) > 200:
+                prompt = self.system_prompt_file.strip()
+            else:
+                prompt_path = workspace / ".crucible" / self.system_prompt_file
+                if prompt_path.exists():
+                    prompt = prompt_path.read_text().strip()
+                else:
+                    # Treat as inline content if file not found
+                    prompt = self.system_prompt_file.strip()
+            if self.language:
+                prompt += f"\n\nWrite ALL your summaries and descriptions in {self.language}."
+            return prompt
         prompt = SYSTEM_PROMPT
         if self.language:
             prompt += f"\n\nWrite ALL your summaries and descriptions in {self.language}."
@@ -214,6 +226,7 @@ class ClaudeCodeAgent(AgentInterface):
         except KeyboardInterrupt:
             raise
         except Exception as e:
+            logger.error("[agent] error: %s", e)
             return AgentResult(modified_files=[], description=f"agent error: {e}", error_type=_classify_error(str(e)))
 
     async def _generate_edit_async(self, prompt: str, workspace: Path) -> AgentResult:

@@ -101,7 +101,7 @@ class ExperimentRunner:
         """Execute experiment repeat times, return aggregated metric."""
         return run_with_repeat(self, run_cmd, eval_cmd, metric_name, repeat, aggregation, timeout)
 
-    def parse_metric(self, eval_command: str, metric_name: str) -> Optional[float]:
+    def parse_metric(self, eval_command: str, metric_name: str, timeout: int = 30) -> Optional[float]:
         """Run an eval command and parse a named metric from its output.
 
         Looks for lines matching ``<metric_name>: <value>`` and returns the
@@ -115,7 +115,7 @@ class ExperimentRunner:
                 env=self._make_env(),
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
             )
             pattern = re.compile(rf"^{re.escape(metric_name)}:\s*(.+)$", re.MULTILINE)
             match = pattern.search(proc.stdout)

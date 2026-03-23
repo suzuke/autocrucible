@@ -95,6 +95,21 @@ def test_language_appended_to_system_prompt(tmp_path):
     assert "ja" in prompt
 
 
+def test_inline_system_prompt(tmp_path):
+    """system_prompt_file with multiline content is treated as inline prompt."""
+    inline = "You are a custom agent.\nFocus on optimization."
+    agent = ClaudeCodeAgent(system_prompt_file=inline)
+    prompt = agent.get_system_prompt(tmp_path)
+    assert prompt == inline
+
+
+def test_inline_system_prompt_fallback(tmp_path):
+    """system_prompt_file with non-existent filename is treated as inline."""
+    agent = ClaudeCodeAgent(system_prompt_file="nonexistent.md")
+    prompt = agent.get_system_prompt(tmp_path)
+    assert prompt == "nonexistent.md"
+
+
 def test_claude_code_agent_error_handling(tmp_path):
     """Test that agent errors are handled gracefully."""
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)

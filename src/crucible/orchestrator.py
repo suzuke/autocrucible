@@ -240,6 +240,7 @@ class Orchestrator:
                 metric_value = self.runner.parse_metric(
                     self.config.commands.eval,
                     self.config.metric.name,
+                    timeout=self.config.constraints.timeout_seconds,
                 )
         run_duration = time.monotonic() - t0_run
 
