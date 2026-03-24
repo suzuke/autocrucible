@@ -13,9 +13,9 @@ This is a demo-friendly version of the full Parameter Golf challenge, designed t
 | Training script | `train_gpt.py` (CUDA) | `train_gpt_mlx.py` (MLX) |
 | Training data | 8B tokens (80 shards) | 1M tokens (1 mini shard) |
 | Validation set | 62M tokens | 500K tokens |
-| Training time | 10 min on 8×H100 | 30s on Apple Silicon |
+| Training time | 10 min on 8×H100 | 60s on Apple Silicon |
 | Validation time | ~30s on H100 | ~3s on Apple Silicon |
-| Per iteration | ~12 min | **~2 min** |
+| Per iteration | ~12 min | **~2.5 min** |
 | Model | Same architecture | Same architecture |
 | Metric | val_bpb (FineWeb) | val_bpb (FineWeb subset) |
 
@@ -33,15 +33,15 @@ crucible run --tag v1
 ## What Happens
 
 - Agent modifies `train_gpt_mlx.py` (architecture, hyperparameters, training strategy)
-- Each iteration: ~30s training + ~3s validation = **~35s eval time**
+- Each iteration: ~60s training + ~3s validation = **~65s eval time**
 - Baseline BPB: ~3.19 (mini dataset)
-- Expected improvement: 3.19 → ~2.0 in ~10 iterations
+- Expected improvement: 3.19 → ~2.5 in ~10 iterations
 
 ## Demo Metrics
 
 | Iteration | Time | What to Expect |
 |-----------|------|---------------|
-| ~2 min | 1 | First improvement (MLP expansion) |
-| ~5 min | 3 | Architecture tuning |
-| ~15 min | 8 | Hyperparameter refinement |
-| ~20 min | 10 | Plateau / convergence |
+| ~2.5 min | 1 | First improvement (MLP expansion) |
+| ~8 min | 3 | Architecture tuning |
+| ~20 min | 8 | Hyperparameter refinement |
+| ~25 min | 10 | Plateau / convergence |
