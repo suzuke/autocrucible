@@ -1,54 +1,53 @@
 #!/bin/bash
 # Setup script for parameter-golf demo
-# Downloads training script + creates mini dataset
+# Downloads training script + creates mini dataset for fast iteration
 set -e
 
 echo "=== Installing dependencies ==="
 pip install mlx numpy sentencepiece huggingface-hub datasets tqdm 2>/dev/null
 
-echo "=== Downloading training script ==="
+echo "=== Downloading training script and data downloader ==="
 if [ ! -f train_gpt_mlx.py ]; then
     curl -sL https://raw.githubusercontent.com/openai/parameter-golf/main/train_gpt_mlx.py -o train_gpt_mlx.py
+    echo "Downloaded train_gpt_mlx.py"
+fi
+mkdir -p data
+if [ ! -f data/cached_challenge_fineweb.py ]; then
+    curl -sL https://raw.githubusercontent.com/openai/parameter-golf/main/data/cached_challenge_fineweb.py -o data/cached_challenge_fineweb.py
+    echo "Downloaded data downloader"
 fi
 
-echo "=== Downloading data ==="
+echo "=== Downloading FineWeb data (1 shard) ==="
+if [ ! -d data/datasets/fineweb10B_sp1024 ]; then
+    python3 data/cached_challenge_fineweb.py --variant sp1024 --train-shards 1
+fi
+
+echo "=== Creating mini dataset ==="
 if [ ! -d data/datasets/fineweb_mini_sp1024 ]; then
-    # Download full data first, then create mini version
-    mkdir -p data/tokenizers data/datasets/fineweb_mini_sp1024
-
-    # Download tokenizer
-    if [ ! -f data/tokenizers/fineweb_1024_bpe.model ]; then
-        python3 -c "
-from huggingface_hub import hf_hub_download
-import shutil
-path = hf_hub_download('openai-community/parameter-golf-fineweb', 'tokenizers/fineweb_1024_bpe.model')
-shutil.copy(path, 'data/tokenizers/fineweb_1024_bpe.model')
-print('Tokenizer downloaded')
-"
-    fi
-
-    # Download 1 shard and create mini version
     python3 -c "
-from huggingface_hub import hf_hub_download
-import shutil, numpy as np, os
+import numpy as np, os
 
-for split, fname in [('train', 'fineweb_train_000000.bin'), ('val', 'fineweb_val_000000.bin')]:
-    print(f'Downloading {fname}...')
-    path = hf_hub_download('openai-community/parameter-golf-fineweb', f'sp1024/{fname}')
-    # Create mini version
-    header = np.fromfile(path, dtype='<i4', count=256)
-    header_bytes = 256 * 4
-    max_tok = 1000000 if 'train' in fname else 500000
-    n = min(max_tok, int(header[2]))
+def make_mini_shard(src, dst, max_tokens):
+    header = np.fromfile(src, dtype='<i4', count=256)
+    n = min(max_tokens, int(header[2]))
     n = (n // 1024) * 1024
-    tokens = np.fromfile(path, dtype='<u2', count=n, offset=header_bytes)
+    tokens = np.fromfile(src, dtype='<u2', count=n, offset=256*4)
     header[2] = n
-    dst = f'data/datasets/fineweb_mini_sp1024/{fname}'
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
     with open(dst, 'wb') as f:
         f.write(header.tobytes())
         f.write(tokens.tobytes())
     print(f'  {dst}: {n:,} tokens')
 
+print('Creating mini shards...')
+make_mini_shard(
+    'data/datasets/fineweb10B_sp1024/fineweb_train_000000.bin',
+    'data/datasets/fineweb_mini_sp1024/fineweb_train_000000.bin',
+    1_000_000)
+make_mini_shard(
+    'data/datasets/fineweb10B_sp1024/fineweb_val_000000.bin',
+    'data/datasets/fineweb_mini_sp1024/fineweb_val_000000.bin',
+    500_000)
 print('Mini dataset ready')
 "
 fi
