@@ -1,0 +1,13 @@
+data/
+logs/
+*.npz
+*.ptz
+*.pt
+__pycache__/
+.venv
+run.log
+results-*.tsv
+results-*.jsonl
+.crucible/.validated
+.crucible_metric.txt
+train_gpt_mlx.py

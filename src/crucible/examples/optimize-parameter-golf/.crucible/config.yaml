@@ -1,0 +1,29 @@
+name: optimize-parameter-golf
+
+metric:
+  name: val_bpb
+  direction: minimize
+
+commands:
+  run: "bash evaluate.sh"
+  eval: "cat .crucible_metric.txt"
+
+evaluation:
+  repeat: 1
+
+files:
+  editable:
+    - train_gpt_mlx.py
+  readonly:
+    - data/
+    - .crucible/
+    - evaluate.sh
+    - setup.sh
+
+constraints:
+  timeout_seconds: 300
+  max_retries: 5
+  max_iterations: 15
+
+agent:
+  system_prompt: system_prompt.md
