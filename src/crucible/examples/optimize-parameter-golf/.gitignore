@@ -10,4 +10,3 @@ results-*.tsv
 results-*.jsonl
 .crucible/.validated
 .crucible_metric.txt
-train_gpt_mlx.py

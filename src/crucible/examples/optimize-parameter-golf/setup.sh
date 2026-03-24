@@ -53,6 +53,10 @@ print('Mini dataset ready')
 fi
 
 chmod +x evaluate.sh
+
+echo "=== Adding train script to git ==="
+git add train_gpt_mlx.py 2>/dev/null && git commit -m "add train_gpt_mlx.py" 2>/dev/null || true
+
 echo ""
 echo "=== Setup complete ==="
 echo "Run: crucible run --tag demo-v1"
