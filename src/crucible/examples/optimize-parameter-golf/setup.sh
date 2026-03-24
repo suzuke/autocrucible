@@ -54,8 +54,12 @@ fi
 
 chmod +x evaluate.sh
 
-echo "=== Adding train script to git ==="
-git add train_gpt_mlx.py 2>/dev/null && git commit -m "add train_gpt_mlx.py" 2>/dev/null || true
+echo "=== Initializing git ==="
+if [ ! -d .git ]; then
+    git init && git add -A && git commit -m "initial setup"
+else
+    git add train_gpt_mlx.py && git commit -m "add train_gpt_mlx.py" 2>/dev/null || true
+fi
 
 echo ""
 echo "=== Setup complete ==="
