@@ -206,8 +206,11 @@ class ClaudeCodeAgent(AgentInterface):
                 if prompt_path.exists():
                     prompt = prompt_path.read_text().strip()
                 else:
-                    # Treat as inline content if file not found
-                    prompt = self.system_prompt_file.strip()
+                    logger.warning(
+                        "system_prompt file not found: %s — using default prompt",
+                        prompt_path,
+                    )
+                    prompt = SYSTEM_PROMPT
             if self.language:
                 prompt += f"\n\nWrite ALL your summaries and descriptions in {self.language}."
             return prompt

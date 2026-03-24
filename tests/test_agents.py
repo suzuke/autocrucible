@@ -103,11 +103,12 @@ def test_inline_system_prompt(tmp_path):
     assert prompt == inline
 
 
-def test_inline_system_prompt_fallback(tmp_path):
-    """system_prompt_file with non-existent filename is treated as inline."""
+def test_missing_prompt_file_falls_back_to_default(tmp_path):
+    """system_prompt_file with non-existent filename falls back to default SYSTEM_PROMPT."""
+    from crucible.agents.claude_code import SYSTEM_PROMPT
     agent = ClaudeCodeAgent(system_prompt_file="nonexistent.md")
     prompt = agent.get_system_prompt(tmp_path)
-    assert prompt == "nonexistent.md"
+    assert prompt == SYSTEM_PROMPT
 
 
 def test_claude_code_agent_error_handling(tmp_path):
