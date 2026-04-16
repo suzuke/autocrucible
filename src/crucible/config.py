@@ -21,6 +21,12 @@ class ContextWindowConfig:
 
 
 @dataclass
+class CriticConfig:
+    enabled: bool = False
+    model: str = "haiku"
+
+
+@dataclass
 class AgentConfig:
     type: str = "claude-code"
     instructions: Optional[str] = None
@@ -28,6 +34,8 @@ class AgentConfig:
     model: str | None = None
     language: str | None = None
     base_url: str | None = None
+    failure_analysis: bool = False
+    critic: CriticConfig = field(default_factory=CriticConfig)
     context_window: ContextWindowConfig = field(default_factory=ContextWindowConfig)
 
 
@@ -134,6 +142,15 @@ def _build_budget(data: dict | None) -> BudgetConfig | None:
     )
 
 
+def _build_critic(data: dict | None) -> CriticConfig:
+    if not data:
+        return CriticConfig()
+    return CriticConfig(
+        enabled=data.get("enabled", False),
+        model=data.get("model", "haiku"),
+    )
+
+
 def _build_agent(data: dict) -> AgentConfig:
     if not data:
         return AgentConfig()
@@ -144,6 +161,8 @@ def _build_agent(data: dict) -> AgentConfig:
         model=data.get("model"),
         base_url=data.get("base_url"),
         language=data.get("language"),
+        failure_analysis=data.get("failure_analysis", False),
+        critic=_build_critic(data.get("critic")),
         context_window=_build_context_window(data.get("context_window", {})),
     )
 

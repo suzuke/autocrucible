@@ -107,6 +107,10 @@ class Orchestrator:
         self._beams: list[BeamState] = []
         self._current_beam_idx: int = 0
         self._profile = profile
+        self._critic = None
+        if config.agent.critic.enabled:
+            from crucible.agents.critic import CriticAgent
+            self._critic = CriticAgent(model=config.agent.critic.model)
 
         # M3: Warn if convergence_window <= plateau_threshold in restart mode
         cw = config.constraints.convergence_window
@@ -165,6 +169,17 @@ class Orchestrator:
         "skip", "budget_exceeded", or "fatal".
         """
         self._iteration += 1
+
+        # 0. Run critic analysis (Plan B) if enabled
+        if self._critic and self._iteration > 1:
+            records = self.results.read_all()
+            agent_log = self._read_last_agent_log()
+            critic_notes = self._critic.analyze(
+                records, self.workspace, self._iteration, agent_log,
+            )
+            if critic_notes:
+                logger.info("[critic] %s", critic_notes.split("\n")[0])
+                self.context.set_critic_notes(critic_notes)
 
         # 1. Assemble prompt (inline files for agents without read capability)
         if "read" not in self.agent.capabilities():
@@ -356,6 +371,16 @@ class Orchestrator:
             log_dir=f"logs/iter-{self._iteration}",
             beam_id=self._current_beam_id,
         )
+
+    def _read_last_agent_log(self) -> str | None:
+        """Read the previous iteration's agent reasoning log."""
+        prev = self._iteration - 1
+        if prev < 1:
+            return None
+        log_path = self.workspace / "logs" / f"iter-{prev}" / "agent.txt"
+        if log_path.exists():
+            return log_path.read_text()
+        return None
 
     def _save_iteration_logs(self, iteration: int, agent_result) -> None:
         """Save agent output and run.log to logs/iter-{N}/."""

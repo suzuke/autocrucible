@@ -126,12 +126,17 @@ class ContextAssembler:
         self._errors: List[str] = []
         self._crash_info: List[str] = []
         self._last_crash_info: List[str] = []
+        self._critic_notes: str | None = None
         self._prompt_breakdown: dict[str, int] | None = None
 
     @property
     def prompt_breakdown(self) -> dict[str, int] | None:
         """Token breakdown by section from last assemble() call, if profiling was enabled."""
         return self._prompt_breakdown
+
+    def set_critic_notes(self, notes: str) -> None:
+        """Set critic analysis notes for the next assembled prompt."""
+        self._critic_notes = notes
 
     def add_error(self, message: str) -> None:
         """Queue an error message for the next assembled prompt."""
@@ -321,6 +326,16 @@ class ContextAssembler:
             )
         return "\n".join(parts) if parts else ""
 
+    def _section_critic(self) -> str:
+        """Render critic agent analysis if available."""
+        if not self._critic_notes:
+            return ""
+        return (
+            "## Critic Analysis (from independent reviewer)\n\n"
+            f"{self._critic_notes}\n\n"
+            "Consider this analysis but use your own judgment."
+        )
+
     def _section_directive(self) -> str:
         """Section 4: Action directive with mandatory workflow."""
         editable = ", ".join(self.config.files.editable)
@@ -336,6 +351,16 @@ class ContextAssembler:
         )
         if self.config.constraints.allow_install:
             rules += "\n- To use a new package: add it to requirements.txt AND import it in your code"
+        explain_step = (
+            "4. **EXPLAIN** — One short line (<120 chars, no markdown): what you changed and why."
+        )
+        if self.config.agent.failure_analysis:
+            explain_step = (
+                "4. **EXPLAIN** — Output in this exact format:\n"
+                "HYPOTHESIS: <why you think this change will improve the metric>\n"
+                "CHANGE: <one line summary of what you changed>\n"
+                "RISK: <what could go wrong>"
+            )
         return (
             "## Your Task\n\n"
             "**Workflow (STRICT ORDER):**\n\n"
@@ -345,7 +370,7 @@ class ContextAssembler:
             "✓ means push further, ✗/💥 means NEVER retry that direction.\n"
             "3. **EDIT** — Make ONE bold, high-impact change to: " + editable + ". "
             "Ensure syntactic correctness and preserve the interface.\n"
-            "4. **EXPLAIN** — One short line (<120 chars, no markdown): what you changed and why.\n\n"
+            + explain_step + "\n\n"
             + rules
         )
 
@@ -429,6 +454,7 @@ class ContextAssembler:
             "cross_beam_history": self._section_cross_beam_history(beam_summaries),
             "history": self._section_history(real_records),
             "plateau_hint": plateau or "",
+            "critic": self._section_critic(),
             "errors": self._section_errors(),
             "directive": self._section_directive(),
         }
@@ -450,5 +476,6 @@ class ContextAssembler:
         # Clear transient context after assembly
         self._errors.clear()
         self._crash_info.clear()
+        self._critic_notes = None
 
         return PREAMBLE + "\n---\n\n" + prompt
