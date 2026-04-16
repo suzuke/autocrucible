@@ -67,6 +67,8 @@ class ConstraintsConfig:
     plateau_threshold: int = 8
     allow_install: bool = False
     max_iterations: int | None = None
+    convergence_window: int | None = None  # stop after N iters with no improvement
+    min_improvement: float | None = None   # relative threshold (0.001 = 0.1%)
 
 
 @dataclass
@@ -256,6 +258,8 @@ def load_config(project_root: Path) -> Config:
             plateau_threshold=constraints_data.get("plateau_threshold", 8),
             allow_install=constraints_data.get("allow_install", False),
             max_iterations=constraints_data.get("max_iterations"),
+            convergence_window=constraints_data.get("convergence_window"),
+            min_improvement=constraints_data.get("min_improvement"),
         ),
         agent=_build_agent(raw.get("agent", {})),
         git=GitConfig(

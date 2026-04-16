@@ -108,6 +108,18 @@ class Orchestrator:
         self._current_beam_idx: int = 0
         self._profile = profile
 
+        # M3: Warn if convergence_window <= plateau_threshold in restart mode
+        cw = config.constraints.convergence_window
+        pt = config.search.plateau_threshold
+        if (cw is not None
+                and config.search.strategy == "restart"
+                and cw <= pt):
+            logger.warning(
+                "convergence_window (%d) <= plateau_threshold (%d): "
+                "experiment will stop before restart can take effect",
+                cw, pt,
+            )
+
     def init(self, fork_from: tuple[str, float, str] | None = None) -> None:
         """Create the experiment branch and initialise results-{tag}.tsv.
 
@@ -391,15 +403,41 @@ class Orchestrator:
                     pass
         return {"insertions": insertions, "deletions": deletions}
 
-    def _count_plateau_streak(self) -> int:
+    def _count_plateau_streak(self, results: ResultsLog | None = None) -> int:
         """Count consecutive non-keep records from the end of results."""
-        records = self.results.read_all()
+        records = (results or self.results).read_all()
         streak = 0
         for r in reversed(records):
             if r.status == "keep":
                 break
             streak += 1
         return streak
+
+    def _check_convergence(self, results: ResultsLog | None = None) -> bool:
+        """Check if the experiment has converged (no meaningful improvement)."""
+        window = self.config.constraints.convergence_window
+        if window is None:
+            return False
+        results = results or self.results
+        records = [r for r in results.read_all() if r.status != "baseline"]
+        if len(records) < window:
+            return False
+
+        # Path 1: no keeps at all in the last N iterations
+        if self._count_plateau_streak(results) >= window:
+            return True
+
+        # Path 2: recent keeps are all negligible improvements
+        min_imp = self.config.constraints.min_improvement
+        if min_imp is not None:
+            kept_in_window = [r for r in records[-window:] if r.status == "keep"]
+            measurable = [r for r in kept_in_window if r.delta_percent is not None]
+            if measurable and all(
+                abs(r.delta_percent) < min_imp * 100 for r in measurable
+            ):
+                return True
+
+        return False
 
     def init_beams(self) -> None:
         """Initialize beam branches and per-beam state. Call after init()."""
@@ -492,6 +530,13 @@ class Orchestrator:
                     logger.warning(f"[iter {self._iteration}] " + _("{n} consecutive skips, stopping.").format(n=max_retries))
                     break
 
+                if self._check_convergence():
+                    logger.info(
+                        f"[iter {self._iteration}] Converged — no meaningful improvement "
+                        f"for {self.config.constraints.convergence_window} iterations, stopping."
+                    )
+                    break
+
                 # Restart strategy: reset to baseline on plateau
                 if strategy == "restart" and self._baseline_commit:
                     streak = self._count_plateau_streak()
@@ -551,6 +596,11 @@ class Orchestrator:
                     logger.info(_("All beams exhausted consecutive failures — stopping."))
                     break
 
+                # All beams converged?
+                if self._beams and all(self._check_convergence(b.results) for b in self._beams):
+                    logger.info(_("All beams converged — stopping."))
+                    break
+
                 # Pick next beam (round-robin, skip exhausted beams)
                 if not self._beams:
                     logger.warning(_("No beams initialized — falling back to serial loop."))
@@ -559,7 +609,11 @@ class Orchestrator:
 
                 beam = self._beams[self._current_beam_idx % len(self._beams)]
                 self._current_beam_idx += 1
+                # TODO: cross-beam early stop — skip beam if its best trails
+                # global best by a large margin and it has plateaued
                 if beam.consecutive_failures >= max_retries:
+                    continue
+                if self._check_convergence(beam.results):
                     continue
 
                 # Checkout beam branch

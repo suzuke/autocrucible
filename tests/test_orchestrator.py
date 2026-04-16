@@ -657,3 +657,149 @@ def test_resume_after_fatal_works(tmp_path):
     orch.resume()
     assert orch._consecutive_failures == 0
     assert orch._consecutive_skips == 0
+
+
+# --- Convergence detection tests ---
+
+
+def _make_convergence_config(**overrides):
+    """Config with convergence_window enabled."""
+    constraints = dict(
+        timeout_seconds=60, max_retries=20,
+        convergence_window=3,
+    )
+    constraints.update(overrides)
+    return Config(
+        name="test",
+        files=FilesConfig(editable=["train.py"], readonly=["prepare.py"]),
+        commands=CommandsConfig(run="python train.py > run.log 2>&1", eval="grep '^loss:' run.log"),
+        metric=MetricConfig(name="loss", direction="minimize"),
+        constraints=ConstraintsConfig(**constraints),
+        agent=AgentConfig(context_window=ContextWindowConfig()),
+        git=GitConfig(),
+    )
+
+
+def test_convergence_stops_on_plateau(tmp_path):
+    """Loop stops after convergence_window consecutive non-keep iterations."""
+    setup_repo(tmp_path)
+    cfg = _make_convergence_config(convergence_window=3)
+    mock_agent = MagicMock()
+    mock_agent.capabilities.return_value = {"read", "edit", "write", "glob", "grep"}
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    call_count = 0
+    def modify_file(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        (tmp_path / "train.py").write_text(f"x = {call_count + 100}")
+        return AgentResult(modified_files=[Path("train.py")], description=f"attempt {call_count}")
+    mock_agent.generate_edit.side_effect = modify_file
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        # First iteration: keep (0.5), then 3 discards (all worse: 0.6, 0.7, 0.8)
+        mock_parse.side_effect = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        orch._run_loop_serial(max_iterations=10)
+
+    # Should have run 4 iterations: 1 keep + 3 discards (convergence_window=3)
+    assert call_count == 4
+
+
+def test_convergence_disabled_by_default(tmp_path):
+    """Without convergence_window, loop runs to max_iterations."""
+    setup_repo(tmp_path)
+    cfg = make_config()  # no convergence_window
+    cfg.constraints.max_retries = 20  # don't stop from retries
+    mock_agent = MagicMock()
+    mock_agent.capabilities.return_value = {"read", "edit", "write", "glob", "grep"}
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    call_count = 0
+    def modify_file(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        (tmp_path / "train.py").write_text(f"x = {call_count + 100}")
+        return AgentResult(modified_files=[Path("train.py")], description=f"attempt {call_count}")
+    mock_agent.generate_edit.side_effect = modify_file
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        # First keep, then all discards — but no convergence stop
+        mock_parse.side_effect = [0.5] + [0.6] * 5
+        orch._run_loop_serial(max_iterations=6)
+
+    assert call_count == 6
+
+
+def test_convergence_min_improvement(tmp_path):
+    """min_improvement triggers convergence when keeps are negligible."""
+    setup_repo(tmp_path)
+    cfg = _make_convergence_config(convergence_window=4, min_improvement=0.01)
+    mock_agent = MagicMock()
+    mock_agent.capabilities.return_value = {"read", "edit", "write", "glob", "grep"}
+
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    call_count = 0
+    def modify_file(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        (tmp_path / "train.py").write_text(f"x = {call_count + 100}")
+        return AgentResult(modified_files=[Path("train.py")], description=f"attempt {call_count}")
+    mock_agent.generate_edit.side_effect = modify_file
+
+    with patch.object(orch.runner, "execute") as mock_exec, \
+         patch.object(orch.runner, "parse_metric") as mock_parse:
+        mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
+        # Tiny improvements: 0.500 → 0.4999 → 0.4998 → 0.4997 → 0.4996
+        # delta_percent < 1% each time, within min_improvement=0.01
+        mock_parse.side_effect = [0.500, 0.4999, 0.4998, 0.4997, 0.4996, 0.4995]
+        orch._run_loop_serial(max_iterations=10)
+
+    # All keeps but negligible — converges after window=4 iterations
+    # (first keep has delta_percent=None, skipped; iters 2-4 are measurable and negligible)
+    assert call_count == 4
+
+
+def test_check_convergence_method(tmp_path):
+    """Direct test of _check_convergence logic."""
+    setup_repo(tmp_path)
+    cfg = _make_convergence_config(convergence_window=3)
+    mock_agent = MagicMock()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+    orch.init()
+
+    # No records — not converged
+    assert orch._check_convergence() is False
+
+    # Add records: 1 keep + 2 discards (< window)
+    orch.results.log(ExperimentRecord(commit="a", metric_value=0.5, status="keep", description="first"))
+    orch.results.log(ExperimentRecord(commit="b", metric_value=0.6, status="discard", description="worse"))
+    orch.results.log(ExperimentRecord(commit="c", metric_value=0.7, status="discard", description="worse"))
+    assert orch._check_convergence() is False  # only 2 streak, need 3
+
+    # Add one more discard — now streak=3
+    orch.results.log(ExperimentRecord(commit="d", metric_value=0.8, status="discard", description="worse"))
+    assert orch._check_convergence() is True
+
+
+def test_convergence_restart_warning(tmp_path, caplog):
+    """Warn when convergence_window <= plateau_threshold in restart mode."""
+    setup_repo(tmp_path)
+    cfg = _make_convergence_config(convergence_window=5)
+    cfg.search = SearchConfig(strategy="restart", plateau_threshold=8)
+    mock_agent = MagicMock()
+
+    import logging
+    with caplog.at_level(logging.WARNING):
+        Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
+
+    assert "convergence_window (5) <= plateau_threshold (8)" in caplog.text

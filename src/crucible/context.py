@@ -196,6 +196,20 @@ class ContextAssembler:
         if summary["total"] > 0 and summary["kept"] == 0:
             lines.append("⚠ No improvements yet — try a fundamentally different approach")
 
+        # Convergence warning: let agent know auto-stop is approaching
+        cw = self.config.constraints.convergence_window
+        if cw is not None and summary["total"] >= cw // 2:
+            streak = 0
+            for r in reversed(records):
+                if r.status == "keep":
+                    break
+                streak += 1
+            if streak >= cw * 3 // 4:
+                lines.append(
+                    f"⚠️ Convergence warning: {streak}/{cw} iterations without improvement. "
+                    "Make a breakthrough or experiment will auto-stop."
+                )
+
         editable = ", ".join(self.config.files.editable)
         lines.append(f"Editable files: {editable}")
 
