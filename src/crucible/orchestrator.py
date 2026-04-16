@@ -405,13 +405,7 @@ class Orchestrator:
 
     def _count_plateau_streak(self, results: ResultsLog | None = None) -> int:
         """Count consecutive non-keep records from the end of results."""
-        records = (results or self.results).read_all()
-        streak = 0
-        for r in reversed(records):
-            if r.status == "keep":
-                break
-            streak += 1
-        return streak
+        return ResultsLog.plateau_streak((results or self.results).read_all())
 
     def _check_convergence(self, results: ResultsLog | None = None) -> bool:
         """Check if the experiment has converged (no meaningful improvement)."""
@@ -591,14 +585,16 @@ class Orchestrator:
                 if max_iterations is not None and session_count >= max_iterations:
                     break
 
-                # All beams exhausted?
-                if self._beams and all(b.consecutive_failures >= max_retries for b in self._beams):
-                    logger.info(_("All beams exhausted consecutive failures — stopping."))
-                    break
-
-                # All beams converged?
-                if self._beams and all(self._check_convergence(b.results) for b in self._beams):
-                    logger.info(_("All beams converged — stopping."))
+                # All beams stopped (exhausted or converged)?
+                if self._beams and all(
+                    b.consecutive_failures >= max_retries
+                    or self._check_convergence(b.results)
+                    for b in self._beams
+                ):
+                    for b in self._beams:
+                        reason = "converged" if self._check_convergence(b.results) else "exhausted"
+                        logger.info(f"beam-{b.beam_id}: {reason}")
+                    logger.info(_("All beams stopped — stopping."))
                     break
 
                 # Pick next beam (round-robin, skip exhausted beams)

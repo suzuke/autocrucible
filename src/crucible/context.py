@@ -199,11 +199,7 @@ class ContextAssembler:
         # Convergence warning: let agent know auto-stop is approaching
         cw = self.config.constraints.convergence_window
         if cw is not None and summary["total"] >= cw // 2:
-            streak = 0
-            for r in reversed(records):
-                if r.status == "keep":
-                    break
-                streak += 1
+            streak = ResultsLog.plateau_streak(records)
             if streak >= cw * 3 // 4:
                 lines.append(
                     f"⚠️ Convergence warning: {streak}/{cw} iterations without improvement. "

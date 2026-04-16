@@ -210,6 +210,16 @@ class ResultsLog:
                     return _parse_tsv(content)
         return []
 
+    @staticmethod
+    def plateau_streak(records: list[ExperimentRecord]) -> int:
+        """Count consecutive non-keep records from the end."""
+        streak = 0
+        for r in reversed(records):
+            if r.status == "keep":
+                break
+            streak += 1
+        return streak
+
     def summary(self) -> dict[str, int]:
         """Return counts by status category (excludes baseline)."""
         records = [r for r in self.read_all() if r.status != "baseline"]
