@@ -19,6 +19,7 @@ class RunResult:
     exit_code: int
     timed_out: bool
     stderr_tail: str = ""
+    stdout: str = ""  # M1b: captured for SandboxRunner.parse_metric (Docker mode)
 
 
 class ExperimentRunner:

@@ -56,12 +56,29 @@ class SandboxRunner:
             return self._docker_run(command, timeout)
         return self._native.execute(command, timeout)
 
-    def parse_metric(self, eval_command: str, metric_name: str):
-        """Parse metric -- always runs natively (reads run.log from host).
+    def parse_metric(self, eval_command: str, metric_name: str, timeout: int = 30):
+        """Parse metric from eval command output.
 
-        Note: eval command runs on host, not in Docker container.
+        M1b: when backend=="docker", the eval command now runs INSIDE the
+        same isolation as run_cmd (closing the trust break flagged by the
+        v3.2 spec review at sandbox.py:59-64). The host process parses
+        the captured stdout, so the platform — not the agent — owns
+        metric extraction. For backend=="none", behavior is unchanged.
+
+        Returns the float metric value, or None if no match.
         """
-        return self._native.parse_metric(eval_command, metric_name)
+        if self.config.backend == "docker":
+            run_result = self._docker_run(eval_command, timeout)
+            import re
+            pattern = re.compile(rf"^{re.escape(metric_name)}:\s*(.+)$", re.MULTILINE)
+            match = pattern.search(run_result.stdout)
+            if match:
+                try:
+                    return float(match.group(1).strip())
+                except ValueError:
+                    return None
+            return None
+        return self._native.parse_metric(eval_command, metric_name, timeout)
 
     def execute_with_repeat(
         self,
@@ -135,6 +152,7 @@ class SandboxRunner:
                 exit_code=proc.returncode,
                 timed_out=False,
                 stderr_tail="\n".join(stderr.splitlines()[-50:]),
+                stdout=stdout,
             )
         except subprocess.TimeoutExpired:
             proc.terminate()
@@ -147,6 +165,7 @@ class SandboxRunner:
                 exit_code=-1,
                 timed_out=True,
                 stderr_tail="\n".join(stderr.splitlines()[-50:]),
+                stdout="",
             )
 
     def _ensure_image(self) -> str:
