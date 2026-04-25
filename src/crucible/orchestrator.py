@@ -22,6 +22,11 @@ from crucible.i18n import _
 from crucible.context import ContextAssembler
 from crucible.git_manager import GitManager
 from crucible.guardrails import GuardRails
+from crucible.ledger import (
+    DIFF_TEXT_INLINE_LIMIT_BYTES,
+    AttemptNode,
+    TrialLedger,
+)
 from crucible.results import ExperimentRecord, ResultsLog, results_filename
 from crucible.runner import ExperimentRunner
 
@@ -70,6 +75,11 @@ class Orchestrator:
             readonly=config.files.readonly,
         )
         self.results = ResultsLog(self.workspace / results_filename(tag))
+        # M1a: dual-write to TrialLedger alongside ResultsLog. Storage is
+        # purely additive; ResultsLog format unchanged for backward compat.
+        self.ledger = TrialLedger(
+            self.workspace / "logs" / f"run-{tag}" / "ledger.jsonl"
+        )
         self.runner = ExperimentRunner(workspace=self.workspace)
 
         # Use sandbox runner if configured
@@ -107,6 +117,9 @@ class Orchestrator:
         self._beams: list[BeamState] = []
         self._current_beam_idx: int = 0
         self._profile = profile
+        # M1a: parent_id tracking for AttemptNode tree edges. Linear strategies
+        # (greedy / restart) → key=None. Beam strategy → key=beam_id.
+        self._last_attempt_id_by_beam: dict[Optional[int], Optional[str]] = {}
         self._critic = None
         if config.agent.critic.enabled:
             from crucible.agents.critic import CriticAgent
@@ -280,13 +293,13 @@ class Orchestrator:
         if metric_value is None or not self.guardrails.check_metric(metric_value):
             self._fail_seq += 1
             self.git.tag_failed_and_reset(self.tag, self._fail_seq)
-            self.results.log(self._make_record(
+            self._dual_log(self._make_record(
                 "crash", 0.0, agent_result.description,
                 commit_hash, agent_result, total_duration,
                 agent_duration_seconds=agent_duration,
                 run_duration_seconds=run_duration,
                 diff_text=diff_text,
-            ))
+            ), agent_result, diff_text=diff_text)
             crash_msg = run_result.stderr_tail
             if run_result.timed_out:
                 crash_msg = (
@@ -306,28 +319,28 @@ class Orchestrator:
 
         # 11. Check improvement
         if self.results.is_improvement(metric_value, self.config.metric.direction):
-            self.results.log(self._make_record(
+            self._dual_log(self._make_record(
                 "keep", metric_value, agent_result.description,
                 commit_hash, agent_result, total_duration,
                 delta=delta, delta_percent=delta_percent,
                 agent_duration_seconds=agent_duration,
                 run_duration_seconds=run_duration,
                 diff_text=diff_text,
-            ))
+            ), agent_result, diff_text=diff_text)
             self._consecutive_failures = 0
             return "keep"
 
         # 12. Discard
         self._fail_seq += 1
         self.git.tag_failed_and_reset(self.tag, self._fail_seq)
-        self.results.log(self._make_record(
+        self._dual_log(self._make_record(
             "discard", metric_value, agent_result.description,
             commit_hash, agent_result, total_duration,
             delta=delta, delta_percent=delta_percent,
             agent_duration_seconds=agent_duration,
             run_duration_seconds=run_duration,
             diff_text=diff_text,
-        ))
+        ), agent_result, diff_text=diff_text)
         self._consecutive_failures += 1
         return "discard"
 
@@ -371,6 +384,84 @@ class Orchestrator:
             log_dir=f"logs/iter-{self._iteration}",
             beam_id=self._current_beam_id,
         )
+
+    def _record_to_attempt_node(
+        self,
+        record: ExperimentRecord,
+        agent_result,
+        diff_text: str | None,
+    ) -> AttemptNode:
+        """Translate an ExperimentRecord into an AttemptNode for ledger append.
+
+        Mapping is intentionally lossy: ResultsLog stays the source of truth
+        for metric/usage/diff_stats; AttemptNode is a normalised tree-edge
+        index. Eval result fields (eval_result_ref / sha256) are populated
+        in M1b when sealed EvalResult artefacts land.
+        """
+        beam = record.beam_id
+        seq = record.iteration if record.iteration is not None else 0
+        if beam is None:
+            attempt_id = AttemptNode.short_id(seq)
+        else:
+            attempt_id = f"b{beam}{AttemptNode.short_id(seq)}"
+        parent_id = self._last_attempt_id_by_beam.get(beam)
+
+        # Cap inline diff at the ledger's hard limit, full content via diff_ref.
+        diff_inline = ""
+        if diff_text:
+            encoded = diff_text.encode("utf-8")
+            if len(encoded) > DIFF_TEXT_INLINE_LIMIT_BYTES:
+                # Reserve room for the truncation marker.
+                head = encoded[: DIFF_TEXT_INLINE_LIMIT_BYTES - 64]
+                diff_inline = head.decode("utf-8", errors="ignore") + "\n... [TRUNCATED]"
+            else:
+                diff_inline = diff_text
+
+        diff_ref = f"{record.log_dir}/diff.patch" if record.log_dir else ""
+        prompt_ref = f"{record.log_dir}/prompt.md" if record.log_dir else ""
+
+        cost_usd: float | None = None
+        usage_source = "unavailable"
+        if record.usage is not None and record.usage.total_cost_usd is not None:
+            cost_usd = record.usage.total_cost_usd
+            usage_source = "api"
+
+        node = AttemptNode(
+            id=attempt_id,
+            parent_id=parent_id,
+            commit=record.commit or "",
+            backend_kind="claude_sdk",  # M2 generalises via AgentBackend.kind
+            backend_version="",
+            model=getattr(self.agent, "model", "") or "",
+            prompt_digest="",  # populated when prompt hashing lands (M1b)
+            prompt_ref=prompt_ref,
+            diff_text=diff_inline,
+            diff_ref=diff_ref,
+            outcome=record.status,
+            node_state="frontier",
+            cost_usd=cost_usd,
+            usage_source=usage_source,
+            created_at=record.timestamp or "",
+            worktree_path=str(self.workspace),
+        )
+
+        # Track for next iteration's parent_id link.
+        self._last_attempt_id_by_beam[beam] = attempt_id
+        return node
+
+    def _dual_log(
+        self,
+        record: ExperimentRecord,
+        agent_result,
+        diff_text: str | None = None,
+    ) -> None:
+        """Write to ResultsLog and TrialLedger atomically (best-effort)."""
+        self.results.log(record)
+        try:
+            node = self._record_to_attempt_node(record, agent_result, diff_text)
+            self.ledger.append_node(node)
+        except Exception as exc:  # never let ledger errors break the loop
+            logger.warning("ledger append failed: %s", exc)
 
     def _read_last_agent_log(self) -> str | None:
         """Read the previous iteration's agent reasoning log."""

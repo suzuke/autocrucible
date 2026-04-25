@@ -1,0 +1,231 @@
+"""Tests for orchestrator → TrialLedger dual-write integration (M1a PR 2).
+
+Focused unit tests on the translation helper `_record_to_attempt_node` and
+the dual-log path. Full end-to-end orchestrator tests live in
+`test_orchestrator.py`; here we just verify the new ledger plumbing.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+import pytest
+
+from crucible.ledger import (
+    DIFF_TEXT_INLINE_LIMIT_BYTES,
+    AttemptNode,
+    TrialLedger,
+)
+from crucible.results import ExperimentRecord, UsageInfo
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def workspace(tmp_path: Path) -> Path:
+    return tmp_path
+
+
+@pytest.fixture
+def fake_orchestrator(workspace: Path):
+    """Build a stand-in object exposing only the methods/attrs that
+    `_record_to_attempt_node` and `_dual_log` need.
+
+    We do this rather than instantiate the real Orchestrator because that
+    pulls in git/agent/runner setup we don't need to test the dual-log path.
+    """
+    from crucible.orchestrator import Orchestrator
+
+    # Bind the real methods without running __init__.
+    obj = Orchestrator.__new__(Orchestrator)
+    obj.workspace = workspace
+    obj.tag = "t1"
+    obj.agent = SimpleNamespace(model="anthropic/claude-sonnet-4-6")
+    obj.results = MagicMock()
+    obj.ledger = TrialLedger(workspace / "logs" / "run-t1" / "ledger.jsonl")
+    obj._last_attempt_id_by_beam = {}
+    return obj
+
+
+def _record(
+    iteration: int = 1,
+    status: str = "keep",
+    beam_id: int | None = None,
+    log_dir: str | None = "logs/iter-1",
+    cost: float | None = 0.05,
+    diff_text: str | None = "--- a\n+++ b\n",
+) -> ExperimentRecord:
+    return ExperimentRecord(
+        commit="abcd1234",
+        metric_value=1.5,
+        status=status,
+        description="test",
+        iteration=iteration,
+        timestamp="2026-04-25T12:00:00+00:00",
+        diff_text=diff_text,
+        usage=UsageInfo(total_cost_usd=cost) if cost is not None else None,
+        log_dir=log_dir,
+        beam_id=beam_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# _record_to_attempt_node — translation correctness
+# ---------------------------------------------------------------------------
+
+
+def test_translation_basic_fields(fake_orchestrator):
+    rec = _record(iteration=3, status="keep")
+    agent_result = SimpleNamespace(modified_files=[])
+    node = fake_orchestrator._record_to_attempt_node(rec, agent_result, "diff")
+
+    assert node.id == "n000003"
+    assert node.commit == "abcd1234"
+    assert node.outcome == "keep"
+    assert node.model == "anthropic/claude-sonnet-4-6"
+    assert node.backend_kind == "claude_sdk"
+    assert node.cost_usd == 0.05
+    assert node.usage_source == "api"
+    assert node.created_at == "2026-04-25T12:00:00+00:00"
+    assert node.diff_ref == "logs/iter-1/diff.patch"
+    assert node.prompt_ref == "logs/iter-1/prompt.md"
+
+
+def test_translation_parent_chain_linear(fake_orchestrator):
+    """Two consecutive iterations in the same (None) beam produce parent_id chain."""
+    agent_result = SimpleNamespace(modified_files=[])
+    n1 = fake_orchestrator._record_to_attempt_node(
+        _record(iteration=1), agent_result, None,
+    )
+    n2 = fake_orchestrator._record_to_attempt_node(
+        _record(iteration=2), agent_result, None,
+    )
+    assert n1.parent_id is None
+    assert n2.parent_id == "n000001"
+
+
+def test_translation_parent_chain_per_beam(fake_orchestrator):
+    """Beams maintain independent parent chains."""
+    agent_result = SimpleNamespace(modified_files=[])
+    a1 = fake_orchestrator._record_to_attempt_node(
+        _record(iteration=1, beam_id=0), agent_result, None,
+    )
+    b1 = fake_orchestrator._record_to_attempt_node(
+        _record(iteration=1, beam_id=1), agent_result, None,
+    )
+    a2 = fake_orchestrator._record_to_attempt_node(
+        _record(iteration=2, beam_id=0), agent_result, None,
+    )
+    b2 = fake_orchestrator._record_to_attempt_node(
+        _record(iteration=2, beam_id=1), agent_result, None,
+    )
+    # IDs are namespaced per beam
+    assert a1.id == "b0n000001"
+    assert b1.id == "b1n000001"
+    # Parent chains independent
+    assert a1.parent_id is None
+    assert b1.parent_id is None
+    assert a2.parent_id == "b0n000001"
+    assert b2.parent_id == "b1n000001"
+
+
+def test_translation_diff_truncation(fake_orchestrator):
+    """Diff text over the inline limit is truncated and marked."""
+    big_diff = "x" * (DIFF_TEXT_INLINE_LIMIT_BYTES + 1000)
+    rec = _record(diff_text=big_diff)
+    agent_result = SimpleNamespace(modified_files=[])
+    node = fake_orchestrator._record_to_attempt_node(rec, agent_result, big_diff)
+    assert "[TRUNCATED]" in node.diff_text
+    assert len(node.diff_text.encode("utf-8")) <= DIFF_TEXT_INLINE_LIMIT_BYTES
+
+
+def test_translation_no_cost_marks_unavailable(fake_orchestrator):
+    rec = _record(cost=None)
+    agent_result = SimpleNamespace(modified_files=[])
+    node = fake_orchestrator._record_to_attempt_node(rec, agent_result, "")
+    assert node.cost_usd is None
+    assert node.usage_source == "unavailable"
+
+
+def test_translation_missing_log_dir(fake_orchestrator):
+    rec = _record(log_dir=None)
+    agent_result = SimpleNamespace(modified_files=[])
+    node = fake_orchestrator._record_to_attempt_node(rec, agent_result, "")
+    assert node.diff_ref == ""
+    assert node.prompt_ref == ""
+
+
+def test_translation_outcome_passthrough(fake_orchestrator):
+    """Status strings on ExperimentRecord pass through to AttemptNode.outcome
+    unchanged — no second taxonomy."""
+    agent_result = SimpleNamespace(modified_files=[])
+    for status in ("keep", "discard", "crash", "violation", "skip"):
+        rec = _record(status=status)
+        # Reset parent chain for each translation
+        fake_orchestrator._last_attempt_id_by_beam = {}
+        node = fake_orchestrator._record_to_attempt_node(rec, agent_result, "")
+        assert node.outcome == status
+
+
+# ---------------------------------------------------------------------------
+# _dual_log — both writes happen, exceptions in ledger don't break results
+# ---------------------------------------------------------------------------
+
+
+def test_dual_log_writes_both(fake_orchestrator, workspace):
+    rec = _record(iteration=1, status="keep")
+    agent_result = SimpleNamespace(modified_files=[])
+    fake_orchestrator._dual_log(rec, agent_result, diff_text="--- a\n+++ b\n")
+
+    # ResultsLog was called
+    fake_orchestrator.results.log.assert_called_once_with(rec)
+
+    # Ledger has the record on disk
+    ledger_path = workspace / "logs" / "run-t1" / "ledger.jsonl"
+    assert ledger_path.exists()
+    nodes = fake_orchestrator.ledger.all_nodes()
+    assert len(nodes) == 1
+    assert nodes[0].id == "n000001"
+    assert nodes[0].outcome == "keep"
+
+
+def test_dual_log_ledger_failure_does_not_break_results(fake_orchestrator):
+    """If ledger.append_node raises, _dual_log should swallow the error and
+    still have called results.log. The crucible loop must NEVER break because
+    of a ledger I/O issue."""
+    fake_orchestrator.ledger = MagicMock()
+    fake_orchestrator.ledger.append_node.side_effect = OSError("disk full")
+    rec = _record(iteration=1, status="keep")
+    agent_result = SimpleNamespace(modified_files=[])
+
+    # Should not raise
+    fake_orchestrator._dual_log(rec, agent_result, diff_text="")
+
+    fake_orchestrator.results.log.assert_called_once_with(rec)
+    fake_orchestrator.ledger.append_node.assert_called_once()
+
+
+def test_dual_log_records_match_in_full_run(fake_orchestrator, workspace):
+    """Five iterations: both logs end up with five entries in matching order."""
+    agent_result = SimpleNamespace(modified_files=[])
+    statuses = ["crash", "keep", "discard", "keep", "violation"]
+    for i, st in enumerate(statuses, start=1):
+        fake_orchestrator._dual_log(_record(iteration=i, status=st), agent_result, None)
+
+    # ResultsLog called 5 times (each via its mock)
+    assert fake_orchestrator.results.log.call_count == 5
+
+    # Ledger has 5 nodes in order with matching outcomes
+    nodes = fake_orchestrator.ledger.all_nodes()
+    assert [n.id for n in nodes] == [f"n00000{i}" for i in range(1, 6)]
+    assert [n.outcome for n in nodes] == statuses
+    # Parent chain is correct
+    assert nodes[0].parent_id is None
+    for i in range(1, 5):
+        assert nodes[i].parent_id == nodes[i - 1].id
