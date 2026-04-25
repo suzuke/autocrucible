@@ -136,6 +136,12 @@ class AttemptNode:
     expanded_at: Optional[str] = None # when BFTS picked node for expansion
     worktree_path: str = ""           # isolated git worktree per attempt
 
+    # Optional human-readable note. Populated for "violation" and "skip"
+    # outcomes (where the violation message / skip reason is the only useful
+    # information, since there's no commit or diff to inspect). M1b may also
+    # use this for the agent's brief description when it's short enough.
+    description: Optional[str] = None
+
     @staticmethod
     def short_id(seq: int) -> str:
         """Generate "n000042" from a numeric sequence."""

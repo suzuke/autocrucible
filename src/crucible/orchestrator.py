@@ -239,9 +239,11 @@ class Orchestrator:
         if violation is not None:
             if violation.kind == "no_edits":
                 self.context.requeue_crash_info()
+                self._ledger_log_no_commit("skip", agent_result, violation.message)
                 return "skip"
             self.git.revert_changes()
             self.context.add_error(violation.message)
+            self._ledger_log_no_commit("violation", agent_result, violation.message)
             return "violation"
 
         # 7. Git commit
@@ -462,6 +464,63 @@ class Orchestrator:
             self.ledger.append_node(node)
         except Exception as exc:  # never let ledger errors break the loop
             logger.warning("ledger append failed: %s", exc)
+
+    def _ledger_log_no_commit(
+        self,
+        outcome: str,
+        agent_result,
+        description: str,
+    ) -> None:
+        """Record a "violation" or "skip" outcome to the ledger only.
+
+        These outcomes never go through _dual_log because the orchestrator
+        early-returns before any ResultsLog.log() call (no commit happened,
+        no metric was measured). Existing behavior — ResultsLog is silent on
+        these paths — is preserved; we only add the new ledger entry.
+        """
+        seq = self._iteration if self._iteration is not None else 0
+        beam = self._current_beam_id
+        if beam is None:
+            attempt_id = AttemptNode.short_id(seq)
+        else:
+            attempt_id = f"b{beam}{AttemptNode.short_id(seq)}"
+        parent_id = self._last_attempt_id_by_beam.get(beam)
+
+        cost_usd: float | None = None
+        usage_source = "unavailable"
+        if (
+            agent_result is not None
+            and agent_result.usage is not None
+            and agent_result.usage.total_cost_usd is not None
+        ):
+            cost_usd = agent_result.usage.total_cost_usd
+            usage_source = "api"
+
+        try:
+            node = AttemptNode(
+                id=attempt_id,
+                parent_id=parent_id,
+                commit="",  # no commit happened
+                backend_kind="claude_sdk",
+                backend_version="",
+                model=getattr(self.agent, "model", "") or "",
+                prompt_digest="",
+                prompt_ref=f"logs/iter-{seq}/prompt.md",
+                diff_text="",
+                diff_ref="",
+                outcome=outcome,
+                node_state="frontier",
+                cost_usd=cost_usd,
+                usage_source=usage_source,
+                created_at=datetime.now(timezone.utc).isoformat(),
+                worktree_path=str(self.workspace),
+                description=description[:500] if description else None,
+            )
+            self._last_attempt_id_by_beam[beam] = attempt_id
+            self.ledger.append_node(node)
+        except Exception as exc:
+            logger.warning("ledger append failed (no-commit outcome %s): %s",
+                           outcome, exc)
 
     def _read_last_agent_log(self) -> str | None:
         """Read the previous iteration's agent reasoning log."""

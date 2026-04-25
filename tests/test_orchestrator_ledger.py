@@ -229,3 +229,93 @@ def test_dual_log_records_match_in_full_run(fake_orchestrator, workspace):
     assert nodes[0].parent_id is None
     for i in range(1, 5):
         assert nodes[i].parent_id == nodes[i - 1].id
+
+
+# ---------------------------------------------------------------------------
+# _ledger_log_no_commit — violation / skip outcomes go straight to ledger
+# ---------------------------------------------------------------------------
+
+
+def _agent_result_with_cost(cost: float | None = 0.002) -> SimpleNamespace:
+    return SimpleNamespace(
+        modified_files=[],
+        usage=UsageInfo(total_cost_usd=cost) if cost is not None else None,
+    )
+
+
+def test_no_commit_violation_writes_ledger(fake_orchestrator):
+    """The violation branch records a node with empty commit/diff and the
+    violation message in description."""
+    fake_orchestrator._iteration = 1
+    fake_orchestrator._current_beam_id = None
+    fake_orchestrator._ledger_log_no_commit(
+        "violation",
+        _agent_result_with_cost(),
+        "File evaluate.py is read-only",
+    )
+    nodes = fake_orchestrator.ledger.all_nodes()
+    assert len(nodes) == 1
+    n = nodes[0]
+    assert n.id == "n000001"
+    assert n.outcome == "violation"
+    assert n.commit == ""
+    assert n.diff_text == ""
+    assert n.description == "File evaluate.py is read-only"
+    assert n.cost_usd == 0.002
+    # Did NOT touch ResultsLog
+    fake_orchestrator.results.log.assert_not_called()
+
+
+def test_no_commit_skip_writes_ledger(fake_orchestrator):
+    fake_orchestrator._iteration = 2
+    fake_orchestrator._current_beam_id = None
+    fake_orchestrator._ledger_log_no_commit(
+        "skip",
+        _agent_result_with_cost(cost=None),
+        "agent produced no edits",
+    )
+    nodes = fake_orchestrator.ledger.all_nodes()
+    assert nodes[0].outcome == "skip"
+    assert nodes[0].cost_usd is None
+    assert nodes[0].usage_source == "unavailable"
+
+
+def test_no_commit_description_capped_at_500(fake_orchestrator):
+    fake_orchestrator._iteration = 1
+    fake_orchestrator._current_beam_id = None
+    long_msg = "x" * 1000
+    fake_orchestrator._ledger_log_no_commit(
+        "violation", _agent_result_with_cost(), long_msg,
+    )
+    nodes = fake_orchestrator.ledger.all_nodes()
+    assert len(nodes[0].description) == 500
+
+
+def test_no_commit_parent_chain_extends(fake_orchestrator):
+    """Violation/skip should still extend the parent chain so subsequent
+    keep/discard nodes have a parent_id pointing back to the rejection."""
+    agent_result = _agent_result_with_cost()
+    # iter 1: keep
+    fake_orchestrator._dual_log(_record(iteration=1, status="keep"), agent_result, None)
+    # iter 2: violation (no commit)
+    fake_orchestrator._iteration = 2
+    fake_orchestrator._current_beam_id = None
+    fake_orchestrator._ledger_log_no_commit("violation", agent_result, "bad edit")
+    # iter 3: keep
+    fake_orchestrator._dual_log(_record(iteration=3, status="keep"), agent_result, None)
+
+    nodes = fake_orchestrator.ledger.all_nodes()
+    assert [n.id for n in nodes] == ["n000001", "n000002", "n000003"]
+    assert nodes[0].parent_id is None
+    assert nodes[1].parent_id == "n000001"
+    assert nodes[2].parent_id == "n000002"
+
+
+def test_no_commit_ledger_failure_logged_not_raised(fake_orchestrator):
+    fake_orchestrator.ledger = MagicMock()
+    fake_orchestrator.ledger.append_node.side_effect = OSError("disk full")
+    fake_orchestrator._iteration = 1
+    fake_orchestrator._current_beam_id = None
+    # should not raise
+    fake_orchestrator._ledger_log_no_commit("violation", _agent_result_with_cost(), "x")
+    fake_orchestrator.ledger.append_node.assert_called_once()
