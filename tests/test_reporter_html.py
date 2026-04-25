@@ -262,3 +262,63 @@ def test_maximize_picks_largest_metric_default(ledger_path: Path):
     n1_pos = out.index('id="n000001"')
     n2_pos = out.index('id="n000002"')
     assert n1_pos < badge_pos < n2_pos
+
+
+# ---------------------------------------------------------------------------
+# M1b PR 7: tree-view rendering
+# ---------------------------------------------------------------------------
+
+
+def test_tree_view_indents_descendants(ledger_path: Path):
+    """A 3-level chain (root → child → grandchild) should render with
+    progressive left-margin indentation."""
+    ledger = TrialLedger(ledger_path)
+    ledger.append_node(_make_node(1))                     # depth 0
+    ledger.append_node(_make_node(2, parent="n000001"))   # depth 1
+    ledger.append_node(_make_node(3, parent="n000002"))   # depth 2
+    out = render_static_html(ledger_path)
+    # depth-1 card has margin-left:32px; depth-2 has 64px
+    assert "margin-left:32px" in out
+    assert "margin-left:64px" in out
+    # branch markers (↳) on non-root cards
+    assert out.count("branch-marker") >= 2
+    _validate(out)
+
+
+def test_tree_view_handles_branching(ledger_path: Path):
+    """Two children sharing a parent → both at depth=1, indented equally."""
+    ledger = TrialLedger(ledger_path)
+    ledger.append_node(_make_node(1))                     # root
+    ledger.append_node(_make_node(2, parent="n000001"))   # branch A
+    ledger.append_node(_make_node(3, parent="n000001"))   # branch B
+    out = render_static_html(ledger_path)
+    # Both children indented at depth 1
+    assert out.count("margin-left:32px") >= 2
+    # Both have a branch-marker
+    assert out.count("branch-marker") >= 2
+    _validate(out)
+
+
+def test_tree_view_orphan_node(ledger_path: Path):
+    """A node referencing a parent_id that doesn't exist in the ledger
+    is rendered with the orphan badge below the main tree."""
+    ledger = TrialLedger(ledger_path)
+    ledger.append_node(_make_node(1))                     # root
+    ledger.append_node(_make_node(2, parent="n999999"))   # orphan
+    out = render_static_html(ledger_path)
+    assert "orphan" in out.lower()
+    assert "orphan-badge" in out
+    _validate(out)
+
+
+def test_tree_view_linear_chain_unchanged(ledger_path: Path):
+    """For a fully-linear chain (each node parent of next), the new tree
+    rendering still produces output where ids appear in order."""
+    ledger = TrialLedger(ledger_path)
+    for i in (1, 2, 3, 4):
+        parent = f"n{i - 1:06d}" if i > 1 else None
+        ledger.append_node(_make_node(i, parent=parent))
+    out = render_static_html(ledger_path)
+    # Verify n000001 appears before n000002 etc.
+    positions = [out.index(f'id="n00000{i}"') for i in range(1, 5)]
+    assert positions == sorted(positions)

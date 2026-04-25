@@ -118,7 +118,7 @@ def _render(
         return _empty_html(title)
 
     best_id = _best_node_id(nodes, metric_lookup, metric_direction)
-    cards = "\n".join(_render_card(n, best_id, metric_lookup) for n in nodes)
+    cards = _render_tree(nodes, best_id, metric_lookup)
     summary = _render_summary(nodes, metric_lookup, best_id)
 
     return _PAGE_TEMPLATE.format(
@@ -128,6 +128,56 @@ def _render(
         cards=cards,
         generated_at=html.escape(datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")),
     )
+
+
+def _render_tree(
+    nodes: Sequence[AttemptNode],
+    best_id: str | None,
+    metric_lookup: dict[str, float],
+) -> str:
+    """M1b: render nodes in DFS-by-parent order with depth indentation.
+
+    Linear chains (greedy/restart) collapse to depth=0 cards, looking
+    identical to the M1a layout. BFTS expansions show as indented
+    cards under their `parent_id`, making the branching structure
+    immediately visible.
+
+    Children are sorted by id (insertion order is the natural fallback
+    when ids are sequential like n000042).
+    """
+    by_parent: dict[str | None, list[AttemptNode]] = {}
+    for n in nodes:
+        by_parent.setdefault(n.parent_id, []).append(n)
+
+    # Order children by id (sequential ids → insertion-order); ties broken
+    # by created_at when ids alias (shouldn't happen but defensive).
+    for siblings in by_parent.values():
+        siblings.sort(key=lambda n: (n.id, n.created_at))
+
+    out: list[str] = []
+    visited: set[str] = set()
+
+    def walk(parent_id: str | None, depth: int) -> None:
+        children = by_parent.get(parent_id, [])
+        for child in children:
+            if child.id in visited:
+                continue  # defensive: skip cycles (shouldn't happen)
+            visited.add(child.id)
+            out.append(_render_card(child, best_id, metric_lookup, depth=depth))
+            walk(child.id, depth + 1)
+
+    # Roots are nodes with parent_id=None
+    walk(None, depth=0)
+
+    # Orphans: any node whose parent_id is set but not in the ledger.
+    # Happens when ledger references a parent from a previous run that
+    # was pruned. Render at depth=0 below the main tree.
+    for n in nodes:
+        if n.id not in visited:
+            out.append(_render_card(n, best_id, metric_lookup, depth=0,
+                                     orphan=True))
+
+    return "\n".join(out)
 
 
 def _empty_html(title: str) -> str:
@@ -199,10 +249,16 @@ def _render_summary(nodes: Sequence[AttemptNode],
 
 
 def _render_card(n: AttemptNode, best_id: str | None,
-                 metric_lookup: dict[str, float]) -> str:
+                 metric_lookup: dict[str, float],
+                 depth: int = 0,
+                 orphan: bool = False) -> str:
     fg, bg = _color_for(n.outcome)
     is_best = (best_id is not None and n.id == best_id)
     badge = '<span class="best-badge">★ best</span>' if is_best else ""
+    orphan_badge = ' <span class="orphan-badge">orphan</span>' if orphan else ""
+    # Tree indentation: 32px per level. Branch indicator ↳ for non-roots.
+    indent_style = f' style="margin-left:{depth * 32}px"' if depth else ""
+    branch_marker = '<span class="branch-marker">↳ </span>' if depth else ""
 
     metric_line = ""
     if n.id in metric_lookup:
@@ -235,13 +291,18 @@ def _render_card(n: AttemptNode, best_id: str | None,
         f'<span class="meta-item">model: <code>{html.escape(n.model)}</code></span>'
     )
 
+    # Compose card-level style: border-left-color + indentation
+    card_style = f"border-left-color:{fg}"
+    if depth:
+        card_style += f";margin-left:{depth * 32}px"
+
     return f"""
-<article id="{html.escape(n.id)}" class="card{' card-best' if is_best else ''}"
-         style="border-left-color:{fg}">
+<article id="{html.escape(n.id)}" class="card{' card-best' if is_best else ''}{' card-orphan' if orphan else ''}"
+         style="{card_style}">
   <header class="card-header" style="background:{bg};color:{fg}">
-    <span class="node-id">{html.escape(n.id)}</span>
+    {branch_marker}<span class="node-id">{html.escape(n.id)}</span>
     <span class="outcome">{html.escape(n.outcome)}</span>
-    {badge}
+    {badge}{orphan_badge}
   </header>
   <div class="card-body">
     <div class="meta">
@@ -325,6 +386,24 @@ summary { cursor: pointer; color: #1976d2; font-size: 13px; user-select: none; }
   white-space: pre; max-height: 400px; overflow-y: auto;
 }
 .diff::selection { background: #ffd54f; color: #000; }
+
+/* M1b tree-view styling: indented branches + arrow markers */
+.branch-marker {
+  color: #757575;
+  font-size: 14px;
+  margin-right: 4px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.card-orphan {
+  border-left-color: #ffa000 !important;
+  background: #fffde7;
+}
+.orphan-badge {
+  color: #ef6c00; font-weight: 500;
+  font-size: 11px; text-transform: uppercase;
+  margin-left: 6px; padding: 2px 6px;
+  background: #fff3e0; border-radius: 3px;
+}
 """
 
 
