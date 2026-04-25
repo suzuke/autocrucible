@@ -27,8 +27,27 @@ class CriticConfig:
 
 
 @dataclass
+class SmolagentsConfig:
+    """M2 PR 13: configuration for the smolagents AgentBackend.
+
+    Per spec §INV-3: only ToolCallingAgent is supported in default safe
+    mode. CodeAct mode is intentionally NOT exposed via config in PR 13.
+    """
+    # LiteLLM provider routing: "anthropic", "openai", "openrouter", etc.
+    # Passed verbatim to smolagents.LiteLLMModel.
+    provider: str = "anthropic"
+    # Model id forwarded to LiteLLM (e.g. "claude-3-5-sonnet-20241022").
+    model: str = "claude-3-5-sonnet-20241022"
+    # Name of the env var to read the API key FROM. The value itself is
+    # never stored in config / logs / prompts (reviewer round 1 Q2).
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    # Hard cap on agent.run() steps; prevents runaway tool-use loops.
+    max_steps: int = 12
+
+
+@dataclass
 class AgentConfig:
-    type: str = "claude-code"
+    type: str = "claude-code"          # "claude-code" | "smolagents"
     instructions: Optional[str] = None
     system_prompt: Optional[str] = None
     model: str | None = None
@@ -37,6 +56,7 @@ class AgentConfig:
     failure_analysis: bool = False
     critic: CriticConfig = field(default_factory=CriticConfig)
     context_window: ContextWindowConfig = field(default_factory=ContextWindowConfig)
+    smolagents: SmolagentsConfig = field(default_factory=SmolagentsConfig)
 
 
 @dataclass
@@ -176,11 +196,36 @@ def _build_critic(data: dict | None) -> CriticConfig:
     )
 
 
+_SUPPORTED_AGENT_TYPES = ("claude-code", "smolagents")
+
+
+def _build_smolagents(data: dict) -> SmolagentsConfig:
+    if not data:
+        return SmolagentsConfig()
+    max_steps = data.get("max_steps", 12)
+    if not isinstance(max_steps, int) or max_steps < 1:
+        raise ConfigError(
+            f"agent.smolagents.max_steps must be a positive int, got {max_steps!r}"
+        )
+    return SmolagentsConfig(
+        provider=data.get("provider", "anthropic"),
+        model=data.get("model", "claude-3-5-sonnet-20241022"),
+        api_key_env=data.get("api_key_env", "ANTHROPIC_API_KEY"),
+        max_steps=max_steps,
+    )
+
+
 def _build_agent(data: dict) -> AgentConfig:
     if not data:
         return AgentConfig()
+    agent_type = data.get("type", "claude-code")
+    if agent_type not in _SUPPORTED_AGENT_TYPES:
+        raise ConfigError(
+            f"agent.type must be one of {list(_SUPPORTED_AGENT_TYPES)}, "
+            f"got {agent_type!r}"
+        )
     return AgentConfig(
-        type=data.get("type", "claude-code"),
+        type=agent_type,
         instructions=data.get("instructions"),
         system_prompt=data.get("system_prompt"),
         model=data.get("model"),
@@ -189,6 +234,7 @@ def _build_agent(data: dict) -> AgentConfig:
         failure_analysis=data.get("failure_analysis", False),
         critic=_build_critic(data.get("critic")),
         context_window=_build_context_window(data.get("context_window", {})),
+        smolagents=_build_smolagents(data.get("smolagents", {})),
     )
 
 
