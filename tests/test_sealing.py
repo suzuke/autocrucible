@@ -235,26 +235,68 @@ def test_verify_returns_false_when_seal_key_id_blank(env_key):
 
 
 # ---------------------------------------------------------------------------
-# Cross-algorithm verification (read M1 seals after switching to M2)
+# Strict-by-default policy enforcement (reviewer round 2 blocking finding)
 # ---------------------------------------------------------------------------
 
 
-def test_verify_recognises_old_content_sha256_under_hmac_config(env_key):
-    """A project switched to hmac-sha256 should still verify old M1 seals."""
-    # Compute an M1-style content-sha256 seal
+def test_verify_rejects_content_sha256_under_hmac_policy_by_default(env_key):
+    """An M1-style content-sha256 seal MUST NOT verify under an HMAC
+    policy unless the caller explicitly opts into legacy mode. Otherwise
+    an attacker can tamper-and-recompute a content-sha256 seal without
+    any HMAC key (algorithm-downgrade bypass)."""
     m1_cfg = SealConfig(algorithm="content-sha256")
-    m1_seal = compute_seal(b"old-payload", config=m1_cfg)
+    m1_seal = compute_seal(b"payload", config=m1_cfg)
 
-    # Verify under M2 hmac config — should still pass for content-sha256 seal
     m2_cfg = SealConfig(algorithm="hmac-sha256")
-    assert verify_seal(b"old-payload", m1_seal, config=m2_cfg) is True
+    assert verify_seal(b"payload", m1_seal, config=m2_cfg) is False
 
 
-def test_verify_rejects_content_sha256_seal_when_payload_tampered(env_key):
+def test_verify_accepts_content_sha256_with_explicit_legacy_flag(env_key):
+    """Migration tools / read-only utilities may opt into legacy compat
+    by passing `allow_legacy_content=True`. This is the ONLY supported
+    path to read M1 seals under an HMAC project policy."""
+    m1_cfg = SealConfig(algorithm="content-sha256")
+    m1_seal = compute_seal(b"payload", config=m1_cfg)
+
+    m2_cfg = SealConfig(algorithm="hmac-sha256")
+    assert verify_seal(
+        b"payload", m1_seal, config=m2_cfg, allow_legacy_content=True
+    ) is True
+
+
+def test_legacy_flag_does_not_excuse_tampering(env_key):
+    """Even with allow_legacy_content=True, a content-sha256 seal must
+    only verify the unmodified bytes. The flag is a policy escape hatch,
+    not a bypass of integrity checking."""
     m1_cfg = SealConfig(algorithm="content-sha256")
     m1_seal = compute_seal(b"original", config=m1_cfg)
+
     m2_cfg = SealConfig(algorithm="hmac-sha256")
-    assert verify_seal(b"tampered", m1_seal, config=m2_cfg) is False
+    assert verify_seal(
+        b"tampered", m1_seal, config=m2_cfg, allow_legacy_content=True
+    ) is False
+
+
+def test_content_policy_still_accepts_content_seals():
+    """Under content-sha256 policy, content-sha256 seals continue to
+    verify without any flag (M1 behavior preserved when not opting into
+    HMAC)."""
+    cfg = SealConfig(algorithm="content-sha256")
+    seal = compute_seal(b"payload", config=cfg)
+    assert verify_seal(b"payload", seal, config=cfg) is True
+
+
+def test_content_policy_accepts_hmac_seal_if_key_matches(env_key):
+    """An hmac-sha256 seal seen under content-sha256 policy is strictly
+    stronger; if the key resolves and matches, it still verifies."""
+    hmac_cfg = SealConfig(algorithm="hmac-sha256")
+    hmac_seal = compute_seal(b"payload", config=hmac_cfg)
+
+    # Under content-sha256 policy with the same key available, accept it.
+    cfg_content = SealConfig(algorithm="content-sha256")
+    # verify_seal still has the key resolution path; key_id="default"
+    # matches our env key, so verification proceeds.
+    assert verify_seal(b"payload", hmac_seal, config=cfg_content) is True
 
 
 # ---------------------------------------------------------------------------
@@ -274,15 +316,22 @@ def test_hmac_detects_any_byte_flip(env_key):
 
 def test_recomputed_content_sha256_does_not_verify_as_hmac(env_key):
     """Critical: a tamper-and-recompute attack on content-sha256 must
-    not succeed when the project's policy is hmac-sha256."""
+    not succeed when the project's policy is hmac-sha256.
+
+    Reviewer round 2 found this exact bypass: an attacker without the
+    HMAC key tampers with payload, then writes a fresh content-sha256:
+    seal over the tampered bytes. The seal IS a valid content-sha256
+    hash, but under HMAC policy the strict policy enforcement rejects
+    the algorithm downgrade.
+    """
     cfg = SealConfig(algorithm="hmac-sha256")
     real_hmac_seal = compute_seal(b"original", config=cfg)
     # Attacker tampers and recomputes a content-sha256 over tampered bytes
     fake_seal = "content-sha256:" + hashlib.sha256(b"tampered").hexdigest()
-    # That seal IS a valid content-sha256 over the tampered bytes (this
-    # is by design — content-sha256 is just a corruption check).
-    assert verify_seal(b"tampered", fake_seal, config=cfg) is True
-    # But the original HMAC seal does NOT verify over tampered bytes:
+    # Under HMAC policy, the downgrade is rejected by default — this is
+    # the strict-by-default behavior that closes the bypass.
+    assert verify_seal(b"tampered", fake_seal, config=cfg) is False
+    # The original HMAC seal does NOT verify over tampered bytes either:
     assert verify_seal(b"tampered", real_hmac_seal, config=cfg) is False
 
 

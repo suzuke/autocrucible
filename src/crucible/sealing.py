@@ -100,27 +100,49 @@ def verify_seal(
     seal: str,
     *,
     config: "SealConfig",
+    allow_legacy_content: bool = False,
 ) -> bool:
     """Verify that `seal` matches `canonical_bytes` under the given config.
 
-    Recognises BOTH algorithms regardless of `config.algorithm`, so a
-    project that switches algorithms can still verify older artefacts.
+    **Strict-by-default policy enforcement** (M2 PR 12 reviewer round 2):
+    when `config.algorithm == "hmac-sha256"`, `content-sha256:` seals are
+    REJECTED unless the caller explicitly opts into legacy compatibility.
+    Without this rule, an attacker who tampered with `eval-result.json`
+    could replace the HMAC seal with a freshly-computed `content-sha256:`
+    over the tampered bytes — no key needed — and verification would
+    accept it. That's an algorithm-downgrade bypass.
+
+    Args:
+        canonical_bytes: bytes the seal was computed over (canonical JSON).
+        seal: the seal string from the artefact.
+        config: the project's seal policy.
+        allow_legacy_content: when True, accept `content-sha256:` seals
+            under any policy. Intended ONLY for migration / legacy-read
+            tools (`crucible verify --legacy`, etc). DEFAULT FALSE — the
+            normal verification path enforces the policy strictly.
 
     Returns False (does NOT raise) on:
       - malformed seal text (missing fields, non-hex, unknown algorithm)
+      - algorithm mismatch under strict policy (legacy `content-sha256`
+        seal seen under HMAC policy with `allow_legacy_content=False`)
       - hash/HMAC mismatch
       - key_id mismatch under hmac-sha256
 
-    Raises SealKeyError ONLY when verification REQUIRES a key (hmac-sha256
-    seal under a config that has hmac configured) and the configured key
-    is missing/unreadable. That's a config invariant violation, not an
-    untrusted-input issue. Pure-content seals never raise.
+    Raises SealKeyError ONLY when verification REQUIRES a key (a valid
+    `hmac-sha256` seal whose key_id matches `config.key_id`) and the
+    configured key is missing/unreadable. That's a config invariant
+    violation, not an untrusted-input issue. Pure-content seals never
+    raise.
     """
     if not isinstance(seal, str) or ":" not in seal:
         return False
     parts = seal.split(":")
     algorithm = parts[0]
     if algorithm == "content-sha256":
+        # Strict policy: under HMAC config, downgrade to content-sha256
+        # is a tamper bypass. Reject unless caller opts into legacy mode.
+        if config.algorithm == "hmac-sha256" and not allow_legacy_content:
+            return False
         if len(parts) != 2:
             return False
         expected_hex = parts[1]
