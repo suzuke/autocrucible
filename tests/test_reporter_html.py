@@ -223,3 +223,42 @@ def test_total_cost_summed(ledger_path: Path):
     ledger.append_node(_make_node(3))   # 0.003
     out = render_static_html(ledger_path)
     assert "$0.0060" in out  # total = 0.006
+
+
+# ---------------------------------------------------------------------------
+# Reviewer F2 — minimize-objective best selection
+# ---------------------------------------------------------------------------
+
+
+def test_minimize_picks_smallest_metric(ledger_path: Path):
+    """For minimize objectives (TSP, tokenizer, regression), the best-of-run
+    star must highlight the SMALLEST metric, not the largest. Without this
+    fix the report would star the worst kept attempt."""
+    ledger = TrialLedger(ledger_path)
+    for i in (1, 2, 3):
+        ledger.append_node(_make_node(i))
+    metrics = {"n000001": 5.0, "n000002": 1.0, "n000003": 3.0}
+    out = render_static_html(
+        ledger_path,
+        metric_lookup=metrics,
+        metric_direction="minimize",
+    )
+    # n000002 is the smallest → should be starred
+    badge_pos = out.index("★ best")
+    n2_pos = out.index('id="n000002"')
+    n3_pos = out.index('id="n000003"')
+    assert n2_pos < badge_pos < n3_pos
+
+
+def test_maximize_picks_largest_metric_default(ledger_path: Path):
+    """Default direction=maximize keeps existing behaviour."""
+    ledger = TrialLedger(ledger_path)
+    for i in (1, 2, 3):
+        ledger.append_node(_make_node(i))
+    metrics = {"n000001": 5.0, "n000002": 1.0, "n000003": 3.0}
+    out = render_static_html(ledger_path, metric_lookup=metrics)
+    # n000001 = 5.0 is largest → should be starred
+    badge_pos = out.index("★ best")
+    n1_pos = out.index('id="n000001"')
+    n2_pos = out.index('id="n000002"')
+    assert n1_pos < badge_pos < n2_pos

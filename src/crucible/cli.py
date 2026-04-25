@@ -928,6 +928,7 @@ def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool,
             ledger_path,
             title=f"Crucible Postmortem — {tag}",
             metric_lookup=metric_lookup,
+            metric_direction=config.metric.direction,
         )
         target = Path(html_out) if html_out else (project / f"postmortem-{tag}.html")
         target.write_text(out)

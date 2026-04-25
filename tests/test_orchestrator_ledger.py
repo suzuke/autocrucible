@@ -319,3 +319,67 @@ def test_no_commit_ledger_failure_logged_not_raised(fake_orchestrator):
     # should not raise
     fake_orchestrator._ledger_log_no_commit("violation", _agent_result_with_cost(), "x")
     fake_orchestrator.ledger.append_node.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Reviewer F1 — resume() must read ledger, not just ResultsLog
+# ---------------------------------------------------------------------------
+
+
+def test_resume_reads_ledger_for_iteration_max(fake_orchestrator):
+    """If ledger has more entries than ResultsLog (because violation/skip
+    only write ledger), _iteration must be set from the LEDGER max so the
+    next iteration doesn't reuse an existing AttemptNode id."""
+    # Stub git checkout so we don't need a real repo
+    fake_orchestrator.git = MagicMock()
+    fake_orchestrator.results.read_all = MagicMock(return_value=[
+        SimpleNamespace(iteration=1, status="keep"),
+        # Only one ResultsLog entry. Ledger has one more (violation).
+    ])
+    # Pre-populate ledger with 2 nodes (1 keep + 1 violation)
+    fake_orchestrator.ledger.append_node(SimpleNamespace.__class__ and __import__("crucible.ledger", fromlist=["AttemptNode"]).AttemptNode(
+        id="n000001", commit="abc", outcome="keep", created_at="2026-04-25T12:00:00+00:00",
+    ))
+    from crucible.ledger import AttemptNode
+    fake_orchestrator.ledger.append_node(AttemptNode(
+        id="n000002", parent_id="n000001", commit="", outcome="violation",
+        description="bad edit", created_at="2026-04-25T12:01:00+00:00",
+    ))
+
+    # Run resume
+    from crucible.orchestrator import Orchestrator
+    Orchestrator.resume(fake_orchestrator)
+
+    # _iteration must reflect ledger max (2), not ResultsLog len (1)
+    assert fake_orchestrator._iteration == 2
+    # parent chain rebuilt
+    assert fake_orchestrator._last_attempt_id_by_beam[None] == "n000002"
+
+
+def test_resume_handles_empty_state(fake_orchestrator):
+    """resume() on empty workspace should set _iteration=0 and empty parent map."""
+    fake_orchestrator.git = MagicMock()
+    fake_orchestrator.results.read_all = MagicMock(return_value=[])
+    from crucible.orchestrator import Orchestrator
+    Orchestrator.resume(fake_orchestrator)
+    assert fake_orchestrator._iteration == 0
+    assert fake_orchestrator._last_attempt_id_by_beam == {}
+
+
+def test_resume_reconstructs_beam_chain(fake_orchestrator):
+    """Per-beam parent chains must be rebuilt from b<beam>n<seq> ids."""
+    fake_orchestrator.git = MagicMock()
+    fake_orchestrator.results.read_all = MagicMock(return_value=[])
+    from crucible.ledger import AttemptNode
+    # beam 0: n000001 → n000002
+    fake_orchestrator.ledger.append_node(AttemptNode(id="b0n000001", outcome="keep"))
+    fake_orchestrator.ledger.append_node(AttemptNode(id="b0n000002", parent_id="b0n000001", outcome="discard"))
+    # beam 1: n000001 only
+    fake_orchestrator.ledger.append_node(AttemptNode(id="b1n000001", outcome="keep"))
+
+    from crucible.orchestrator import Orchestrator
+    Orchestrator.resume(fake_orchestrator)
+    assert fake_orchestrator._last_attempt_id_by_beam[0] == "b0n000002"
+    assert fake_orchestrator._last_attempt_id_by_beam[1] == "b1n000001"
+    # Iteration is max sequence across all ids
+    assert fake_orchestrator._iteration == 2

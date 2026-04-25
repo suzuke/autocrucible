@@ -30,6 +30,7 @@ def render_static_html(
     *,
     title: str = "Crucible Postmortem",
     metric_lookup: dict[str, float] | None = None,
+    metric_direction: str = "maximize",
 ) -> str:
     """Render the ledger at `ledger_path` as a self-contained HTML string.
 
@@ -39,13 +40,21 @@ def render_static_html(
         metric_lookup: optional mapping `attempt_id → metric_value` (from
             results-{tag}.jsonl or sealed EvalResult). When provided, the
             best-of-run is highlighted and metric values appear on each card.
+        metric_direction: "maximize" (default) or "minimize". Determines which
+            extreme of metric_lookup is starred as best-of-run. Critical for
+            minimize-objective examples (TSP, tokenizer, regression, lm).
 
     Returns:
         Complete HTML document (UTF-8 string, ready to write or display).
     """
     ledger = TrialLedger(Path(ledger_path))
     nodes = ledger.all_nodes()
-    return _render(nodes, title=title, metric_lookup=metric_lookup or {})
+    return _render(
+        nodes,
+        title=title,
+        metric_lookup=metric_lookup or {},
+        metric_direction=metric_direction,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -103,13 +112,14 @@ def _render(
     *,
     title: str,
     metric_lookup: dict[str, float],
+    metric_direction: str = "maximize",
 ) -> str:
     if not nodes:
         return _empty_html(title)
 
-    best_id = _best_node_id(nodes, metric_lookup)
+    best_id = _best_node_id(nodes, metric_lookup, metric_direction)
     cards = "\n".join(_render_card(n, best_id, metric_lookup) for n in nodes)
-    summary = _render_summary(nodes, metric_lookup)
+    summary = _render_summary(nodes, metric_lookup, best_id)
 
     return _PAGE_TEMPLATE.format(
         title=html.escape(title),
@@ -131,8 +141,14 @@ def _empty_html(title: str) -> str:
 
 
 def _best_node_id(nodes: Sequence[AttemptNode],
-                  metric_lookup: dict[str, float]) -> str | None:
-    """Pick the highest-metric kept node. Returns None if no candidate."""
+                  metric_lookup: dict[str, float],
+                  metric_direction: str = "maximize") -> str | None:
+    """Pick the best-metric kept node, honouring metric_direction.
+
+    For maximize: argmax(metric). For minimize: argmin(metric). Critical for
+    minimize-objective examples (TSP, tokenizer, regression, lm).
+    Returns None if no kept node has a recorded metric.
+    """
     candidates = [
         (metric_lookup.get(n.id), n)
         for n in nodes
@@ -140,11 +156,13 @@ def _best_node_id(nodes: Sequence[AttemptNode],
     ]
     if not candidates:
         return None
-    return max(candidates, key=lambda pair: pair[0])[1].id
+    chooser = min if metric_direction == "minimize" else max
+    return chooser(candidates, key=lambda pair: pair[0])[1].id
 
 
 def _render_summary(nodes: Sequence[AttemptNode],
-                    metric_lookup: dict[str, float]) -> str:
+                    metric_lookup: dict[str, float],
+                    best_id: str | None = None) -> str:
     by_outcome: dict[str, int] = {}
     for n in nodes:
         by_outcome[n.outcome] = by_outcome.get(n.outcome, 0) + 1
@@ -161,7 +179,6 @@ def _render_summary(nodes: Sequence[AttemptNode],
             f'{html.escape(outcome)}: {count}</span>'
         )
 
-    best_id = _best_node_id(nodes, metric_lookup)
     best_line = ""
     if best_id is not None:
         v = metric_lookup.get(best_id)

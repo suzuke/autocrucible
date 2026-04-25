@@ -169,11 +169,49 @@ class Orchestrator:
             self.git.commit("chore: gitignore generated files")
 
     def resume(self) -> None:
-        """Resume an existing experiment branch."""
+        """Resume an existing experiment branch.
+
+        Reads BOTH ResultsLog and TrialLedger to set _iteration and rebuild
+        the parent_id chain. Required because violation/skip outcomes are
+        recorded in the ledger ONLY (PR 2.1) — if we read only ResultsLog,
+        we'd undercount _iteration and create duplicate AttemptNode IDs.
+        """
         self.git.checkout_branch(self.tag)
         existing = self.results.read_all()
         self._fail_seq = sum(1 for r in existing if r.status in ("crash", "discard"))
-        self._iteration = len(existing)
+
+        # Source 1: ResultsLog (counts keep/discard/crash)
+        results_max = max((r.iteration for r in existing if r.iteration is not None),
+                          default=0)
+        # Source 2: TrialLedger (counts everything including violation/skip)
+        ledger_max = 0
+        try:
+            ledger_nodes = self.ledger.all_nodes()
+        except Exception:
+            ledger_nodes = []
+        if ledger_nodes:
+            # Parse the trailing numeric portion from "n000042" or "b1n000042"
+            for n in ledger_nodes:
+                tail = n.id.split("n")[-1] if "n" in n.id else "0"
+                try:
+                    ledger_max = max(ledger_max, int(tail))
+                except ValueError:
+                    pass
+
+        self._iteration = max(len(existing), results_max, ledger_max)
+
+        # Rebuild parent chain from ledger so the next AttemptNode links
+        # correctly. Walk in append order and remember the last id seen
+        # per beam (None for linear).
+        self._last_attempt_id_by_beam = {}
+        for n in ledger_nodes:
+            beam: int | None = None
+            if n.id.startswith("b") and "n" in n.id:
+                try:
+                    beam = int(n.id[1 : n.id.index("n")])
+                except ValueError:
+                    beam = None
+            self._last_attempt_id_by_beam[beam] = n.id
 
     def run_one_iteration(self) -> str:
         """Execute one full experiment cycle.
@@ -207,6 +245,15 @@ class Orchestrator:
         t0_agent = time.monotonic()
         agent_result = self.agent.generate_edit(prompt, self.workspace)
         agent_duration = time.monotonic() - t0_agent
+
+        # M1a: persist prompt.md early so violation/skip paths (which early-return
+        # before _save_iteration_logs) still leave a trace for AttemptNode.prompt_ref.
+        try:
+            log_dir = self.workspace / "logs" / f"iter-{self._iteration}"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            (log_dir / "prompt.md").write_text(prompt)
+        except OSError as exc:  # never break the loop on disk errors
+            logger.warning("could not save prompt.md: %s", exc)
 
         # Budget check
         self.budget.accumulate(agent_result.usage)
@@ -288,8 +335,10 @@ class Orchestrator:
 
         total_duration = agent_duration + run_duration
 
-        # Save per-iteration logs (agent reasoning + run.log)
-        self._save_iteration_logs(self._iteration, agent_result)
+        # Save per-iteration logs (agent reasoning + run.log + prompt + diff)
+        self._save_iteration_logs(
+            self._iteration, agent_result, prompt=prompt, diff_text=diff_text,
+        )
 
         # 10. Handle crash (metric is None or invalid)
         if metric_value is None or not self.guardrails.check_metric(metric_value):
@@ -532,8 +581,20 @@ class Orchestrator:
             return log_path.read_text()
         return None
 
-    def _save_iteration_logs(self, iteration: int, agent_result) -> None:
-        """Save agent output and run.log to logs/iter-{N}/."""
+    def _save_iteration_logs(
+        self,
+        iteration: int,
+        agent_result,
+        prompt: str | None = None,
+        diff_text: str | None = None,
+    ) -> None:
+        """Save agent output, run.log, and (M1a) prompt + diff artefacts.
+
+        prompt.md and diff.patch are referenced by AttemptNode.prompt_ref /
+        diff_ref. Per reviewer F3: orchestrator MUST write these files if
+        AttemptNode is going to point at them, otherwise HTML report has
+        broken links.
+        """
         log_dir = self.workspace / "logs" / f"iter-{iteration}"
         log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -545,6 +606,12 @@ class Orchestrator:
         run_log = self.workspace / "run.log"
         if run_log.exists():
             shutil.copy2(run_log, log_dir / "run.log")
+
+        # M1a: persist prompt + diff for the ledger's *_ref fields
+        if prompt is not None:
+            (log_dir / "prompt.md").write_text(prompt)
+        if diff_text:
+            (log_dir / "diff.patch").write_text(diff_text)
 
     def _install_requirements(self):
         """Install packages from requirements.txt."""
