@@ -105,6 +105,12 @@ class SearchConfig:
     strategy: str = "greedy"   # greedy | restart | beam | bfts-lite
     beam_width: int = 3
     plateau_threshold: int = 8
+    # M2 PR 10: doom-loop pruning threshold for BFTSLiteStrategy.
+    # When a kept node has accumulated this many consecutive trailing
+    # failed-expansion children (discard / crash / non-improving keep),
+    # BFTS stops considering it for BranchFrom and falls back to the
+    # next-best kept node. Other strategies ignore this field.
+    prune_threshold: int = 3
 
 
 @dataclass
@@ -193,10 +199,16 @@ def _build_search(search_data: dict, constraints_data: dict) -> SearchConfig:
         "plateau_threshold",
         constraints_data.get("plateau_threshold", 8),
     )
+    prune_threshold = search_data.get("prune_threshold", 3)
+    if not isinstance(prune_threshold, int) or prune_threshold < 1:
+        raise ConfigError(
+            f"search.prune_threshold must be a positive int, got {prune_threshold!r}"
+        )
     return SearchConfig(
         strategy=search_data.get("strategy", "greedy"),
         beam_width=search_data.get("beam_width", 3),
         plateau_threshold=plateau,
+        prune_threshold=prune_threshold,
     )
 
 
