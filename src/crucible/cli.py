@@ -691,8 +691,34 @@ def history(tag: str, last: int, project_dir: str, as_json: bool, fmt: str) -> N
 @main.command(help=_("Compare two experiment runs side by side."))
 @click.argument("tags", nargs=2)
 @click.option("--project-dir", default=".", help=_("Project root directory."))
+@click.option("--right-project", default=None,
+              help=_("Project root for the SECOND tag (for cross-project compare). "
+                     "If omitted, both tags are read from --project-dir."))
 @click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
-def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
+@click.option("--html", "html_output", is_flag=True,
+              help=_("Render side-by-side HTML comparison from ledger.jsonl files. "
+                     "M2 PR 11."))
+@click.option("--html-out", default=None,
+              help=_("Output path for the HTML report "
+                     "(default: <project>/reports/compare-<a>-vs-<b>.html)."))
+def compare(tags: tuple[str, str], project_dir: str, right_project: str | None,
+            as_json: bool, html_output: bool, html_out: str | None) -> None:
+    tag_a, tag_b = tags
+
+    if html_output:
+        _render_compare_html(
+            tag_a, tag_b,
+            project_dir=project_dir,
+            right_project_dir=right_project,
+            html_out=html_out,
+        )
+        return
+
+    if right_project is not None:
+        raise click.ClickException(
+            _("--right-project is currently only supported with --html")
+        )
+
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -727,7 +753,6 @@ def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
         click.echo(json_module.dumps(comparison))
         return
 
-    tag_a, tag_b = tags
     col_w = max(len(tag_a), len(tag_b), 12)
     click.echo(f"{'':>16} {tag_a:>{col_w}} {tag_b:>{col_w}}")
     for key in ("iterations", "kept", "discarded", "crashed", "best_metric", "best_commit"):
@@ -735,6 +760,110 @@ def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
         vb = comparison[tag_b].get(key, "N/A")
         label = key.replace("_", " ").title()
         click.echo(f"{label:>16} {str(va):>{col_w}} {str(vb):>{col_w}}")
+
+
+def _build_metric_lookup(results_path: Path) -> dict[str, float]:
+    """Build attempt_id → metric_value map from a results-<tag>.jsonl file.
+
+    Mirrors the same id derivation used by `crucible postmortem --html`.
+    Returns {} if the file is missing or unreadable (best-effort).
+    """
+    metric_lookup: dict[str, float] = {}
+    if not results_path.exists():
+        return metric_lookup
+    try:
+        with results_path.open() as fp:
+            for i, line in enumerate(fp, start=1):
+                rec = json_module.loads(line)
+                if rec.get("metric_value") is None:
+                    continue
+                beam_id = rec.get("beam_id")
+                iteration = rec.get("iteration", i)
+                attempt_id = (
+                    f"n{iteration:06d}" if beam_id is None
+                    else f"b{beam_id}n{iteration:06d}"
+                )
+                metric_lookup[attempt_id] = float(rec["metric_value"])
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "could not build metric_lookup from %s: %s", results_path, exc
+        )
+    return metric_lookup
+
+
+def _render_compare_html(
+    tag_a: str,
+    tag_b: str,
+    *,
+    project_dir: str,
+    right_project_dir: str | None,
+    html_out: str | None,
+) -> None:
+    """Render `crucible compare --html` output. Strict read-only."""
+    from crucible.reporter import render_comparison_html
+
+    left_project = Path(project_dir).resolve()
+    right_project = (
+        Path(right_project_dir).resolve() if right_project_dir else left_project
+    )
+    cross_project = right_project != left_project
+
+    left_ledger = left_project / "logs" / f"run-{tag_a}" / "ledger.jsonl"
+    right_ledger = right_project / "logs" / f"run-{tag_b}" / "ledger.jsonl"
+    for label, path in (("left", left_ledger), ("right", right_ledger)):
+        if not path.exists():
+            raise click.ClickException(
+                _("ledger not found for {label} side: {path}").format(
+                    label=label, path=path
+                )
+            )
+
+    # Per-side metric direction: read each project's config independently.
+    # If a config is missing/unreadable, pass None → renderer omits Δ.
+    left_dir = _safe_read_metric_direction(left_project)
+    right_dir = _safe_read_metric_direction(right_project)
+
+    left_metrics = _build_metric_lookup(left_project / results_filename(tag_a))
+    right_metrics = _build_metric_lookup(right_project / results_filename(tag_b))
+
+    title = (
+        f"Crucible Compare — {tag_a} (left) vs {tag_b} (right)"
+        if not cross_project
+        else f"Crucible Compare — {left_project.name}:{tag_a} vs {right_project.name}:{tag_b}"
+    )
+
+    out = render_comparison_html(
+        left_ledger,
+        right_ledger,
+        left_label=tag_a,
+        right_label=tag_b,
+        title=title,
+        left_metric_lookup=left_metrics,
+        right_metric_lookup=right_metrics,
+        left_direction=left_dir,
+        right_direction=right_dir,
+    )
+
+    if html_out:
+        target = Path(html_out)
+    elif cross_project:
+        target = Path.cwd() / f"compare-{tag_a}-vs-{tag_b}.html"
+    else:
+        reports_dir = left_project / "reports"
+        reports_dir.mkdir(exist_ok=True)
+        target = reports_dir / f"compare-{tag_a}-vs-{tag_b}.html"
+
+    target.write_text(out)
+    click.echo(_("Wrote HTML comparison to {path}").format(path=target))
+
+
+def _safe_read_metric_direction(project: Path) -> str | None:
+    """Return `metric.direction` from a project config, or None on failure."""
+    try:
+        cfg = load_config(project)
+        return cfg.metric.direction
+    except (ConfigError, FileNotFoundError, OSError):
+        return None
 
 
 @main.command(help=_("Generate a new experiment from a natural language description."))
