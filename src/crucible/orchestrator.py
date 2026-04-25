@@ -147,6 +147,12 @@ class Orchestrator:
             logger.warning("unknown search strategy %r — using legacy path",
                            config.search.strategy)
             self.strategy = None
+        # M2 PR 12: validate seal config at startup so HMAC misconfig
+        # fails immediately rather than after the first eval finishes.
+        # Cheap no-op for the default content-sha256 algorithm.
+        from crucible.sealing import validate_seal_config
+        validate_seal_config(config.seal)
+
         self._critic = None
         if config.agent.critic.enabled:
             from crucible.agents.critic import CriticAgent
@@ -598,7 +604,8 @@ class Orchestrator:
             canonical = _json.dumps(
                 payload_dict, sort_keys=True, separators=(",", ":")
             ).encode("utf-8")
-            payload.seal = "content-sha256:" + hashlib.sha256(canonical).hexdigest()
+            from crucible.sealing import compute_seal
+            payload.seal = compute_seal(canonical, config=self.config.seal)
             payload_dict["seal"] = payload.seal
 
             # Write under logs/run-<tag>/iter-<N>/eval-result.json (per spec §4).

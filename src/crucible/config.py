@@ -114,6 +114,24 @@ class SearchConfig:
 
 
 @dataclass
+class SealConfig:
+    """M2 PR 12: integrity / authenticity policy for `eval-result.json` seals.
+
+    M1 used `content-sha256:<hex>` (corruption check only). M2 introduces
+    `hmac-sha256:<key-id>:<hex>` (tamper-evidence under Docker isolation,
+    where the agent has no access to the host's CRUCIBLE_SEAL_KEY).
+
+    Default `algorithm: content-sha256` so existing projects keep their
+    M1 byte-identical seal output. Users opt into HMAC explicitly.
+    """
+    algorithm: str = "content-sha256"   # "content-sha256" | "hmac-sha256"
+    key_id: str = "default"             # opaque label; embedded in seal string
+    key_env_var: str = "CRUCIBLE_SEAL_KEY"  # hex-encoded bytes
+    key_file: str | None = None         # path to a hex-encoded keyfile; takes
+                                        # precedence over key_env_var if set
+
+
+@dataclass
 class Config:
     name: str = ""
     description: str = ""
@@ -126,6 +144,7 @@ class Config:
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     sandbox: SandboxConfig | None = None
     search: SearchConfig = field(default_factory=SearchConfig)
+    seal: SealConfig = field(default_factory=SealConfig)
 
 
 def _build_context_window(data: dict) -> ContextWindowConfig:
@@ -209,6 +228,38 @@ def _build_search(search_data: dict, constraints_data: dict) -> SearchConfig:
         beam_width=search_data.get("beam_width", 3),
         plateau_threshold=plateau,
         prune_threshold=prune_threshold,
+    )
+
+
+_SUPPORTED_SEAL_ALGORITHMS = ("content-sha256", "hmac-sha256")
+
+
+def _build_seal(seal_data: dict) -> SealConfig:
+    if not seal_data:
+        return SealConfig()
+    algorithm = seal_data.get("algorithm", "content-sha256")
+    if algorithm not in _SUPPORTED_SEAL_ALGORITHMS:
+        raise ConfigError(
+            f"seal.algorithm must be one of {list(_SUPPORTED_SEAL_ALGORITHMS)}, "
+            f"got {algorithm!r}"
+        )
+    key_id = seal_data.get("key_id", "default")
+    if not isinstance(key_id, str) or not key_id:
+        raise ConfigError("seal.key_id must be a non-empty string")
+    # M2 PR 12 reviewer: key_id MUST NOT contain ':' since it terminates
+    # the algorithm/key_id portion of the seal string.
+    if ":" in key_id:
+        raise ConfigError(
+            f"seal.key_id must not contain ':' (got {key_id!r}); "
+            f"the seal format is '<algorithm>:<key-id>:<hex>'"
+        )
+    key_env_var = seal_data.get("key_env_var", "CRUCIBLE_SEAL_KEY")
+    key_file = seal_data.get("key_file")
+    return SealConfig(
+        algorithm=algorithm,
+        key_id=key_id,
+        key_env_var=key_env_var,
+        key_file=key_file,
     )
 
 
@@ -304,4 +355,5 @@ def load_config(project_root: Path) -> Config:
             raw.get("search", {}),
             raw.get("constraints", {}),
         ),
+        seal=_build_seal(raw.get("seal", {})),
     )

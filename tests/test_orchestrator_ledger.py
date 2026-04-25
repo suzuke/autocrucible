@@ -487,6 +487,12 @@ def test_write_eval_result_artifact_creates_json_with_seal(fake_orchestrator, wo
     fake_orchestrator.config = SimpleNamespace(
         commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
         metric=SimpleNamespace(name="ratio", direction="maximize"),
+        seal=SimpleNamespace(
+            algorithm="content-sha256",
+            key_id="default",
+            key_env_var="CRUCIBLE_SEAL_KEY",
+            key_file=None,
+        ),
     )
     fake_orchestrator._current_beam_id = None
 
@@ -525,6 +531,12 @@ def test_write_eval_result_artifact_handles_missing_metric(fake_orchestrator, wo
     fake_orchestrator.config = SimpleNamespace(
         commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
         metric=SimpleNamespace(name="ratio", direction="maximize"),
+        seal=SimpleNamespace(
+            algorithm="content-sha256",
+            key_id="default",
+            key_env_var="CRUCIBLE_SEAL_KEY",
+            key_file=None,
+        ),
     )
     fake_orchestrator._current_beam_id = None
 
@@ -554,6 +566,12 @@ def test_write_eval_result_artifact_handles_io_failure(fake_orchestrator):
     fake_orchestrator.config = SimpleNamespace(
         commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
         metric=SimpleNamespace(name="ratio", direction="maximize"),
+        seal=SimpleNamespace(
+            algorithm="content-sha256",
+            key_id="default",
+            key_env_var="CRUCIBLE_SEAL_KEY",
+            key_file=None,
+        ),
     )
     fake_orchestrator._current_beam_id = None
     fake_orchestrator.workspace = Path("/no/such/dir/that/exists")
@@ -587,6 +605,12 @@ def test_write_eval_result_artifact_seals_eval_stdout_not_run_stdout(
     fake_orchestrator.config = SimpleNamespace(
         commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
         metric=SimpleNamespace(name="ratio", direction="maximize"),
+        seal=SimpleNamespace(
+            algorithm="content-sha256",
+            key_id="default",
+            key_env_var="CRUCIBLE_SEAL_KEY",
+            key_file=None,
+        ),
     )
     fake_orchestrator._current_beam_id = None
 
