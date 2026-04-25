@@ -51,7 +51,7 @@ def _ctx(
     metrics: dict[str, float] | None = None,
     direction: str = "maximize",
     iters: int = 0,
-    failures: int = 0,
+    streak: int = 0,
     plateau: int = 8,
     max_iters: int | None = None,
     baseline: str | None = "abc1234",
@@ -61,7 +61,7 @@ def _ctx(
         metric_lookup=metrics or {},
         metric_direction=direction,  # type: ignore[arg-type]
         iteration_count=iters,
-        consecutive_failures=failures,
+        plateau_streak=streak,
         plateau_threshold=plateau,
         max_iterations=max_iters,
         baseline_commit=baseline,
@@ -98,12 +98,12 @@ def test_make_strategy_unknown_raises():
 
 def test_greedy_continues_when_no_failures():
     s = GreedyStrategy()
-    assert isinstance(s.decide(_ctx(iters=3, failures=0, plateau=8)), Continue)
+    assert isinstance(s.decide(_ctx(iters=3, streak=0, plateau=8)), Continue)
 
 
 def test_greedy_stops_at_plateau():
     s = GreedyStrategy()
-    action = s.decide(_ctx(iters=10, failures=8, plateau=8))
+    action = s.decide(_ctx(iters=10, streak=8, plateau=8))
     assert isinstance(action, Stop)
     assert "plateau" in action.reason.lower()
 
@@ -118,7 +118,7 @@ def test_greedy_stops_at_max_iterations():
 def test_greedy_max_iters_takes_priority_over_plateau():
     """Max iterations is a harder stop than plateau."""
     s = GreedyStrategy()
-    action = s.decide(_ctx(iters=20, failures=8, plateau=8, max_iters=20))
+    action = s.decide(_ctx(iters=20, streak=8, plateau=8, max_iters=20))
     assert isinstance(action, Stop)
     # Either reason is acceptable; just verify it stops.
 
@@ -140,13 +140,13 @@ def test_restart_continues_when_no_failures():
 
 def test_restart_returns_restart_at_plateau():
     s = RestartStrategy()
-    action = s.decide(_ctx(iters=10, failures=8, plateau=8))
+    action = s.decide(_ctx(iters=10, streak=8, plateau=8))
     assert isinstance(action, Restart)
 
 
 def test_restart_stops_at_max_iterations_before_restarting():
     s = RestartStrategy()
-    action = s.decide(_ctx(iters=20, failures=8, plateau=8, max_iters=20))
+    action = s.decide(_ctx(iters=20, streak=8, plateau=8, max_iters=20))
     assert isinstance(action, Stop)
 
 

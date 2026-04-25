@@ -29,6 +29,15 @@ from crucible.ledger import (
 )
 from crucible.results import ExperimentRecord, ResultsLog, results_filename
 from crucible.runner import ExperimentRunner
+from crucible.strategy import (
+    BranchFrom,
+    Continue as StrategyContinue,
+    Restart as StrategyRestart,
+    SearchStrategy,
+    Stop as StrategyStop,
+    StrategyContext,
+    make_strategy,
+)
 
 
 @dataclass
@@ -120,6 +129,19 @@ class Orchestrator:
         # M1a: parent_id tracking for AttemptNode tree edges. Linear strategies
         # (greedy / restart) → key=None. Beam strategy → key=beam_id.
         self._last_attempt_id_by_beam: dict[Optional[int], Optional[str]] = {}
+        # M1b PR 2: SearchStrategy Protocol instance. Beam still uses the
+        # legacy _run_loop_beam path; "greedy" / "restart" / "bfts-lite" go
+        # through self.strategy.decide() in _run_loop_serial.
+        try:
+            if config.search.strategy != "beam":
+                self.strategy: SearchStrategy | None = make_strategy(config.search.strategy)
+            else:
+                self.strategy = None
+        except ValueError:
+            # Unknown strategy name → fall back to legacy string-branching path.
+            logger.warning("unknown search strategy %r — using legacy path",
+                           config.search.strategy)
+            self.strategy = None
         self._critic = None
         if config.agent.critic.enabled:
             from crucible.agents.critic import CriticAgent
@@ -773,8 +795,52 @@ class Orchestrator:
                     )
                     break
 
-                # Restart strategy: reset to baseline on plateau
-                if strategy == "restart" and self._baseline_commit:
+                # M1b PR 2: SearchStrategy decides plateau→Restart vs Continue
+                # vs Stop. Falls back to legacy string-branching if no
+                # strategy was instantiated (unknown name / "beam" path).
+                if self.strategy is not None:
+                    streak = self._count_plateau_streak()
+                    sctx = StrategyContext(
+                        ledger_nodes=tuple(),  # ledger nodes not yet
+                                                # consumed by Greedy/Restart;
+                                                # BFTS-lite (M1b PR 3) will
+                                                # need this populated
+                        metric_lookup={},
+                        metric_direction=self.config.metric.direction,
+                        iteration_count=session_count,
+                        plateau_streak=streak,
+                        plateau_threshold=plateau_threshold,
+                        max_iterations=max_iterations,
+                        baseline_commit=self._baseline_commit,
+                    )
+                    action = self.strategy.decide(sctx)
+                    if isinstance(action, StrategyStop):
+                        logger.info(f"[strategy] {action.reason}")
+                        break
+                    elif isinstance(action, StrategyRestart):
+                        if self._baseline_commit:
+                            logger.info(
+                                f"[iter {self._iteration}] Plateau ({streak} iters) — "
+                                "restarting from baseline"
+                            )
+                            self.git.reset_to_commit(self._baseline_commit)
+                            self.context.add_error(
+                                f"⟳ RESTART — {streak} iterations without improvement. "
+                                "Returning to baseline. Your full history is preserved above. "
+                                "Choose a completely different direction."
+                            )
+                            self._consecutive_failures = 0
+                            self._consecutive_skips = 0
+                    elif isinstance(action, BranchFrom):
+                        # M1b PR 3 will implement git checkout + workspace reset
+                        # to the BranchFrom.parent_id commit. PR 2 logs only.
+                        logger.info(
+                            f"[strategy] BranchFrom({action.parent_id}) — "
+                            "not yet wired; treating as Continue"
+                        )
+                    # Continue → fall through to next iteration
+                elif strategy == "restart" and self._baseline_commit:
+                    # Legacy path (only reached if make_strategy failed).
                     streak = self._count_plateau_streak()
                     if streak >= plateau_threshold:
                         logger.info(

@@ -93,7 +93,7 @@ class StrategyContext:
     metric_lookup: dict[str, float]
     metric_direction: Literal["maximize", "minimize"]
     iteration_count: int  # number of iterations completed so far
-    consecutive_failures: int
+    plateau_streak: int
     plateau_threshold: int  # config.search.plateau_threshold
     max_iterations: Optional[int]
     baseline_commit: Optional[str]
@@ -155,7 +155,7 @@ class GreedyStrategy:
     def decide(self, ctx: StrategyContext) -> StrategyAction:
         if ctx.max_iterations is not None and ctx.iteration_count >= ctx.max_iterations:
             return Stop(reason=f"max_iterations={ctx.max_iterations} reached")
-        if ctx.consecutive_failures >= ctx.plateau_threshold:
+        if ctx.plateau_streak >= ctx.plateau_threshold:
             return Stop(reason=f"plateau_threshold={ctx.plateau_threshold} hit")
         return Continue()
 
@@ -173,7 +173,7 @@ class RestartStrategy:
     def decide(self, ctx: StrategyContext) -> StrategyAction:
         if ctx.max_iterations is not None and ctx.iteration_count >= ctx.max_iterations:
             return Stop(reason=f"max_iterations={ctx.max_iterations} reached")
-        if ctx.consecutive_failures >= ctx.plateau_threshold:
+        if ctx.plateau_streak >= ctx.plateau_threshold:
             return Restart(reason=f"plateau_threshold={ctx.plateau_threshold} hit")
         return Continue()
 
