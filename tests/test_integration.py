@@ -36,7 +36,9 @@ constraints:
   timeout_seconds: 10
   max_retries: 2
 agent:
-  type: "fake"
+  # Type uses one of the supported names; the orchestrator overrides
+  # the agent instance directly via constructor injection in this test.
+  type: "claude-code"
   instructions: "program.md"
 git:
   branch_prefix: "test"

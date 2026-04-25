@@ -347,16 +347,27 @@ def init(tag: str, project_dir: str) -> None:
 
     from crucible.agents import create_agent
     from crucible.orchestrator import Orchestrator
+    from crucible.security.cheat_resistance_policy import CheatResistancePolicy
 
     editable = set(config.files.editable)
     if config.constraints.allow_install:
         editable.add("requirements.txt")
 
+    # Always build the policy so factory paths that need it (smolagents)
+    # have it ready. ClaudeCode backend ignores it.
+    policy = CheatResistancePolicy.from_lists(
+        workspace=project,
+        editable=list(editable),
+        readonly=list(config.files.readonly),
+        hidden=list(config.files.hidden),
+    )
     agent = create_agent(
         config.agent,
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
         editable_files=editable,
+        workspace=project,
+        policy=policy,
     )
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
     orch.init()
@@ -420,14 +431,24 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
     except ConfigError as e:
         raise click.ClickException(str(e))
 
-    check_claude_cli()
+    # `check_claude_cli()` only applies to the claude-code backend.
+    if config.agent.type == "claude-code":
+        check_claude_cli()
 
     from crucible.agents import create_agent
     from crucible.orchestrator import Orchestrator
+    from crucible.security.cheat_resistance_policy import CheatResistancePolicy
 
     editable = set(config.files.editable)
     if config.constraints.allow_install:
         editable.add("requirements.txt")
+
+    policy = CheatResistancePolicy.from_lists(
+        workspace=project,
+        editable=list(editable),
+        readonly=list(config.files.readonly),
+        hidden=list(config.files.hidden),
+    )
 
     override_kwargs: dict = {}
     if timeout is not None:
@@ -439,6 +460,8 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
         editable_files=editable,
+        workspace=project,
+        policy=policy,
         **override_kwargs,
     )
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent, profile=profile)

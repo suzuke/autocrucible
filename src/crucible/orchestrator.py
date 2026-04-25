@@ -729,12 +729,18 @@ class Orchestrator:
         eval_result_ref = getattr(self, "_pending_eval_result_ref", None)
         eval_result_sha256 = getattr(self, "_pending_eval_result_sha256", None)
 
+        # M2 PR 13: ask the agent for its identity if it exposes one;
+        # fall back to "claude_sdk" for the legacy ClaudeCodeAgent which
+        # doesn't have backend_kind/backend_version properties.
+        backend_kind = getattr(self.agent, "backend_kind", None) or "claude_sdk"
+        backend_version = getattr(self.agent, "backend_version", None) or ""
+
         node = AttemptNode(
             id=attempt_id,
             parent_id=parent_id,
             commit=record.commit or "",
-            backend_kind="claude_sdk",  # M2 generalises via AgentBackend.kind
-            backend_version="",
+            backend_kind=backend_kind,
+            backend_version=backend_version,
             model=getattr(self.agent, "model", "") or "",
             prompt_digest="",  # populated when prompt hashing lands (M1b)
             prompt_ref=prompt_ref,
@@ -807,12 +813,14 @@ class Orchestrator:
             usage_source = "api"
 
         try:
+            backend_kind = getattr(self.agent, "backend_kind", None) or "claude_sdk"
+            backend_version = getattr(self.agent, "backend_version", None) or ""
             node = AttemptNode(
                 id=attempt_id,
                 parent_id=parent_id,
                 commit="",  # no commit happened
-                backend_kind="claude_sdk",
-                backend_version="",
+                backend_kind=backend_kind,
+                backend_version=backend_version,
                 model=getattr(self.agent, "model", "") or "",
                 prompt_digest="",
                 prompt_ref=f"logs/iter-{seq}/prompt.md",
