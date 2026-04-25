@@ -10,6 +10,7 @@ from crucible.config import (
 from crucible.agents.base import AgentResult, AgentErrorType
 from crucible.config import SearchConfig
 from crucible.results import ExperimentRecord
+from crucible.runner import MetricParseResult
 
 
 def make_config():
@@ -48,9 +49,9 @@ def test_single_successful_iteration(tmp_path):
 
     # Mock runner to simulate successful experiment
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
-        mock_parse.return_value = 0.95
+        mock_parse.return_value = MetricParseResult(metric_value=0.95, stdout='', stderr_tail='')
 
         def modify_file(*args, **kwargs):
             (tmp_path / "train.py").write_text("x = 2")
@@ -75,9 +76,9 @@ def test_iteration_with_crash(tmp_path):
     orch.init()
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=1, timed_out=False, stderr_tail="OOM error")
-        mock_parse.return_value = None
+        mock_parse.return_value = MetricParseResult(metric_value=None, stdout='', stderr_tail='')
 
         def modify_file(*args, **kwargs):
             (tmp_path / "train.py").write_text("x = bad")
@@ -153,9 +154,9 @@ def test_hidden_files_remain_on_disk_during_agent_call(tmp_path):
     mock_agent.generate_edit.side_effect = agent_check_files
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
-        mock_parse.return_value = 0.95
+        mock_parse.return_value = MetricParseResult(metric_value=0.95, stdout='', stderr_tail='')
         result = orch.run_one_iteration()
 
     assert result == "keep"
@@ -188,9 +189,9 @@ def test_hidden_files_stripped_from_modified_list(tmp_path):
     mock_agent.generate_edit.side_effect = agent_creates_hidden
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
-        mock_parse.return_value = 0.95
+        mock_parse.return_value = MetricParseResult(metric_value=0.95, stdout='', stderr_tail='')
         result = orch.run_one_iteration()
 
     assert result == "keep"
@@ -297,9 +298,9 @@ def test_budget_exceeded_stops(tmp_path):
     mock_agent.generate_edit.side_effect = modify_file
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
-        mock_parse.return_value = 0.95
+        mock_parse.return_value = MetricParseResult(metric_value=0.95, stdout='', stderr_tail='')
         result = orch.run_one_iteration()
 
     assert result == "budget_exceeded"
@@ -326,9 +327,9 @@ def test_budget_warning_does_not_stop(tmp_path):
     mock_agent.generate_edit.side_effect = modify_file
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
-        mock_parse.return_value = 0.95
+        mock_parse.return_value = MetricParseResult(metric_value=0.95, stdout='', stderr_tail='')
         result = orch.run_one_iteration()
 
     # Should keep the result, not stop
@@ -357,9 +358,9 @@ def test_no_budget_config_runs_normally(tmp_path):
     mock_agent.generate_edit.side_effect = modify_file
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
-        mock_parse.return_value = 0.95
+        mock_parse.return_value = MetricParseResult(metric_value=0.95, stdout='', stderr_tail='')
         result = orch.run_one_iteration()
 
     assert result == "keep"
@@ -419,9 +420,9 @@ def test_iteration_saves_agent_log(tmp_path):
     mock_agent.generate_edit.side_effect = modify_file
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
-        mock_parse.return_value = 0.95
+        mock_parse.return_value = MetricParseResult(metric_value=0.95, stdout='', stderr_tail='')
         orch.run_one_iteration()
 
     agent_log = tmp_path / "logs" / "iter-1" / "agent.txt"
@@ -448,10 +449,10 @@ def test_allow_install_installs_on_requirements_change(tmp_path):
     mock_agent.generate_edit.side_effect = modify_files
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse, \
+         patch.object(orch.runner, "parse_metric_result") as mock_parse, \
          patch.object(orch, "_install_requirements") as mock_install:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
-        mock_parse.return_value = 0.95
+        mock_parse.return_value = MetricParseResult(metric_value=0.95, stdout='', stderr_tail='')
         result = orch.run_one_iteration()
 
     assert result == "keep"
@@ -538,10 +539,10 @@ def test_run_loop_stops_at_max_iterations(tmp_path):
     mock_agent.generate_edit.side_effect = modify_file
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
         # Return decreasing values so each iteration is "keep"
-        mock_parse.side_effect = [0.5, 0.4, 0.3]
+        mock_parse.side_effect = [MetricParseResult(metric_value=0.5, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.4, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.3, stdout='', stderr_tail='')]
         orch.run_loop(max_iterations=3)
 
     assert call_count == 3
@@ -566,9 +567,9 @@ def test_run_loop_none_max_iterations_uses_config(tmp_path):
     mock_agent.generate_edit.side_effect = modify_file
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
-        mock_parse.side_effect = [0.5, 0.4]
+        mock_parse.side_effect = [MetricParseResult(metric_value=0.5, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.4, stdout='', stderr_tail='')]
         orch.run_loop()  # No explicit max_iterations — should use config
 
     assert call_count == 2
@@ -699,10 +700,10 @@ def test_convergence_stops_on_plateau(tmp_path):
     mock_agent.generate_edit.side_effect = modify_file
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
         # First iteration: keep (0.5), then 3 discards (all worse: 0.6, 0.7, 0.8)
-        mock_parse.side_effect = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        mock_parse.side_effect = [MetricParseResult(metric_value=0.5, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.6, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.7, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.8, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.9, stdout='', stderr_tail=''), MetricParseResult(metric_value=1.0, stdout='', stderr_tail='')]
         orch._run_loop_serial(max_iterations=10)
 
     # Should have run 4 iterations: 1 keep + 3 discards (convergence_window=3)
@@ -729,10 +730,14 @@ def test_convergence_disabled_by_default(tmp_path):
     mock_agent.generate_edit.side_effect = modify_file
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
         # First keep, then all discards — but no convergence stop
-        mock_parse.side_effect = [0.5] + [0.6] * 5
+        mock_parse.side_effect = [
+            MetricParseResult(metric_value=0.5, stdout='', stderr_tail=''),
+        ] + [
+            MetricParseResult(metric_value=0.6, stdout='', stderr_tail='')
+        ] * 5
         orch._run_loop_serial(max_iterations=6)
 
     assert call_count == 6
@@ -757,11 +762,11 @@ def test_convergence_min_improvement(tmp_path):
     mock_agent.generate_edit.side_effect = modify_file
 
     with patch.object(orch.runner, "execute") as mock_exec, \
-         patch.object(orch.runner, "parse_metric") as mock_parse:
+         patch.object(orch.runner, "parse_metric_result") as mock_parse:
         mock_exec.return_value = MagicMock(exit_code=0, timed_out=False, stderr_tail="")
         # Tiny improvements: 0.500 → 0.4999 → 0.4998 → 0.4997 → 0.4996
         # delta_percent < 1% each time, within min_improvement=0.01
-        mock_parse.side_effect = [0.500, 0.4999, 0.4998, 0.4997, 0.4996, 0.4995]
+        mock_parse.side_effect = [MetricParseResult(metric_value=0.500, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.4999, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.4998, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.4997, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.4996, stdout='', stderr_tail=''), MetricParseResult(metric_value=0.4995, stdout='', stderr_tail='')]
         orch._run_loop_serial(max_iterations=10)
 
     # All keeps but negligible — converges after window=4 iterations

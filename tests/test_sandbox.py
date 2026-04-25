@@ -64,12 +64,24 @@ def test_none_backend_with_explicit_config(tmp_path):
         mock_exec.assert_called_once()
 
 
-def test_parse_metric_always_native(tmp_path):
-    cfg = SandboxConfig(backend="docker")
+def test_parse_metric_native_when_backend_none(tmp_path):
+    """In backend='none' mode, parse_metric still delegates to the native
+    ExperimentRunner. Renamed from `test_parse_metric_always_native`,
+    which asserted the now-fixed v3.2 trust break: in docker mode,
+    parse_metric runs INSIDE the container, not on the host.
+
+    M1b PR 8b: parse_metric is a backward-compat shim over
+    parse_metric_result. Native delegation goes through the result
+    method now."""
+    from crucible.runner import MetricParseResult
+    cfg = SandboxConfig(backend="none")
     runner = SandboxRunner(config=cfg, workspace=tmp_path)
-    with patch.object(runner._native, "parse_metric", return_value=0.5) as mock_pm:
+    fake_result = MetricParseResult(metric_value=0.5, stdout="metric: 0.5\n",
+                                    stderr_tail="", exit_code=0, timed_out=False)
+    with patch.object(runner._native, "parse_metric_result",
+                      return_value=fake_result) as mock_pm:
         val = runner.parse_metric("python eval.py", "accuracy")
-        mock_pm.assert_called_once_with("python eval.py", "accuracy")
+        mock_pm.assert_called_once()
         assert val == 0.5
 
 
@@ -427,3 +439,77 @@ def test_docker_shadow_not_overridden_by_editable(tmp_path):
             assert "/dev/null:/workspace/.env:ro" in args_str
             # Real path must NOT be mounted as rw
             assert f"{tmp_path}/.env:/workspace/.env:rw" not in args_str
+
+
+# --- M1b PR 5c: parse_metric runs eval inside Docker isolation ---
+
+
+def test_parse_metric_docker_uses_isolation(tmp_path: Path):
+    """Per spec §M1b: when backend='docker', SandboxRunner.parse_metric
+    must run the eval command via _docker_run, NOT via _native.parse_metric.
+
+    Closes the trust-boundary break the v3.2 spec review flagged at
+    sandbox.py:59-64.
+    """
+    config = SandboxConfig(backend="docker", base_image="python:3.11-slim")
+    runner = SandboxRunner(config=config, workspace=tmp_path)
+
+    captured_calls = []
+
+    def fake_docker_run(self, command: str, timeout: int) -> RunResult:
+        captured_calls.append((command, timeout))
+        return RunResult(exit_code=0, timed_out=False, stderr_tail="", stdout="metric: 1.42\n")
+
+    with patch.object(SandboxRunner, "_docker_run", fake_docker_run):
+        # _native.parse_metric must NOT be called when backend=docker
+        with patch.object(runner._native, "parse_metric") as native_pm:
+            value = runner.parse_metric("python eval.py", "metric")
+
+    assert value == 1.42
+    assert len(captured_calls) == 1, "eval should run via _docker_run exactly once"
+    assert captured_calls[0][0] == "python eval.py"
+    native_pm.assert_not_called()
+
+
+def test_parse_metric_native_falls_through(tmp_path: Path):
+    """When backend='none', parse_metric still delegates to native runner.
+    M1b PR 8b: now goes through parse_metric_result internally."""
+    from crucible.runner import MetricParseResult
+    config = SandboxConfig(backend="none")
+    runner = SandboxRunner(config=config, workspace=tmp_path)
+    fake_result = MetricParseResult(metric_value=0.99, stdout="metric: 0.99\n",
+                                    stderr_tail="", exit_code=0, timed_out=False)
+    with patch.object(runner._native, "parse_metric_result",
+                      return_value=fake_result) as native_pm:
+        value = runner.parse_metric("python eval.py", "metric")
+
+    assert value == 0.99
+    native_pm.assert_called_once()
+
+
+def test_parse_metric_docker_returns_none_on_no_match(tmp_path: Path):
+    """If the eval command stdout doesn't contain the metric line, return None."""
+    config = SandboxConfig(backend="docker", base_image="python:3.11-slim")
+    runner = SandboxRunner(config=config, workspace=tmp_path)
+
+    def fake_docker_run(self, command: str, timeout: int) -> RunResult:
+        return RunResult(exit_code=0, timed_out=False, stderr_tail="", stdout="something completely different\n")
+
+    with patch.object(SandboxRunner, "_docker_run", fake_docker_run):
+        value = runner.parse_metric("python eval.py", "compression_ratio")
+
+    assert value is None
+
+
+def test_parse_metric_docker_handles_invalid_float(tmp_path: Path):
+    """Stdout contains 'metric: not_a_number' — should return None, not raise."""
+    config = SandboxConfig(backend="docker", base_image="python:3.11-slim")
+    runner = SandboxRunner(config=config, workspace=tmp_path)
+
+    def fake_docker_run(self, command: str, timeout: int) -> RunResult:
+        return RunResult(exit_code=0, timed_out=False, stderr_tail="", stdout="metric: not_a_number\n")
+
+    with patch.object(SandboxRunner, "_docker_run", fake_docker_run):
+        value = runner.parse_metric("python eval.py", "metric")
+
+    assert value is None

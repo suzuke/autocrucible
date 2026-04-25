@@ -29,6 +29,15 @@ from crucible.ledger import (
 )
 from crucible.results import ExperimentRecord, ResultsLog, results_filename
 from crucible.runner import ExperimentRunner
+from crucible.strategy import (
+    BranchFrom,
+    Continue as StrategyContinue,
+    Restart as StrategyRestart,
+    SearchStrategy,
+    Stop as StrategyStop,
+    StrategyContext,
+    make_strategy,
+)
 
 
 @dataclass
@@ -73,6 +82,8 @@ class Orchestrator:
         self.guardrails = GuardRails(
             editable=config.files.editable,
             readonly=config.files.readonly,
+            hidden=config.files.hidden,
+            workspace=self.workspace,  # M1b: enable SSOT mode (symlink/hardlink defenses)
         )
         self.results = ResultsLog(self.workspace / results_filename(tag))
         # M1a: dual-write to TrialLedger alongside ResultsLog. Storage is
@@ -102,7 +113,7 @@ class Orchestrator:
 
         # Allow agent to install packages via requirements.txt
         if config.constraints.allow_install:
-            self.guardrails.editable.add("requirements.txt")
+            self.guardrails.add_editable("requirements.txt")
             req = self.workspace / "requirements.txt"
             if not req.exists():
                 req.touch()
@@ -120,6 +131,19 @@ class Orchestrator:
         # M1a: parent_id tracking for AttemptNode tree edges. Linear strategies
         # (greedy / restart) → key=None. Beam strategy → key=beam_id.
         self._last_attempt_id_by_beam: dict[Optional[int], Optional[str]] = {}
+        # M1b PR 2: SearchStrategy Protocol instance. Beam still uses the
+        # legacy _run_loop_beam path; "greedy" / "restart" / "bfts-lite" go
+        # through self.strategy.decide() in _run_loop_serial.
+        try:
+            if config.search.strategy != "beam":
+                self.strategy: SearchStrategy | None = make_strategy(config.search.strategy)
+            else:
+                self.strategy = None
+        except ValueError:
+            # Unknown strategy name → fall back to legacy string-branching path.
+            logger.warning("unknown search strategy %r — using legacy path",
+                           config.search.strategy)
+            self.strategy = None
         self._critic = None
         if config.agent.critic.enabled:
             from crucible.agents.critic import CriticAgent
@@ -201,10 +225,14 @@ class Orchestrator:
         self._iteration = max(len(existing), results_max, ledger_max)
 
         # Rebuild parent chain from ledger so the next AttemptNode links
-        # correctly. Walk in append order and remember the last id seen
-        # per beam (None for linear).
+        # correctly. Walk in append order and remember the last KEPT id
+        # seen per beam (None for linear). Only kept attempts carry code
+        # commits; discard/crash/violation/skip nodes appear in the ledger
+        # but do not advance the code-parent pointer (M1b PR 8a semantics).
         self._last_attempt_id_by_beam = {}
         for n in ledger_nodes:
+            if n.outcome != "keep":
+                continue
             beam: int | None = None
             if n.id.startswith("b") and "n" in n.id:
                 try:
@@ -313,6 +341,9 @@ class Orchestrator:
         # 8. Execute experiment (with optional repeat)
         t0_run = time.monotonic()
         eval_cfg = self.config.evaluation
+        metric_parse_result = None  # M1b PR 8b: only the non-repeat path
+                                    # populates this; repeat path uses its
+                                    # own aggregated metric.
         if eval_cfg.repeat > 1:
             run_result, metric_value = self.runner.execute_with_repeat(
                 self.config.commands.run, self.config.commands.eval,
@@ -326,11 +357,22 @@ class Orchestrator:
             )
             metric_value = None
             if run_result.exit_code == 0 and not run_result.timed_out:
-                metric_value = self.runner.parse_metric(
-                    self.config.commands.eval,
-                    self.config.metric.name,
-                    timeout=self.config.constraints.timeout_seconds,
-                )
+                # Prefer parse_metric_result (M1b PR 8b) for full eval streams.
+                # Fall back to legacy parse_metric for runners that haven't
+                # been upgraded yet (e.g., custom backends or test mocks).
+                if hasattr(self.runner, "parse_metric_result"):
+                    metric_parse_result = self.runner.parse_metric_result(
+                        self.config.commands.eval,
+                        self.config.metric.name,
+                        timeout=self.config.constraints.timeout_seconds,
+                    )
+                    metric_value = metric_parse_result.metric_value
+                else:
+                    metric_value = self.runner.parse_metric(
+                        self.config.commands.eval,
+                        self.config.metric.name,
+                        timeout=self.config.constraints.timeout_seconds,
+                    )
         run_duration = time.monotonic() - t0_run
 
         total_duration = agent_duration + run_duration
@@ -339,6 +381,36 @@ class Orchestrator:
         self._save_iteration_logs(
             self._iteration, agent_result, prompt=prompt, diff_text=diff_text,
         )
+
+        # M1b PR 6 + 8b: write sealed EvalResult artefact for this iteration.
+        # PR 8b (reviewer F1): hash the EVAL command's stdout/stderr (not
+        # the run command's), so the integrity hash actually proves the
+        # bytes that produced metric_value.
+        if metric_parse_result is not None:
+            seal_stdout = metric_parse_result.stdout
+            seal_stderr_tail = metric_parse_result.stderr_tail
+            seal_exit = metric_parse_result.exit_code
+            seal_timed_out = metric_parse_result.timed_out
+        else:
+            # Crashed before eval ran — seal empty bytes for the eval, but
+            # keep the run's exit_code so the artefact reflects what happened.
+            seal_stdout = ""
+            seal_stderr_tail = run_result.stderr_tail or ""
+            seal_exit = run_result.exit_code
+            seal_timed_out = run_result.timed_out
+
+        eval_result_ref, eval_result_sha256 = self._write_eval_result_artifact(
+            iteration=self._iteration,
+            commit_hash=commit_hash,
+            seal_stdout=seal_stdout,
+            seal_stderr_tail=seal_stderr_tail,
+            seal_exit_code=seal_exit,
+            seal_timed_out=seal_timed_out,
+            metric_value=metric_value,
+            run_duration_seconds=run_duration,
+        )
+        self._pending_eval_result_ref = eval_result_ref
+        self._pending_eval_result_sha256 = eval_result_sha256
 
         # 10. Handle crash (metric is None or invalid)
         if metric_value is None or not self.guardrails.check_metric(metric_value):
@@ -436,6 +508,170 @@ class Orchestrator:
             beam_id=self._current_beam_id,
         )
 
+    def _write_eval_result_artifact(
+        self,
+        iteration: int,
+        commit_hash: str,
+        seal_stdout: str,
+        seal_stderr_tail: str,
+        seal_exit_code: int,
+        seal_timed_out: bool,
+        metric_value: float | None,
+        run_duration_seconds: float,
+    ) -> tuple[str, str] | tuple[None, None]:
+        """Write a sealed EvalResult JSON artefact for this iteration.
+
+        Returns (relative_path, sha256_hash) on success, or (None, None) on
+        failure (does not raise — never breaks the experiment loop).
+
+        Per spec §4 / §11: the host process is the SOLE writer; agent
+        code never produces this file. The integrity hash is the sha256
+        of canonical JSON (M1) — M2 will upgrade to HMAC-SHA256 once
+        secret-key management lands.
+
+        PR 8b (reviewer F1): seal_stdout / seal_stderr_tail come from the
+        EVAL command (not run_cmd), so the hash actually proves the
+        bytes that produced metric_value. seal_stderr_tail is the tail
+        only — RunResult does not carry full stderr — so this is named
+        stderr_TAIL_sha256 honestly.
+        """
+        import hashlib
+        import json as _json
+        from datetime import datetime, timezone
+
+        from crucible.ledger import LEDGER_SCHEMA_VERSION, EvalResult
+
+        try:
+            beam = self._current_beam_id
+            attempt_id = (
+                AttemptNode.short_id(iteration)
+                if beam is None
+                else f"b{beam}{AttemptNode.short_id(iteration)}"
+            )
+
+            # Manifest hash: combines eval_command, run_command, metric_name.
+            # M2 may include entry_file_hash + config_hash for stronger
+            # tampering detection.
+            manifest_payload = (
+                f"{self.config.commands.eval}|"
+                f"{self.config.commands.run}|"
+                f"{self.config.metric.name}"
+            )
+            manifest_hash = hashlib.sha256(
+                manifest_payload.encode("utf-8")
+            ).hexdigest()
+
+            stdout_hash = hashlib.sha256(
+                (seal_stdout or "").encode("utf-8")
+            ).hexdigest()
+            stderr_hash = hashlib.sha256(
+                (seal_stderr_tail or "").encode("utf-8")
+            ).hexdigest()
+
+            payload = EvalResult(
+                schema_version=LEDGER_SCHEMA_VERSION,
+                run_id=self.tag,
+                attempt_id=attempt_id,
+                commit=commit_hash or "",
+                eval_command=self.config.commands.eval,
+                eval_manifest_hash=manifest_hash,
+                metric_name=self.config.metric.name,
+                metric_value=metric_value,
+                metric_direction=self.config.metric.direction,
+                diagnostics={},  # M2 will best-effort parse from stdout
+                valid=metric_value is not None,
+                exit_code=seal_exit_code,
+                timed_out=seal_timed_out,
+                duration_ms=int(run_duration_seconds * 1000),
+                stdout_sha256=stdout_hash,
+                stderr_sha256=stderr_hash,
+                seal=None,  # populated below
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+            # Canonical JSON for sealing (sorted keys, no whitespace variability).
+            from dataclasses import asdict
+            payload_dict = asdict(payload)
+            canonical = _json.dumps(
+                payload_dict, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            payload.seal = "content-sha256:" + hashlib.sha256(canonical).hexdigest()
+            payload_dict["seal"] = payload.seal
+
+            # Write under logs/run-<tag>/iter-<N>/eval-result.json (per spec §4).
+            # Co-located with prompt.md and diff.patch so HTML reporter can
+            # cross-reference.
+            target_dir = self.workspace / "logs" / f"run-{self.tag}" / f"iter-{iteration}"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target_path = target_dir / "eval-result.json"
+            target_path.write_text(_json.dumps(payload_dict, indent=2))
+
+            # Compute sha256 of the bytes actually on disk (may differ from
+            # canonical_json if json.dumps with indent=2 reorders / spaces).
+            disk_hash = hashlib.sha256(target_path.read_bytes()).hexdigest()
+
+            rel_path = target_path.relative_to(self.workspace).as_posix()
+            return rel_path, disk_hash
+        except Exception as exc:
+            logger.warning("could not write eval-result.json: %s", exc)
+            return None, None
+
+    def _lookup_commit_for_node(self, node_id: str) -> str | None:
+        """Resolve an AttemptNode id back to its commit sha by reading the
+        ledger. Returns None if not found or commit is empty (e.g., a
+        violation/skip node has no commit)."""
+        try:
+            for node in self.ledger.all_nodes():
+                if node.id == node_id and node.commit:
+                    return node.commit
+        except Exception as exc:
+            logger.warning("ledger lookup failed for %s: %s", node_id, exc)
+        return None
+
+    def _build_strategy_context(
+        self,
+        session_count: int,
+        plateau_threshold: int,
+        max_iterations: int | None,
+    ) -> StrategyContext:
+        """Snapshot the orchestrator state for SearchStrategy.decide().
+
+        Reads ledger + ResultsLog so strategies (notably BFTSLite) have
+        the full attempt-tree view. metric_lookup is built from the
+        committed ResultsLog records keyed by AttemptNode id scheme.
+        """
+        try:
+            ledger_nodes = list(self.ledger.all_nodes())
+        except Exception:
+            ledger_nodes = []
+
+        # Map iteration → metric_value via ResultsLog (keep records only;
+        # discards/crashes have no useful metric for "best").
+        metric_lookup: dict[str, float] = {}
+        try:
+            for r in self.results.read_all():
+                if r.metric_value is None or r.iteration is None:
+                    continue
+                if r.beam_id is None:
+                    attempt_id = AttemptNode.short_id(r.iteration)
+                else:
+                    attempt_id = f"b{r.beam_id}{AttemptNode.short_id(r.iteration)}"
+                metric_lookup[attempt_id] = float(r.metric_value)
+        except Exception:
+            pass
+
+        streak = self._count_plateau_streak()
+        return StrategyContext(
+            ledger_nodes=tuple(ledger_nodes),
+            metric_lookup=metric_lookup,
+            metric_direction=self.config.metric.direction,
+            iteration_count=session_count,
+            plateau_streak=streak,
+            plateau_threshold=plateau_threshold,
+            max_iterations=max_iterations,
+            baseline_commit=self._baseline_commit,
+        )
+
     def _record_to_attempt_node(
         self,
         record: ExperimentRecord,
@@ -477,6 +713,12 @@ class Orchestrator:
             cost_usd = record.usage.total_cost_usd
             usage_source = "api"
 
+        # M1b PR 6: thread sealed EvalResult artefact refs onto the node.
+        # Set lazily by _write_eval_result_artifact in the iteration that
+        # produced this record; cleared after consumption.
+        eval_result_ref = getattr(self, "_pending_eval_result_ref", None)
+        eval_result_sha256 = getattr(self, "_pending_eval_result_sha256", None)
+
         node = AttemptNode(
             id=attempt_id,
             parent_id=parent_id,
@@ -488,6 +730,8 @@ class Orchestrator:
             prompt_ref=prompt_ref,
             diff_text=diff_inline,
             diff_ref=diff_ref,
+            eval_result_ref=eval_result_ref,
+            eval_result_sha256=eval_result_sha256,
             outcome=record.status,
             node_state="frontier",
             cost_usd=cost_usd,
@@ -496,8 +740,15 @@ class Orchestrator:
             worktree_path=str(self.workspace),
         )
 
-        # Track for next iteration's parent_id link.
-        self._last_attempt_id_by_beam[beam] = attempt_id
+        # M1b PR 8a (reviewer F3): parent_id is CODE ancestry, not sequence
+        # ancestry. Only "keep" outcomes advance the parent pointer because
+        # only kept nodes leave a commit on the branch. discard / crash /
+        # violation / skip nodes still appear in the ledger (with this same
+        # parent_id), but the NEXT attempt runs from the previous kept
+        # state, so its parent must point at the kept node — not the
+        # rejected one.
+        if record.status == "keep":
+            self._last_attempt_id_by_beam[beam] = attempt_id
         return node
 
     def _dual_log(
@@ -565,7 +816,9 @@ class Orchestrator:
                 worktree_path=str(self.workspace),
                 description=description[:500] if description else None,
             )
-            self._last_attempt_id_by_beam[beam] = attempt_id
+            # M1b PR 8a: violation/skip do NOT advance the code-parent
+            # pointer. The next attempt runs from the previous kept state,
+            # so its parent must point at the kept node.
             self.ledger.append_node(node)
         except Exception as exc:
             logger.warning("ledger append failed (no-commit outcome %s): %s",
@@ -759,6 +1012,47 @@ class Orchestrator:
                 else:
                     self._consecutive_skips = 0
 
+                # M1b PR 8c (reviewer F2): SearchStrategy gets the FIRST
+                # word on what to do next. BFTS may decide to BranchFrom
+                # the best kept node even after a streak of crashes —
+                # that is a normal search event, not a reason to stop.
+                # Greedy/Restart strategies preserve old behavior because
+                # their decide() never returns BranchFrom; the legacy
+                # max_retries / convergence checks below still fire for them.
+                strategy_action = None
+                if self.strategy is not None:
+                    sctx = self._build_strategy_context(
+                        session_count=session_count,
+                        plateau_threshold=plateau_threshold,
+                        max_iterations=max_iterations,
+                    )
+                    streak = sctx.plateau_streak
+                    strategy_action = self.strategy.decide(sctx)
+                    # BranchFrom + Restart need to pre-empt legacy stop checks.
+                    if isinstance(strategy_action, BranchFrom):
+                        target_commit = self._lookup_commit_for_node(strategy_action.parent_id)
+                        if target_commit is not None:
+                            logger.info(
+                                f"[iter {self._iteration}] "
+                                f"BranchFrom({strategy_action.parent_id}) "
+                                f"commit={target_commit[:7]}"
+                                f"{f' — {strategy_action.reason}' if strategy_action.reason else ''}"
+                            )
+                            self.git.reset_to_commit(target_commit)
+                            self.context.add_error(
+                                f"⤴ BRANCH — search strategy redirected to attempt "
+                                f"{strategy_action.parent_id} (commit {target_commit[:7]}). "
+                                f"Reasoning carried forward from that point."
+                            )
+                            self._last_attempt_id_by_beam[None] = strategy_action.parent_id
+                            self._consecutive_failures = 0
+                            self._consecutive_skips = 0
+                            continue  # bypass legacy stops; next iter runs from new commit
+                        logger.warning(
+                            f"[strategy] BranchFrom({strategy_action.parent_id}) "
+                            f"could not resolve commit; falling through to Continue"
+                        )
+
                 if self._consecutive_failures >= max_retries:
                     logger.warning(f"[iter {self._iteration}] " + _("{n} consecutive failures, stopping.").format(n=max_retries))
                     break
@@ -773,8 +1067,32 @@ class Orchestrator:
                     )
                     break
 
-                # Restart strategy: reset to baseline on plateau
-                if strategy == "restart" and self._baseline_commit:
+                # M1b PR 2+3: handle the remaining strategy actions
+                # (Continue / Restart / Stop) after legacy stops have had
+                # their say. BranchFrom was already handled above.
+                if self.strategy is not None and strategy_action is not None:
+                    action = strategy_action
+                    if isinstance(action, StrategyStop):
+                        logger.info(f"[strategy] {action.reason}")
+                        break
+                    elif isinstance(action, StrategyRestart):
+                        if self._baseline_commit:
+                            logger.info(
+                                f"[iter {self._iteration}] Plateau ({streak} iters) — "
+                                "restarting from baseline"
+                            )
+                            self.git.reset_to_commit(self._baseline_commit)
+                            self.context.add_error(
+                                f"⟳ RESTART — {streak} iterations without improvement. "
+                                "Returning to baseline. Your full history is preserved above. "
+                                "Choose a completely different direction."
+                            )
+                            self._consecutive_failures = 0
+                            self._consecutive_skips = 0
+                    # BranchFrom was handled before legacy stops (PR 8c).
+                    # Continue → fall through to next iteration.
+                elif strategy == "restart" and self._baseline_commit:
+                    # Legacy path (only reached if make_strategy failed).
                     streak = self._count_plateau_streak()
                     if streak >= plateau_threshold:
                         logger.info(

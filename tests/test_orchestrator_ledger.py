@@ -225,10 +225,18 @@ def test_dual_log_records_match_in_full_run(fake_orchestrator, workspace):
     nodes = fake_orchestrator.ledger.all_nodes()
     assert [n.id for n in nodes] == [f"n00000{i}" for i in range(1, 6)]
     assert [n.outcome for n in nodes] == statuses
-    # Parent chain is correct
+
+    # M1b PR 8a code-ancestry parent chain:
+    #   n000001 crash    parent=None     (no kept yet)
+    #   n000002 keep     parent=None     (no prior kept either)
+    #   n000003 discard  parent=n000002
+    #   n000004 keep     parent=n000002  (extends from last kept, not n000003)
+    #   n000005 violation parent=n000004
     assert nodes[0].parent_id is None
-    for i in range(1, 5):
-        assert nodes[i].parent_id == nodes[i - 1].id
+    assert nodes[1].parent_id is None
+    assert nodes[2].parent_id == "n000002"
+    assert nodes[3].parent_id == "n000002"
+    assert nodes[4].parent_id == "n000004"
 
 
 # ---------------------------------------------------------------------------
@@ -291,24 +299,28 @@ def test_no_commit_description_capped_at_500(fake_orchestrator):
     assert len(nodes[0].description) == 500
 
 
-def test_no_commit_parent_chain_extends(fake_orchestrator):
-    """Violation/skip should still extend the parent chain so subsequent
-    keep/discard nodes have a parent_id pointing back to the rejection."""
+def test_no_commit_parent_does_not_advance(fake_orchestrator):
+    """M1b PR 8a: violation/skip do NOT advance the code-parent pointer.
+    iter 1 keep, iter 2 violation, iter 3 keep should produce:
+      n000001 (keep)    parent=None
+      n000002 (violation) parent=n000001
+      n000003 (keep)    parent=n000001    ← extends from kept iter 1, not violation
+    """
     agent_result = _agent_result_with_cost()
     # iter 1: keep
     fake_orchestrator._dual_log(_record(iteration=1, status="keep"), agent_result, None)
-    # iter 2: violation (no commit)
+    # iter 2: violation (no commit, doesn't advance parent)
     fake_orchestrator._iteration = 2
     fake_orchestrator._current_beam_id = None
     fake_orchestrator._ledger_log_no_commit("violation", agent_result, "bad edit")
-    # iter 3: keep
+    # iter 3: keep — parent should be n000001 (not n000002)
     fake_orchestrator._dual_log(_record(iteration=3, status="keep"), agent_result, None)
 
     nodes = fake_orchestrator.ledger.all_nodes()
     assert [n.id for n in nodes] == ["n000001", "n000002", "n000003"]
     assert nodes[0].parent_id is None
     assert nodes[1].parent_id == "n000001"
-    assert nodes[2].parent_id == "n000002"
+    assert nodes[2].parent_id == "n000001"  # CODE ANCESTRY: skips n000002
 
 
 def test_no_commit_ledger_failure_logged_not_raised(fake_orchestrator):
@@ -329,31 +341,30 @@ def test_no_commit_ledger_failure_logged_not_raised(fake_orchestrator):
 def test_resume_reads_ledger_for_iteration_max(fake_orchestrator):
     """If ledger has more entries than ResultsLog (because violation/skip
     only write ledger), _iteration must be set from the LEDGER max so the
-    next iteration doesn't reuse an existing AttemptNode id."""
-    # Stub git checkout so we don't need a real repo
+    next iteration doesn't reuse an existing AttemptNode id.
+
+    M1b PR 8a: parent chain rebuild only tracks KEPT nodes (code ancestry)."""
     fake_orchestrator.git = MagicMock()
     fake_orchestrator.results.read_all = MagicMock(return_value=[
         SimpleNamespace(iteration=1, status="keep"),
-        # Only one ResultsLog entry. Ledger has one more (violation).
     ])
-    # Pre-populate ledger with 2 nodes (1 keep + 1 violation)
-    fake_orchestrator.ledger.append_node(SimpleNamespace.__class__ and __import__("crucible.ledger", fromlist=["AttemptNode"]).AttemptNode(
-        id="n000001", commit="abc", outcome="keep", created_at="2026-04-25T12:00:00+00:00",
-    ))
     from crucible.ledger import AttemptNode
+    fake_orchestrator.ledger.append_node(AttemptNode(
+        id="n000001", commit="abc", outcome="keep",
+        created_at="2026-04-25T12:00:00+00:00",
+    ))
     fake_orchestrator.ledger.append_node(AttemptNode(
         id="n000002", parent_id="n000001", commit="", outcome="violation",
         description="bad edit", created_at="2026-04-25T12:01:00+00:00",
     ))
 
-    # Run resume
     from crucible.orchestrator import Orchestrator
     Orchestrator.resume(fake_orchestrator)
 
-    # _iteration must reflect ledger max (2), not ResultsLog len (1)
+    # _iteration must reflect ledger max (2)
     assert fake_orchestrator._iteration == 2
-    # parent chain rebuilt
-    assert fake_orchestrator._last_attempt_id_by_beam[None] == "n000002"
+    # parent chain holds last KEPT node (n000001), not the violation
+    assert fake_orchestrator._last_attempt_id_by_beam[None] == "n000001"
 
 
 def test_resume_handles_empty_state(fake_orchestrator):
@@ -367,19 +378,234 @@ def test_resume_handles_empty_state(fake_orchestrator):
 
 
 def test_resume_reconstructs_beam_chain(fake_orchestrator):
-    """Per-beam parent chains must be rebuilt from b<beam>n<seq> ids."""
+    """Per-beam parent chains must be rebuilt from b<beam>n<seq> ids.
+    M1b PR 8a: rebuild only tracks KEPT nodes per beam (code ancestry)."""
     fake_orchestrator.git = MagicMock()
     fake_orchestrator.results.read_all = MagicMock(return_value=[])
     from crucible.ledger import AttemptNode
-    # beam 0: n000001 → n000002
+    # beam 0: keep n1 → discard n2 (the discard does NOT advance the chain)
     fake_orchestrator.ledger.append_node(AttemptNode(id="b0n000001", outcome="keep"))
     fake_orchestrator.ledger.append_node(AttemptNode(id="b0n000002", parent_id="b0n000001", outcome="discard"))
-    # beam 1: n000001 only
+    # beam 1: keep only
     fake_orchestrator.ledger.append_node(AttemptNode(id="b1n000001", outcome="keep"))
 
     from crucible.orchestrator import Orchestrator
     Orchestrator.resume(fake_orchestrator)
-    assert fake_orchestrator._last_attempt_id_by_beam[0] == "b0n000002"
+    # beam 0 last KEPT is b0n000001 (not the discard b0n000002)
+    assert fake_orchestrator._last_attempt_id_by_beam[0] == "b0n000001"
     assert fake_orchestrator._last_attempt_id_by_beam[1] == "b1n000001"
-    # Iteration is max sequence across all ids
+    # Iteration is max sequence across all ids (still includes discard's seq)
     assert fake_orchestrator._iteration == 2
+
+
+# ---------------------------------------------------------------------------
+# M1b PR 3 — BranchFrom commit lookup + strategy context build
+# ---------------------------------------------------------------------------
+
+
+def test_lookup_commit_for_node_returns_committed_sha(fake_orchestrator):
+    from crucible.ledger import AttemptNode
+    fake_orchestrator.ledger.append_node(
+        AttemptNode(id="n000001", commit="abc1234", outcome="keep")
+    )
+    fake_orchestrator.ledger.append_node(
+        AttemptNode(id="n000002", parent_id="n000001",
+                    commit="def5678", outcome="keep")
+    )
+    from crucible.orchestrator import Orchestrator
+    sha = Orchestrator._lookup_commit_for_node(fake_orchestrator, "n000002")
+    assert sha == "def5678"
+
+
+def test_lookup_commit_for_violation_node_returns_none(fake_orchestrator):
+    """Violation/skip nodes have empty commit (no commit happened) → None."""
+    from crucible.ledger import AttemptNode
+    fake_orchestrator.ledger.append_node(AttemptNode(
+        id="n000001", commit="", outcome="violation",
+        description="bad edit",
+    ))
+    from crucible.orchestrator import Orchestrator
+    sha = Orchestrator._lookup_commit_for_node(fake_orchestrator, "n000001")
+    assert sha is None
+
+
+def test_lookup_commit_for_unknown_node_returns_none(fake_orchestrator):
+    from crucible.orchestrator import Orchestrator
+    sha = Orchestrator._lookup_commit_for_node(fake_orchestrator, "n999999")
+    assert sha is None
+
+
+def test_build_strategy_context_populates_metric_lookup(fake_orchestrator):
+    """_build_strategy_context maps ResultsLog records to the AttemptNode
+    id schema so BFTSLiteStrategy can pick the best kept node."""
+    from crucible.ledger import AttemptNode
+    from crucible.results import ExperimentRecord
+    fake_orchestrator.ledger.append_node(AttemptNode(id="n000001", outcome="keep"))
+    fake_orchestrator.ledger.append_node(AttemptNode(id="n000002", outcome="discard"))
+    fake_orchestrator.results.read_all = MagicMock(return_value=[
+        ExperimentRecord(commit="x", metric_value=1.5, status="keep",
+                          description="", iteration=1),
+        ExperimentRecord(commit="y", metric_value=0.8, status="discard",
+                          description="", iteration=2),
+    ])
+    fake_orchestrator._iteration = 0
+    fake_orchestrator._baseline_commit = "abc"
+
+    cfg = SimpleNamespace(metric=SimpleNamespace(direction="maximize"))
+    fake_orchestrator.config = cfg
+    fake_orchestrator._count_plateau_streak = MagicMock(return_value=2)
+
+    from crucible.orchestrator import Orchestrator
+    ctx = Orchestrator._build_strategy_context(
+        fake_orchestrator,
+        session_count=2,
+        plateau_threshold=8,
+        max_iterations=10,
+    )
+    assert ctx.metric_lookup == {"n000001": 1.5, "n000002": 0.8}
+    assert ctx.metric_direction == "maximize"
+    assert ctx.iteration_count == 2
+    assert ctx.plateau_streak == 2
+    assert ctx.plateau_threshold == 8
+    assert ctx.baseline_commit == "abc"
+
+
+# ---------------------------------------------------------------------------
+# M1b PR 6 — sealed EvalResult artefact write
+# ---------------------------------------------------------------------------
+
+
+def test_write_eval_result_artifact_creates_json_with_seal(fake_orchestrator, workspace):
+    """Per spec §4 / §11: the host process is the SOLE writer of
+    eval-result.json. PR 8b: hash the EVAL command's stdout/stderr,
+    not the run command's, so the seal proves the bytes that produced
+    metric_value."""
+    import hashlib
+    import json as _json
+    from types import SimpleNamespace
+
+    fake_orchestrator.config = SimpleNamespace(
+        commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
+        metric=SimpleNamespace(name="ratio", direction="maximize"),
+    )
+    fake_orchestrator._current_beam_id = None
+
+    from crucible.orchestrator import Orchestrator
+    rel_path, sha = Orchestrator._write_eval_result_artifact(
+        fake_orchestrator,
+        iteration=3,
+        commit_hash="abc1234",
+        seal_stdout="metric: 1.42\n",
+        seal_stderr_tail="",
+        seal_exit_code=0,
+        seal_timed_out=False,
+        metric_value=1.42,
+        run_duration_seconds=0.5,
+    )
+
+    assert rel_path == "logs/run-t1/iter-3/eval-result.json"
+    assert sha is not None
+    target = workspace / rel_path
+    assert target.exists()
+    payload = _json.loads(target.read_text())
+    assert payload["metric_value"] == 1.42
+    assert payload["metric_name"] == "ratio"
+    assert payload["seal"].startswith("content-sha256:")
+    assert payload["valid"] is True
+    assert payload["exit_code"] == 0
+    # Returned sha matches disk
+    assert sha == hashlib.sha256(target.read_bytes()).hexdigest()
+
+
+def test_write_eval_result_artifact_handles_missing_metric(fake_orchestrator, workspace):
+    """metric_value=None → valid=False, seal still computed."""
+    import json as _json
+    from types import SimpleNamespace
+
+    fake_orchestrator.config = SimpleNamespace(
+        commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
+        metric=SimpleNamespace(name="ratio", direction="maximize"),
+    )
+    fake_orchestrator._current_beam_id = None
+
+    from crucible.orchestrator import Orchestrator
+    rel_path, sha = Orchestrator._write_eval_result_artifact(
+        fake_orchestrator,
+        iteration=1,
+        commit_hash="",
+        seal_stdout="",
+        seal_stderr_tail="boom",
+        seal_exit_code=1,
+        seal_timed_out=False,
+        metric_value=None,
+        run_duration_seconds=0.1,
+    )
+
+    target = workspace / rel_path
+    payload = _json.loads(target.read_text())
+    assert payload["metric_value"] is None
+    assert payload["valid"] is False
+    assert payload["exit_code"] == 1
+
+
+def test_write_eval_result_artifact_handles_io_failure(fake_orchestrator):
+    """If the write fails, returns (None, None) and does not raise."""
+    from types import SimpleNamespace
+    fake_orchestrator.config = SimpleNamespace(
+        commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
+        metric=SimpleNamespace(name="ratio", direction="maximize"),
+    )
+    fake_orchestrator._current_beam_id = None
+    fake_orchestrator.workspace = Path("/no/such/dir/that/exists")
+
+    from crucible.orchestrator import Orchestrator
+    rel_path, sha = Orchestrator._write_eval_result_artifact(
+        fake_orchestrator,
+        iteration=1,
+        commit_hash="abc",
+        seal_stdout="",
+        seal_stderr_tail="",
+        seal_exit_code=0,
+        seal_timed_out=False,
+        metric_value=1.0,
+        run_duration_seconds=0.1,
+    )
+    assert rel_path is None
+    assert sha is None
+
+
+def test_write_eval_result_artifact_seals_eval_stdout_not_run_stdout(
+    fake_orchestrator, workspace
+):
+    """Reviewer F1 regression: the sealed payload must hash bytes from the
+    EVAL command, not from the run command. We pass distinct stdouts to
+    verify the seal reflects seal_stdout (eval), not what run produced."""
+    import hashlib
+    import json as _json
+    from types import SimpleNamespace
+
+    fake_orchestrator.config = SimpleNamespace(
+        commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
+        metric=SimpleNamespace(name="ratio", direction="maximize"),
+    )
+    fake_orchestrator._current_beam_id = None
+
+    eval_stdout = "metric: 0.42\n"  # what eval produced
+    expected_stdout_hash = hashlib.sha256(eval_stdout.encode("utf-8")).hexdigest()
+
+    from crucible.orchestrator import Orchestrator
+    rel_path, _sha = Orchestrator._write_eval_result_artifact(
+        fake_orchestrator,
+        iteration=1,
+        commit_hash="aaa",
+        seal_stdout=eval_stdout,
+        seal_stderr_tail="",
+        seal_exit_code=0,
+        seal_timed_out=False,
+        metric_value=0.42,
+        run_duration_seconds=0.1,
+    )
+    payload = _json.loads((workspace / rel_path).read_text())
+    assert payload["stdout_sha256"] == expected_stdout_hash, (
+        f"stdout hash should reflect eval bytes, got {payload['stdout_sha256']}"
+    )

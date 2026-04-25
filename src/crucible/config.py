@@ -102,7 +102,7 @@ class SandboxConfig:
 
 @dataclass
 class SearchConfig:
-    strategy: str = "greedy"   # greedy | restart | beam
+    strategy: str = "greedy"   # greedy | restart | beam | bfts-lite
     beam_width: int = 3
     plateau_threshold: int = 8
 
@@ -241,9 +241,10 @@ def load_config(project_root: Path) -> Config:
 
     search_data = raw.get("search", {})
     strategy = search_data.get("strategy", "greedy")
-    if strategy not in ("greedy", "restart", "beam"):
+    if strategy not in ("greedy", "restart", "beam", "bfts-lite"):
         raise ConfigError(
-            f"search.strategy must be 'greedy', 'restart', or 'beam', got '{strategy}'"
+            f"search.strategy must be 'greedy', 'restart', 'beam', or 'bfts-lite', "
+            f"got '{strategy}'"
         )
 
     files_data = raw.get("files", {})
