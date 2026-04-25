@@ -277,3 +277,94 @@ def test_bfts_branchfrom_uses_legacy_path_for_violation_nodes(tmp_path: Path):
     # Manually invoke _lookup_commit_for_node on a fake violation entry
     sha = o._lookup_commit_for_node("n999999")
     assert sha is None  # unknown id → None, not raise
+
+
+# ---------------------------------------------------------------------------
+# M1b PR 8c — BFTS pre-empts legacy max_retries / convergence stops
+# ---------------------------------------------------------------------------
+
+
+class _FailingThenBranchAgent(AgentInterface):
+    """First attempt produces a clear improvement (best becomes n000001),
+    then the next 3 attempts produce regressions that get discarded.
+
+    With max_retries=3 and BFTS, we should see BranchFrom kick in BEFORE
+    the legacy "3 consecutive failures, stopping" check triggers.
+    """
+
+    model = "fail-then-branch-agent"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate_edit(self, prompt: str, workspace: Path) -> AgentResult:
+        self.calls += 1
+        sol = workspace / "solution.py"
+        # iter 1: massive improvement
+        # iter 2-4: regressions (worse than iter 1)
+        # iter 5+: BFTS branches back to iter 1, agent now produces another improvement
+        if self.calls == 1:
+            sol.write_text("def f(x):\n    return x * 100\n")
+            desc = "*100 (huge improvement)"
+        elif self.calls in (2, 3, 4):
+            sol.write_text("def f(x):\n    return x * 0\n")
+            desc = f"*0 regression #{self.calls}"
+        else:
+            sol.write_text(f"def f(x):\n    return x * {200 + self.calls}\n")
+            desc = f"*{200 + self.calls} (BFTS branched)"
+        return AgentResult(
+            modified_files=[Path("solution.py")],
+            description=desc,
+            usage=UsageInfo(total_cost_usd=0.001),
+        )
+
+
+def test_branch_from_preempts_max_retries(tmp_path: Path):
+    """Reviewer F2 regression: when a search strategy returns BranchFrom,
+    the orchestrator must apply it BEFORE checking legacy max_retries
+    consecutive-failures stop. Otherwise BFTS could never recover from
+    a streak of failed expansions.
+
+    Tests this with a stub strategy that always returns BranchFrom(n000001)
+    so we can isolate the gate-ordering behavior independent of BFTSLite's
+    own metric-best heuristic.
+    """
+    from crucible.orchestrator import Orchestrator
+    from crucible.strategy import BranchFrom, Continue
+
+    class StubStrategy:
+        name = "stub-branch"
+        def __init__(self):
+            self.calls = 0
+        def decide(self, ctx):
+            self.calls += 1
+            # First decide call after iter 1 keep: return Continue.
+            # Subsequent calls (after discards) return BranchFrom(n000001)
+            # to test pre-emption.
+            if self.calls == 1:
+                return Continue()
+            return BranchFrom(parent_id="n000001", reason="stub branching")
+        def should_prune(self, ctx, node_id):
+            return False
+
+    ws = _build_workspace(tmp_path, strategy="bfts-lite", max_iters=5)
+    config = load_config(ws)
+    config.constraints.max_retries = 3
+
+    o = Orchestrator(
+        config=config, workspace=ws, tag="preempt", agent=_FailingThenBranchAgent(),
+    )
+    o.strategy = StubStrategy()  # override the BFTSLite the constructor built
+    o.init()
+    o.run_loop(max_iterations=5)
+
+    nodes = TrialLedger(ws / "logs" / "run-preempt" / "ledger.jsonl").all_nodes()
+    # If max_retries had killed the run at iter 4 (3 failures since iter 1
+    # keep), we'd see ≤4 nodes. With BranchFrom pre-emption, the iter-5 BFTS
+    # decision diverts before the stop check fires, so we get ≥5 nodes.
+    # (The test agent makes regressions on iters 2-4 then improvements on
+    # iter 5+, so iter 5 should produce a kept node.)
+    assert len(nodes) >= 5, (
+        f"BranchFrom should have pre-empted max_retries=3 stop; "
+        f"got {len(nodes)} nodes: {[(n.id, n.outcome) for n in nodes]}"
+    )
