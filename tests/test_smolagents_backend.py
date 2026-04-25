@@ -274,3 +274,83 @@ def test_classify_error_timeout():
 
 def test_classify_error_unknown():
     assert _classify_error("Some other error") == AgentErrorType.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# Workspace mismatch hard-fail (reviewer round 2 F1)
+# ---------------------------------------------------------------------------
+
+
+def test_generate_edit_rejects_workspace_mismatch_hard(
+    workspace, policy, smolagents_config, monkeypatch, tmp_path
+):
+    """Reviewer round 2 F1: workspace mismatch must be a hard error.
+
+    The backend's tools and ACL policy are bound to the construction
+    workspace; running with a different workspace would silently apply
+    the wrong ACL. Must raise — and MUST NOT call agent.run or touch
+    any files in either workspace.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    backend = SmolagentsBackend(
+        config=smolagents_config, policy=policy, workspace=workspace
+    )
+
+    # Track agent.run call count to assert it's never invoked.
+    call_count = {"n": 0}
+    original_run = backend._agent.run
+
+    def _spy_run(*args, **kwargs):
+        call_count["n"] += 1
+        return original_run(*args, **kwargs)
+
+    backend._agent.run = _spy_run
+
+    other_workspace = tmp_path / "other_ws"
+    other_workspace.mkdir()
+    (other_workspace / "file_in_other.txt").write_text("untouched")
+
+    # Snapshot mtimes in BOTH workspaces so we can assert no writes.
+    snapshot_a = {
+        p.resolve(): p.stat().st_mtime
+        for p in workspace.rglob("*") if p.is_file()
+    }
+    snapshot_b = {
+        p.resolve(): p.stat().st_mtime
+        for p in other_workspace.rglob("*") if p.is_file()
+    }
+
+    with pytest.raises(ValueError, match="constructed for workspace"):
+        backend.generate_edit("anything", other_workspace)
+
+    # agent.run must NOT have been called
+    assert call_count["n"] == 0, "agent.run was called despite mismatch"
+
+    # No files in either workspace should have been modified
+    after_a = {
+        p.resolve(): p.stat().st_mtime
+        for p in workspace.rglob("*") if p.is_file()
+    }
+    after_b = {
+        p.resolve(): p.stat().st_mtime
+        for p in other_workspace.rglob("*") if p.is_file()
+    }
+    assert snapshot_a == after_a, "configured workspace was touched on mismatch"
+    assert snapshot_b == after_b, "passed workspace was touched on mismatch"
+
+
+def test_generate_edit_accepts_matching_workspace(
+    workspace, policy, smolagents_config, monkeypatch
+):
+    """Same workspace path (even if not the same Path object) is accepted."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    backend = SmolagentsBackend(
+        config=smolagents_config, policy=policy, workspace=workspace
+    )
+    backend._agent.run = lambda prompt, **kwargs: "ok"
+
+    # Same path, different Path() instance — should still match after .resolve()
+    same_workspace = Path(str(workspace))
+    result = backend.generate_edit("anything", same_workspace)
+    assert result.description == "ok"
+    assert result.error_type is None

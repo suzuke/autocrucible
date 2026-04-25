@@ -157,13 +157,23 @@ class SmolagentsBackend(AgentInterface):
     # ------------------------------------------------------------------
 
     def generate_edit(self, prompt: str, workspace: Path) -> AgentResult:
-        # Per AgentInterface contract; workspace arg is honoured even
-        # though we already have one — orchestrator may rebind.
+        """Run one edit attempt. The `workspace` arg MUST match the one
+        the backend was constructed with; mismatch is a hard error
+        (reviewer round 2 F1).
+
+        The backend owns its tools and CheatResistancePolicy bound to a
+        specific workspace; running with a different workspace path
+        would silently apply the wrong ACL and read/write the wrong
+        files. Programmatic callers that legitimately need to switch
+        workspaces should construct a new SmolagentsBackend.
+        """
         if workspace.resolve() != self._workspace.resolve():
-            logger.warning(
-                "smolagents backend: workspace mismatch (got %s, configured %s)"
-                " — using configured workspace for tool ACL.",
-                workspace, self._workspace,
+            raise ValueError(
+                f"smolagents backend was constructed for workspace "
+                f"{self._workspace} but generate_edit was called with "
+                f"{workspace}. The backend's tools and policy are bound "
+                f"to the construction workspace; create a new backend "
+                f"instance for a different workspace."
             )
 
         full_prompt = self._compose_prompt(prompt)

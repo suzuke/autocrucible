@@ -272,6 +272,12 @@ def safe_glob(
         raise ToolDenied("pattern argument must be a non-empty string")
     if "/.." in pattern or pattern.startswith(".."):
         raise ToolDenied("pattern must not include parent-dir traversal")
+    # Reviewer round 2 F2: `Path.glob()` raises NotImplementedError on
+    # absolute / drive-rooted patterns, which would escape the
+    # sanitized-denial channel and bubble as a backend exception.
+    # Reject explicitly here — patterns must be workspace-relative.
+    if Path(pattern).is_absolute() or pattern.startswith(("/", "\\")):
+        raise ToolDenied("pattern must be workspace-relative (no absolute paths)")
     workspace_abs = workspace.resolve()
     matches: list[str] = []
     # Path.glob() with `**` pattern is expensive; we accept it as

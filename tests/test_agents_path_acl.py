@@ -299,6 +299,22 @@ def test_safe_glob_rejects_empty_pattern(workspace, policy):
         safe_glob("", policy=policy, workspace=workspace)
 
 
+def test_safe_glob_rejects_absolute_pattern(workspace, policy):
+    """Reviewer round 2 F2: `Path.glob()` raises NotImplementedError on
+    absolute patterns, which would escape the sanitized-denial channel.
+    safe_glob MUST reject absolute patterns with ToolDenied before
+    calling Path.glob()."""
+    with pytest.raises(ToolDenied, match="workspace-relative"):
+        safe_glob("/tmp/*", policy=policy, workspace=workspace)
+
+
+def test_safe_glob_rejects_root_slash_pattern(workspace, policy):
+    """Even patterns starting with `/` (which Path() may treat as root)
+    must be rejected to avoid escaping the workspace."""
+    with pytest.raises(ToolDenied, match="workspace-relative"):
+        safe_glob("/etc/*.conf", policy=policy, workspace=workspace)
+
+
 # ---------------------------------------------------------------------------
 # safe_grep — visibility-filtered search
 # ---------------------------------------------------------------------------
