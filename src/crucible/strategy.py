@@ -183,31 +183,44 @@ class RestartStrategy:
 
 @dataclass
 class BFTSLiteStrategy:
-    """Best-first tree search, M1b minimum. NOT YET WIRED into orchestrator;
-    will be activated in M1b PR 2.
+    """Best-first tree search.
 
     Algorithm:
       1. Identify all kept nodes (`outcome == "keep"`) with metric_lookup.
-      2. Pick the best one not currently the parent of the most recent node.
-      3. If it's not the most recent ancestor, return BranchFrom(best_id);
-         otherwise return Continue.
-      4. Stop when no kept nodes exist or max_iterations reached.
+      2. Filter out doom-looped candidates via `should_prune`.
+      3. Pick the best surviving one; if not currently the parent of the
+         most recent node, return BranchFrom(best_id), else Continue.
+      4. If every kept node is pruned, return Stop ("doom-loop").
+      5. Stop when no kept nodes exist or max_iterations reached.
 
-    Pruning is a no-op in M1b PR 1; M2 will plug in doom-loop pruning.
+    M2 PR 10 plugs in doom-loop pruning via `prune_threshold`.
     """
 
     name: str = "bfts-lite"
+    prune_threshold: int = 3
+
+    def __post_init__(self) -> None:
+        if self.prune_threshold < 1:
+            raise ValueError(
+                f"prune_threshold must be a positive int, got {self.prune_threshold!r}"
+            )
 
     def decide(self, ctx: StrategyContext) -> StrategyAction:
         if ctx.max_iterations is not None and ctx.iteration_count >= ctx.max_iterations:
             return Stop(reason=f"max_iterations={ctx.max_iterations} reached")
 
-        kept = [n for n in ctx.ledger_nodes
-                if n.outcome == "keep" and n.id in ctx.metric_lookup]
-        if not kept:
+        kept_all = [n for n in ctx.ledger_nodes
+                    if n.outcome == "keep" and n.id in ctx.metric_lookup]
+        if not kept_all:
             return Continue()  # nothing to branch from yet
 
-        # Best kept node by direction
+        # M2 PR 10: filter pruned BEFORE max-metric selection so a high-
+        # scoring but doom-looped branch cannot starve a viable lower-scoring
+        # one.
+        kept = [n for n in kept_all if not self.should_prune(ctx, n.id)]
+        if not kept:
+            return Stop(reason="all kept nodes pruned (doom-loop)")
+
         chooser = min if ctx.metric_direction == "minimize" else max
         best = chooser(kept, key=lambda n: ctx.metric_lookup[n.id])
 
@@ -222,7 +235,52 @@ class BFTSLiteStrategy:
         return BranchFrom(parent_id=best.id, reason="BFTS expand best kept node")
 
     def should_prune(self, ctx: StrategyContext, candidate_id: str) -> bool:
-        return False
+        """Doom-loop pruning over trailing children of `candidate_id`.
+
+        A candidate is pruned when its last `prune_threshold` direct children
+        (in ledger order) all failed to produce a strict metric improvement
+        over the candidate's own metric.
+
+        Failure shapes counted toward the streak:
+          - `discard` outcome (always — regardless of metric)
+          - `crash` / `violation` / `skip` outcome (no metric to compare;
+            still a failed expansion attempt)
+          - `keep` outcome whose metric did NOT strictly improve over the
+            candidate's metric (equality counts as non-improvement)
+
+        Defensive corner cases:
+          - Returns False if the candidate has no metric (bootstrap nodes
+            cannot be reasoned about; "strict improvement over parent
+            metric" is undefined).
+          - Returns False if direct-child count < prune_threshold (need
+            enough evidence before pruning).
+          - A strict improvement at any tail position resets the streak.
+        """
+        candidate_metric = ctx.metric_lookup.get(candidate_id)
+        if candidate_metric is None:
+            return False
+
+        children = [n for n in ctx.ledger_nodes if n.parent_id == candidate_id]
+        if len(children) < self.prune_threshold:
+            return False
+
+        direction = ctx.metric_direction
+        streak = 0
+        for child in reversed(children):
+            improved = False
+            if child.outcome == "keep":
+                child_metric = ctx.metric_lookup.get(child.id)
+                if child_metric is not None:
+                    if direction == "maximize":
+                        improved = child_metric > candidate_metric
+                    else:
+                        improved = child_metric < candidate_metric
+            if improved:
+                break
+            streak += 1
+            if streak >= self.prune_threshold:
+                return True
+        return streak >= self.prune_threshold
 
 
 # ---------------------------------------------------------------------------
@@ -237,10 +295,16 @@ _STRATEGIES: dict[str, type] = {
 }
 
 
-def make_strategy(name: str) -> SearchStrategy:
-    """Build a strategy instance by name. Raises ValueError on unknown name."""
+def make_strategy(name: str, *, prune_threshold: int = 3) -> SearchStrategy:
+    """Build a strategy instance by name. Raises ValueError on unknown name.
+
+    `prune_threshold` is forwarded to BFTSLiteStrategy; other strategies
+    ignore it (they don't prune in v1.0).
+    """
     cls = _STRATEGIES.get(name)
     if cls is None:
         raise ValueError(f"unknown search strategy: {name!r} "
                          f"(available: {sorted(_STRATEGIES)})")
+    if cls is BFTSLiteStrategy:
+        return cls(prune_threshold=prune_threshold)
     return cls()

@@ -136,7 +136,10 @@ class Orchestrator:
         # through self.strategy.decide() in _run_loop_serial.
         try:
             if config.search.strategy != "beam":
-                self.strategy: SearchStrategy | None = make_strategy(config.search.strategy)
+                self.strategy: SearchStrategy | None = make_strategy(
+                    config.search.strategy,
+                    prune_threshold=config.search.prune_threshold,
+                )
             else:
                 self.strategy = None
         except ValueError:

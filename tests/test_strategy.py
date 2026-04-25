@@ -220,11 +220,211 @@ def test_bfts_stops_at_max_iterations():
     assert isinstance(action, Stop)
 
 
-def test_bfts_no_pruning_in_m1b_pr1():
-    """should_prune is a defined seam but always False in PR 1; M2 plugs in."""
+def test_bfts_should_prune_no_children():
+    """A candidate with zero direct children cannot be pruned."""
     s = BFTSLiteStrategy()
     nodes = [_node(1, outcome="keep")]
-    assert s.should_prune(_ctx(nodes=nodes), "n000001") is False
+    metrics = {"n000001": 1.0}
+    assert s.should_prune(_ctx(nodes=nodes, metrics=metrics), "n000001") is False
+
+
+# ---------------------------------------------------------------------------
+# BFTSLiteStrategy.should_prune — doom-loop pruning (M2 PR 10)
+# ---------------------------------------------------------------------------
+
+
+def test_prune_trailing_failures_at_threshold():
+    """3 trailing discards → candidate is pruned."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),
+        _node(2, parent="n000001", outcome="discard"),
+        _node(3, parent="n000001", outcome="discard"),
+        _node(4, parent="n000001", outcome="discard"),
+    ]
+    metrics = {"n000001": 1.0}
+    assert s.should_prune(_ctx(nodes=nodes, metrics=metrics), "n000001") is True
+
+
+def test_prune_below_threshold_does_not_fire():
+    """Only 2 trailing discards (below threshold of 3) → not pruned."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),
+        _node(2, parent="n000001", outcome="discard"),
+        _node(3, parent="n000001", outcome="discard"),
+    ]
+    metrics = {"n000001": 1.0}
+    assert s.should_prune(_ctx(nodes=nodes, metrics=metrics), "n000001") is False
+
+
+def test_prune_strict_improvement_resets_streak():
+    """A kept child with strictly better metric breaks the trailing failure streak."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),
+        _node(2, parent="n000001", outcome="discard"),
+        _node(3, parent="n000001", outcome="discard"),
+        _node(4, parent="n000001", outcome="keep"),  # strict improvement → reset
+        _node(5, parent="n000001", outcome="discard"),
+    ]
+    metrics = {"n000001": 1.0, "n000004": 2.0}
+    assert s.should_prune(_ctx(nodes=nodes, metrics=metrics), "n000001") is False
+
+
+def test_prune_equal_metric_kept_counts_as_failure():
+    """A kept child with metric == candidate's is NOT a strict improvement."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),
+        _node(2, parent="n000001", outcome="keep"),       # equal — not improvement
+        _node(3, parent="n000001", outcome="keep"),       # equal — not improvement
+        _node(4, parent="n000001", outcome="keep"),       # equal — not improvement
+    ]
+    metrics = {"n000001": 1.0, "n000002": 1.0, "n000003": 1.0, "n000004": 1.0}
+    assert s.should_prune(_ctx(nodes=nodes, metrics=metrics), "n000001") is True
+
+
+def test_prune_discard_with_worse_metric_counts():
+    """Discard outcomes count regardless of metric."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),
+        _node(2, parent="n000001", outcome="discard"),
+        _node(3, parent="n000001", outcome="discard"),
+        _node(4, parent="n000001", outcome="discard"),
+    ]
+    metrics = {"n000001": 5.0, "n000002": 0.5, "n000003": 0.6, "n000004": 0.4}
+    assert s.should_prune(_ctx(nodes=nodes, metrics=metrics), "n000001") is True
+
+
+def test_prune_crash_counts_as_failed_expansion():
+    """Crash / violation / skip outcomes (no metric) count toward the streak."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),
+        _node(2, parent="n000001", outcome="crash"),
+        _node(3, parent="n000001", outcome="violation"),
+        _node(4, parent="n000001", outcome="skip"),
+    ]
+    metrics = {"n000001": 1.0}  # no metrics for crash/violation/skip
+    assert s.should_prune(_ctx(nodes=nodes, metrics=metrics), "n000001") is True
+
+
+def test_prune_unrelated_siblings_dont_affect_candidate():
+    """Children of OTHER parents must not enter candidate's streak."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),
+        _node(2, outcome="keep"),  # different root, different parent
+        _node(3, parent="n000002", outcome="discard"),
+        _node(4, parent="n000002", outcome="discard"),
+        _node(5, parent="n000002", outcome="discard"),
+        _node(6, parent="n000001", outcome="discard"),  # only ONE child of n000001
+    ]
+    metrics = {"n000001": 1.0, "n000002": 1.0}
+    assert s.should_prune(_ctx(nodes=nodes, metrics=metrics), "n000001") is False
+
+
+def test_prune_candidate_without_metric_returns_false():
+    """Defensive: bootstrap nodes without a metric cannot be reasoned about."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),
+        _node(2, parent="n000001", outcome="discard"),
+        _node(3, parent="n000001", outcome="discard"),
+        _node(4, parent="n000001", outcome="discard"),
+    ]
+    metrics: dict[str, float] = {}  # no metric for n000001
+    assert s.should_prune(_ctx(nodes=nodes, metrics=metrics), "n000001") is False
+
+
+def test_prune_minimize_direction_strict_improvement():
+    """Under minimize, lower metric is strict improvement → resets streak."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),
+        _node(2, parent="n000001", outcome="discard"),
+        _node(3, parent="n000001", outcome="discard"),
+        _node(4, parent="n000001", outcome="keep"),
+    ]
+    metrics = {"n000001": 5.0, "n000004": 3.0}
+    assert s.should_prune(
+        _ctx(nodes=nodes, metrics=metrics, direction="minimize"), "n000001"
+    ) is False
+
+
+# ---------------------------------------------------------------------------
+# BFTSLiteStrategy.decide — pruning interaction with selection
+# ---------------------------------------------------------------------------
+
+
+def test_decide_filters_pruned_picks_next_best():
+    """Pruned high-score branch starves; decide() picks next-best unpruned."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),  # score 5.0 — will be pruned
+        _node(2, outcome="keep"),  # score 3.0 — viable
+        _node(3, parent="n000001", outcome="discard"),
+        _node(4, parent="n000001", outcome="discard"),
+        _node(5, parent="n000001", outcome="discard"),
+        _node(6, parent="n000002", outcome="keep"),  # most-recent, child of n2
+    ]
+    metrics = {"n000001": 5.0, "n000002": 3.0, "n000006": 4.0}
+    action = s.decide(_ctx(nodes=nodes, metrics=metrics))
+    # n000001 (best metric) is pruned; n000002 is next-best. Most-recent is
+    # already a child of n000002, so the action is Continue (extending n2).
+    assert isinstance(action, Continue)
+
+
+def test_decide_branchfrom_unpruned_lower_score_when_best_pruned():
+    """When the metric-best is pruned, decide() should BranchFrom the next-
+    best — and BranchFrom only fires if most-recent isn't already its child."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),     # score 5.0 — pruned
+        _node(2, outcome="keep"),     # score 3.0 — viable, but isolated
+        _node(3, parent="n000001", outcome="discard"),
+        _node(4, parent="n000001", outcome="discard"),
+        _node(5, parent="n000001", outcome="discard"),  # most-recent, child of n1
+    ]
+    metrics = {"n000001": 5.0, "n000002": 3.0}
+    action = s.decide(_ctx(nodes=nodes, metrics=metrics))
+    assert isinstance(action, BranchFrom)
+    assert action.parent_id == "n000002"
+
+
+def test_decide_all_pruned_returns_stop():
+    """If every kept node is pruned, decide() returns Stop with doom-loop reason."""
+    s = BFTSLiteStrategy(prune_threshold=3)
+    nodes = [
+        _node(1, outcome="keep"),
+        _node(2, parent="n000001", outcome="discard"),
+        _node(3, parent="n000001", outcome="discard"),
+        _node(4, parent="n000001", outcome="discard"),
+    ]
+    metrics = {"n000001": 1.0}
+    action = s.decide(_ctx(nodes=nodes, metrics=metrics))
+    assert isinstance(action, Stop)
+    assert "doom-loop" in action.reason.lower()
+
+
+def test_make_strategy_forwards_prune_threshold():
+    """Factory threads prune_threshold to BFTSLiteStrategy."""
+    s = make_strategy("bfts-lite", prune_threshold=5)
+    assert isinstance(s, BFTSLiteStrategy)
+    assert s.prune_threshold == 5
+    # Other strategies ignore the kwarg without error.
+    assert isinstance(make_strategy("greedy", prune_threshold=5), GreedyStrategy)
+
+
+def test_bfts_rejects_zero_or_negative_prune_threshold():
+    """Defence-in-depth: __post_init__ rejects prune_threshold < 1 even if
+    the config validator is bypassed (e.g. direct construction in tests)."""
+    with pytest.raises(ValueError, match="prune_threshold must be a positive int"):
+        BFTSLiteStrategy(prune_threshold=0)
+    with pytest.raises(ValueError, match="prune_threshold must be a positive int"):
+        BFTSLiteStrategy(prune_threshold=-1)
 
 
 # ---------------------------------------------------------------------------
