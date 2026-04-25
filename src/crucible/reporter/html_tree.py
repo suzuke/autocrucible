@@ -134,6 +134,8 @@ def _render_tree(
     nodes: Sequence[AttemptNode],
     best_id: str | None,
     metric_lookup: dict[str, float],
+    *,
+    anchor_prefix: str = "",
 ) -> str:
     """M1b: render nodes in DFS-by-parent order with depth indentation.
 
@@ -144,6 +146,12 @@ def _render_tree(
 
     Children are sorted by id (insertion order is the natural fallback
     when ids are sequential like n000042).
+
+    `anchor_prefix` (M2 PR 11): when non-empty, every DOM `id` and
+    intra-document `href="#..."` is namespaced with this prefix. Single-
+    view callers leave it empty (output unchanged); compare-view callers
+    pass `"left-"` / `"right-"` so two trees can coexist in one HTML doc
+    without colliding on identical attempt IDs.
     """
     by_parent: dict[str | None, list[AttemptNode]] = {}
     for n in nodes:
@@ -163,7 +171,8 @@ def _render_tree(
             if child.id in visited:
                 continue  # defensive: skip cycles (shouldn't happen)
             visited.add(child.id)
-            out.append(_render_card(child, best_id, metric_lookup, depth=depth))
+            out.append(_render_card(child, best_id, metric_lookup,
+                                     depth=depth, anchor_prefix=anchor_prefix))
             walk(child.id, depth + 1)
 
     # Roots are nodes with parent_id=None
@@ -175,7 +184,7 @@ def _render_tree(
     for n in nodes:
         if n.id not in visited:
             out.append(_render_card(n, best_id, metric_lookup, depth=0,
-                                     orphan=True))
+                                     orphan=True, anchor_prefix=anchor_prefix))
 
     return "\n".join(out)
 
@@ -212,7 +221,9 @@ def _best_node_id(nodes: Sequence[AttemptNode],
 
 def _render_summary(nodes: Sequence[AttemptNode],
                     metric_lookup: dict[str, float],
-                    best_id: str | None = None) -> str:
+                    best_id: str | None = None,
+                    *,
+                    anchor_prefix: str = "") -> str:
     by_outcome: dict[str, int] = {}
     for n in nodes:
         by_outcome[n.outcome] = by_outcome.get(n.outcome, 0) + 1
@@ -232,9 +243,13 @@ def _render_summary(nodes: Sequence[AttemptNode],
     best_line = ""
     if best_id is not None:
         v = metric_lookup.get(best_id)
+        # M2 PR 11: anchor uses the side-scoped prefix so compare-mode
+        # `Best metric (...)` link points to the right column's card.
+        # Display text remains the raw node id (no prefix shown to user).
+        anchor = html.escape(anchor_prefix) + html.escape(best_id)
         best_line = (
             f'<div class="best">Best metric: <code>{v}</code> '
-            f'(node <a href="#{best_id}">{best_id}</a>)</div>'
+            f'(node <a href="#{anchor}">{html.escape(best_id)}</a>)</div>'
         )
 
     total_cost = sum((n.cost_usd or 0.0) for n in nodes)
@@ -251,7 +266,9 @@ def _render_summary(nodes: Sequence[AttemptNode],
 def _render_card(n: AttemptNode, best_id: str | None,
                  metric_lookup: dict[str, float],
                  depth: int = 0,
-                 orphan: bool = False) -> str:
+                 orphan: bool = False,
+                 *,
+                 anchor_prefix: str = "") -> str:
     fg, bg = _color_for(n.outcome)
     is_best = (best_id is not None and n.id == best_id)
     badge = '<span class="best-badge">★ best</span>' if is_best else ""
@@ -267,10 +284,16 @@ def _render_card(n: AttemptNode, best_id: str | None,
             f'<code>{metric_lookup[n.id]}</code></div>'
         )
 
-    parent_line = (
-        f'<a class="parent-link" href="#{n.parent_id}">{n.parent_id}</a>'
-        if n.parent_id else "(root)"
-    )
+    # M2 PR 11: parent links resolve within the same side. The displayed
+    # text is the bare parent id (no prefix shown to the reader).
+    if n.parent_id:
+        parent_anchor = html.escape(anchor_prefix) + html.escape(n.parent_id)
+        parent_line = (
+            f'<a class="parent-link" href="#{parent_anchor}">'
+            f'{html.escape(n.parent_id)}</a>'
+        )
+    else:
+        parent_line = "(root)"
 
     diff_block = ""
     if n.diff_text:
@@ -296,8 +319,9 @@ def _render_card(n: AttemptNode, best_id: str | None,
     if depth:
         card_style += f";margin-left:{depth * 32}px"
 
+    article_id = html.escape(anchor_prefix) + html.escape(n.id)
     return f"""
-<article id="{html.escape(n.id)}" class="card{' card-best' if is_best else ''}{' card-orphan' if orphan else ''}"
+<article id="{article_id}" class="card{' card-best' if is_best else ''}{' card-orphan' if orphan else ''}"
          style="{card_style}">
   <header class="card-header" style="background:{bg};color:{fg}">
     {branch_marker}<span class="node-id">{html.escape(n.id)}</span>

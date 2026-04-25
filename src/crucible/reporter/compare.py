@@ -78,9 +78,11 @@ def render_comparison_html(
 
     left_section = _render_side(
         left_label, left_nodes, left_metrics, left_best_id,
+        anchor_prefix="left-",
     )
     right_section = _render_side(
         right_label, right_nodes, right_metrics, right_best_id,
+        anchor_prefix="right-",
     )
 
     return _COMPARE_PAGE_TEMPLATE.format(
@@ -108,8 +110,15 @@ def _render_side(
     nodes: Sequence[AttemptNode],
     metric_lookup: dict[str, float],
     best_id: str | None,
+    *,
+    anchor_prefix: str,
 ) -> str:
-    """Render one column: header label + summary pills + tree."""
+    """Render one column: header label + summary pills + tree.
+
+    `anchor_prefix` namespaces this side's DOM ids and intra-doc anchors
+    (e.g. "left-", "right-") so two trees with overlapping AttemptNode
+    ids can coexist in one HTML document without collisions.
+    """
     safe_label = html.escape(label)
     if not nodes:
         return (
@@ -118,8 +127,12 @@ def _render_side(
             f'<div class="empty">(no attempts in this ledger)</div>'
             f'</section>'
         )
-    summary = _render_summary(nodes, metric_lookup, best_id)
-    cards = _render_tree(nodes, best_id, metric_lookup)
+    summary = _render_summary(
+        nodes, metric_lookup, best_id, anchor_prefix=anchor_prefix
+    )
+    cards = _render_tree(
+        nodes, best_id, metric_lookup, anchor_prefix=anchor_prefix
+    )
     return (
         f'<section class="side">'
         f'<h2 class="side-label">{safe_label}</h2>'

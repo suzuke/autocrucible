@@ -49,6 +49,9 @@ def _validate(html_str: str) -> None:
     p = _Validator()
     p.feed(html_str)
     assert not p.errors, f"HTML errors: {p.errors}"
+    # M2 PR 11 reviewer non-blocker: validator must also assert no
+    # unclosed tags at EOF, otherwise a stray `<div>` would slip past.
+    assert not p.tags_open, f"unclosed tags at EOF: {p.tags_open}"
 
 
 def _make_node(seq: int, *, outcome: str = "keep",
@@ -95,9 +98,16 @@ def test_compare_renders_both_sides(two_ledgers: tuple[Path, Path]):
     # Both labels present
     assert "greedy" in out
     assert "bfts-lite" in out
-    # Both ledgers' nodes present
-    assert 'id="n000001"' in out
-    assert 'id="n000002"' in out
+    # Both ledgers' nodes present — under their side-scoped DOM ids.
+    assert 'id="left-n000001"' in out
+    assert 'id="left-n000002"' in out
+    assert 'id="right-n000001"' in out
+    assert 'id="right-n000002"' in out
+    # Critically: NO bare DOM id (would collide between sides).
+    assert 'id="n000001"' not in out
+    assert 'id="n000002"' not in out
+    # Display text still shows the bare node id (no prefix shown to user).
+    assert '>n000001<' in out
     # Compare grid present
     assert "compare-grid" in out
     _validate(out)
@@ -117,7 +127,9 @@ def test_compare_empty_ledger_one_side(two_ledgers: tuple[Path, Path]):
     )
     assert "no attempts" in out.lower()
     assert "real-run" in out
-    assert 'id="n000001"' in out
+    # Right-side node uses the right-prefixed anchor (no bare id collision).
+    assert 'id="right-n000001"' in out
+    assert 'id="n000001"' not in out
     _validate(out)
 
 
@@ -227,7 +239,8 @@ def test_delta_omitted_when_metric_lookup_empty(two_ledgers: tuple[Path, Path]):
 
 
 def test_compare_preserves_parent_relationship(two_ledgers: tuple[Path, Path]):
-    """Child cards still link to their parent on each side."""
+    """Child cards still link to their parent on each side — but parent
+    links are SIDE-SCOPED so they resolve unambiguously."""
     left, right = two_ledgers
     lL = TrialLedger(left)
     lR = TrialLedger(right)
@@ -241,10 +254,13 @@ def test_compare_preserves_parent_relationship(two_ledgers: tuple[Path, Path]):
         left, right,
         left_label="greedy", right_label="bfts-lite",
     )
-    # Both sides reference the parent
-    assert out.count('href="#n000001"') >= 2
-    # Right side has a branch (third node also under n000001)
-    assert 'id="n000003"' in out
+    # Each side has its own parent-link anchor (left-n000001 / right-n000001).
+    assert 'href="#left-n000001"' in out
+    assert 'href="#right-n000001"' in out
+    # Bare anchors that would be ambiguous must NOT appear.
+    assert 'href="#n000001"' not in out
+    # Right side has a branch (third node also under n000001).
+    assert 'id="right-n000003"' in out
     _validate(out)
 
 
@@ -307,3 +323,55 @@ def test_per_side_direction_picks_correct_best(two_ledgers: tuple[Path, Path]):
     assert out.count("★ best") == 2
     # Δ line MUST be omitted because directions differ
     assert "Δ" not in out
+
+
+# ---------------------------------------------------------------------------
+# Anchor uniqueness + side-scoping (reviewer round 2 blocking finding)
+# ---------------------------------------------------------------------------
+
+
+def test_compare_dom_ids_are_unique_per_side(two_ledgers: tuple[Path, Path]):
+    """Both ledgers normally share AttemptNode ids (n000001, n000002…).
+    Compare HTML MUST namespace them so each id appears exactly once
+    in the document. This is the reviewer round 2 blocking finding."""
+    left, right = two_ledgers
+    lL = TrialLedger(left)
+    lR = TrialLedger(right)
+    for i in (1, 2, 3):
+        lL.append_node(_make_node(i, outcome="keep"))
+        lR.append_node(_make_node(i, outcome="keep"))
+
+    out = render_comparison_html(
+        left, right,
+        left_label="L", right_label="R",
+    )
+    # Each side gets a unique DOM id per node.
+    for i in (1, 2, 3):
+        nid = f"n{i:06d}"
+        assert out.count(f'id="left-{nid}"') == 1
+        assert out.count(f'id="right-{nid}"') == 1
+        # No bare colliding ids.
+        assert f'id="{nid}"' not in out
+
+
+def test_compare_best_link_uses_side_anchor(two_ledgers: tuple[Path, Path]):
+    """The summary's `(node …)` link must point to the same-side card,
+    otherwise clicking on the right side's "Best metric" would scroll
+    to the left side's card with a colliding id."""
+    left, right = two_ledgers
+    lL = TrialLedger(left)
+    lR = TrialLedger(right)
+    for i in (1, 2):
+        lL.append_node(_make_node(i, outcome="keep"))
+        lR.append_node(_make_node(i, outcome="keep"))
+
+    out = render_comparison_html(
+        left, right,
+        left_label="L", right_label="R",
+        left_metric_lookup={"n000001": 1.0, "n000002": 5.0},   # left best n2
+        right_metric_lookup={"n000001": 9.0, "n000002": 7.0},  # right best n1
+        left_direction="maximize", right_direction="maximize",
+    )
+    # Summary's best-link is side-scoped.
+    assert 'href="#left-n000002"' in out
+    assert 'href="#right-n000001"' in out
