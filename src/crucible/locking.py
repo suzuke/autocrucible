@@ -69,16 +69,22 @@ def lock_dir() -> Path:
     Resolution order:
       1. `CRUCIBLE_LOCK_DIR` env var if set (used by tests + lets ops
          pin a known location, e.g. for subprocess coordination).
+         Always resolved to an absolute path so a relative override
+         can't be steered by cwd.
       2. `{tempdir}/crucible-locks/`. `tempfile.gettempdir()` respects
          `TMPDIR` / `XDG_RUNTIME_DIR` per platform.
-    Reviewer round 2 F3: locks live outside any workspace so the
-    agent's filesystem tools cannot reach them across any backend.
+    Reviewer round 2 F3 / round 3 follow-up: locks must live outside
+    ANY workspace. Returning the directory here is best-effort; the
+    final containment check happens in `WorktreeMutex.__init__()`
+    where we know the workspace path.
     """
     override = os.environ.get(_LOCK_DIR_ENV_VAR)
     if override:
-        base = Path(override)
+        # Resolve to absolute up-front so a relative `CRUCIBLE_LOCK_DIR`
+        # can't be manipulated by changing cwd between processes.
+        base = Path(override).resolve()
     else:
-        base = Path(tempfile.gettempdir()) / "crucible-locks"
+        base = (Path(tempfile.gettempdir()) / "crucible-locks").resolve()
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -89,6 +95,30 @@ _POLL_INTERVAL_SECONDS = 0.1
 # ---------------------------------------------------------------------------
 # Errors
 # ---------------------------------------------------------------------------
+
+
+class WorktreeLockConfigError(RuntimeError):
+    """Raised when the resolved lock file path violates an invariant.
+
+    Reviewer round 3: if `CRUCIBLE_LOCK_DIR` is set to a value inside
+    the workspace, the lock file becomes reachable by the agent's
+    filesystem tools across backends. Fail loudly at construction
+    time rather than silently re-exposing the lock.
+    """
+
+
+def _is_inside(path: Path, ancestor: Path) -> bool:
+    """Return True iff `path` is a descendant of (or equal to) `ancestor`.
+
+    Both arguments must already be resolved (absolute, symlinks
+    expanded). Uses `relative_to`-based check; works on Python 3.10+
+    without depending on `Path.is_relative_to` on older versions.
+    """
+    try:
+        path.relative_to(ancestor)
+        return True
+    except ValueError:
+        return False
 
 
 class WorktreeLocked(RuntimeError):
@@ -281,7 +311,21 @@ class WorktreeMutex:
         else:
             digest = hashlib.sha256(str(self.workspace).encode("utf-8")).hexdigest()
             stem = digest[:32]  # 128 bits of collision resistance — plenty
-        self.lock_path = lock_dir() / f"{stem}.lock"
+        self.lock_path = (lock_dir() / f"{stem}.lock").resolve()
+
+        # Reviewer round 3 F3 follow-up: defence-in-depth check that
+        # the resolved lock path is NOT inside the workspace tree. If
+        # `CRUCIBLE_LOCK_DIR` is misconfigured (or hostile) to point
+        # back into the workspace, that re-exposes the lock file to
+        # the agent's filesystem tools across backends. Fail loudly.
+        if _is_inside(self.lock_path, self.workspace):
+            raise WorktreeLockConfigError(
+                f"resolved lock path {self.lock_path} is inside workspace "
+                f"{self.workspace}; lock files MUST live outside any "
+                f"workspace so the agent's filesystem tools cannot reach "
+                f"them. Unset or correct CRUCIBLE_LOCK_DIR."
+            )
+
         self._fh = None
         self._held = False
 

@@ -26,6 +26,7 @@ import pytest
 
 from crucible.locking import (
     LockOwner,
+    WorktreeLockConfigError,
     WorktreeLocked,
     WorktreeMutex,
     _current_owner,
@@ -336,6 +337,76 @@ def test_lock_path_is_outside_workspace(workspace: Path):
         f"lock file {m.lock_path} is inside workspace {workspace_abs}; "
         f"agent tools could read/glob/grep it"
     )
+
+
+# ---------------------------------------------------------------------------
+# Reviewer round 3 follow-up: CRUCIBLE_LOCK_DIR misconfig defence
+# ---------------------------------------------------------------------------
+
+
+def test_env_override_inside_workspace_rejected(workspace: Path, monkeypatch):
+    """Reviewer round 3 F3 follow-up: setting CRUCIBLE_LOCK_DIR to a
+    path inside the workspace re-exposes the lock to agent tools.
+    `WorktreeMutex.__init__()` must reject this configuration."""
+    bad_dir = workspace / "locks"
+    monkeypatch.setenv("CRUCIBLE_LOCK_DIR", str(bad_dir))
+    with pytest.raises(WorktreeLockConfigError, match="inside workspace"):
+        WorktreeMutex(workspace)
+
+
+def test_env_override_inside_workspace_subdir_rejected(workspace: Path, monkeypatch, tmp_path):
+    """Even a deeply nested lock dir inside the workspace is rejected."""
+    nested = workspace / "logs" / "internal" / "locks"
+    monkeypatch.setenv("CRUCIBLE_LOCK_DIR", str(nested))
+    with pytest.raises(WorktreeLockConfigError, match="inside workspace"):
+        WorktreeMutex(workspace)
+
+
+def test_env_override_outside_workspace_ok(
+    workspace: Path, monkeypatch, tmp_path_factory
+):
+    """A `CRUCIBLE_LOCK_DIR` resolved to a path OUTSIDE the workspace
+    is allowed (pin: this is the legitimate ops-coordination use case
+    that env override exists for)."""
+    safe_dir = tmp_path_factory.mktemp("external-locks-truly-outside")
+    monkeypatch.setenv("CRUCIBLE_LOCK_DIR", str(safe_dir))
+    # No raise — resolved location is outside `workspace`.
+    m = WorktreeMutex(workspace)
+    assert m.lock_path.resolve().is_relative_to(safe_dir.resolve())
+
+
+def test_env_override_relative_pointing_into_workspace_rejected(
+    workspace: Path, monkeypatch
+):
+    """If a relative `CRUCIBLE_LOCK_DIR` happens to resolve INTO the
+    workspace (e.g. cwd happens to be the workspace), the containment
+    check rejects it."""
+    monkeypatch.chdir(workspace)
+    monkeypatch.setenv("CRUCIBLE_LOCK_DIR", "internal-locks")  # resolves to <workspace>/internal-locks
+    with pytest.raises(WorktreeLockConfigError, match="inside workspace"):
+        WorktreeMutex(workspace)
+
+
+def test_default_tempdir_placement_passes_containment(workspace: Path, monkeypatch):
+    """Default placement (no env override) is in tempdir — must be
+    outside workspace and pass the containment check cleanly."""
+    monkeypatch.delenv("CRUCIBLE_LOCK_DIR", raising=False)
+    # tempfile.gettempdir() respects TMPDIR; in our test fixture the
+    # autouse `isolated_lock_dir` set CRUCIBLE_LOCK_DIR — clear it
+    # and let the real tempdir be used. To avoid polluting actual
+    # /tmp, point TMPDIR at a fresh tmp dir.
+    fresh_tmp = workspace.parent / "isolated-tmp"
+    fresh_tmp.mkdir(exist_ok=True)
+    monkeypatch.setenv("TMPDIR", str(fresh_tmp))
+    m = WorktreeMutex(workspace)
+    # Lock should be in tempdir, NOT in workspace.
+    workspace_abs = workspace.resolve()
+    try:
+        m.lock_path.relative_to(workspace_abs)
+        inside = True
+    except ValueError:
+        inside = False
+    assert not inside
 
 
 def test_safe_cleanup_lock_skips_busy(workspace: Path, tmp_path: Path):
