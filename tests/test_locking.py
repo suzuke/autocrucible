@@ -32,6 +32,7 @@ from crucible.locking import (
     _read_owner,
     classify_worktree,
     is_owner_alive,
+    lock_dir,
     safe_cleanup_lock,
     try_acquire_for_cleanup,
 )
@@ -50,14 +51,35 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def isolated_lock_dir(tmp_path_factory, monkeypatch):
+    """Each test gets its own crucible-locks dir under tmp, so unrelated
+    lock files from other tests can't leak in. Reviewer round 2 F3:
+    locks live OUTSIDE the workspace under tempdir/crucible-locks/.
+
+    We use the `CRUCIBLE_LOCK_DIR` env var so subprocess helpers
+    inherit the same isolated location.
+    """
+    iso = tmp_path_factory.mktemp("locks-iso")
+    monkeypatch.setenv("CRUCIBLE_LOCK_DIR", str(iso))
+    yield iso
+
+
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _lock_path_for(workspace: Path) -> Path:
+    """Compute the lock file path the implementation uses for a given
+    workspace. Mirrors `WorktreeMutex.__init__` logic."""
+    import hashlib
+    digest = hashlib.sha256(str(workspace.resolve()).encode("utf-8")).hexdigest()
+    return lock_dir() / f"{digest[:32]}.lock"
+
+
 def _read_sentinel(workspace: Path) -> dict:
-    lock_path = workspace / "logs" / "locks" / f"{workspace.name}.lock"
-    raw = lock_path.read_text().strip()
+    raw = _lock_path_for(workspace).read_text().strip()
     return json.loads(raw)
 
 
@@ -127,7 +149,7 @@ def test_sentinel_overwritten_on_subsequent_acquire(workspace: Path):
     with WorktreeMutex(workspace):
         first = _read_sentinel(workspace)
     # Sentinel persists across release (we only flock-unlock, don't unlink)
-    lock_path = workspace / "logs" / "locks" / f"{workspace.name}.lock"
+    lock_path = _lock_path_for(workspace)
     assert lock_path.exists()
     assert _read_sentinel(workspace) == first
 
@@ -205,7 +227,7 @@ def test_no_split_brain_stale_sentinel_with_live_holder(workspace: Path, tmp_pat
         assert ei.value.owner.pid == 99999999
 
         # Verify the lock file was NOT unlinked or replaced — same content
-        lock_path = workspace / "logs" / "locks" / f"{workspace.name}.lock"
+        lock_path = _lock_path_for(workspace)
         data = json.loads(lock_path.read_text().strip())
         assert data["pid"] == 99999999, "B tampered with sentinel under live flock"
     finally:
@@ -278,7 +300,7 @@ def test_classify_live_owner(workspace: Path):
 
 def test_classify_orphan_malformed_sentinel(workspace: Path):
     # Create lock file with garbage so LockOwner.from_json returns None.
-    lock_path = workspace / "logs" / "locks" / f"{workspace.name}.lock"
+    lock_path = _lock_path_for(workspace)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text("not valid json")
     cand = classify_worktree(workspace)
@@ -286,17 +308,8 @@ def test_classify_orphan_malformed_sentinel(workspace: Path):
 
 
 def test_classify_stale_dead_pid(workspace: Path):
-    lock_path = workspace / "logs" / "locks" / f"{workspace.name}.lock"
+    lock_path = _lock_path_for(workspace)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text(json.dumps({
-        "pid": 99999999,
-        "host": "localhost-not-this",  # cross-host fallback alive
-        "process_create_time": None,
-        "claimed_at": "2020-01-01T00:00:00Z",
-    }) + "\n")
-    cand = classify_worktree(workspace)
-    # Cross-host means we conservatively classify as live; same-host
-    # dead-pid would be "stale". Use same-host:
     import socket
     lock_path.write_text(json.dumps({
         "pid": 99999999,
@@ -306,6 +319,23 @@ def test_classify_stale_dead_pid(workspace: Path):
     }) + "\n")
     cand = classify_worktree(workspace)
     assert cand.reason == "stale"
+
+
+def test_lock_path_is_outside_workspace(workspace: Path):
+    """Reviewer round 2 F3 regression: lock file MUST live outside the
+    workspace tree so no agent's filesystem tools can reach it."""
+    m = WorktreeMutex(workspace)
+    # The lock path must NOT be a descendant of the workspace.
+    workspace_abs = workspace.resolve()
+    try:
+        m.lock_path.resolve().relative_to(workspace_abs)
+        inside = True
+    except ValueError:
+        inside = False
+    assert not inside, (
+        f"lock file {m.lock_path} is inside workspace {workspace_abs}; "
+        f"agent tools could read/glob/grep it"
+    )
 
 
 def test_safe_cleanup_lock_skips_busy(workspace: Path, tmp_path: Path):
@@ -336,7 +366,7 @@ def test_safe_cleanup_lock_skips_busy(workspace: Path, tmp_path: Path):
 
 def test_safe_cleanup_lock_succeeds_when_unheld(workspace: Path):
     # Pre-write a stale sentinel
-    lock_path = workspace / "logs" / "locks" / f"{workspace.name}.lock"
+    lock_path = _lock_path_for(workspace)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text(json.dumps({
         "pid": 99999999,
@@ -349,6 +379,42 @@ def test_safe_cleanup_lock_succeeds_when_unheld(workspace: Path):
         # Lock is unheld so cleanup should be able to acquire.
         assert held is not None
         assert held.held is True
+
+
+def test_cleanup_does_not_unlink_lock_file(workspace: Path, tmp_path: Path):
+    """Reviewer round 2 F1 regression: cleanup MUST NOT unlink the lock
+    file path while another process may have the inode open. After
+    cleanup completes, the lock file must still exist with refreshed
+    metadata under flock — not deleted."""
+    # Create a stale sentinel
+    import socket
+    lock_path = _lock_path_for(workspace)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(json.dumps({
+        "pid": 99999999,
+        "host": socket.gethostname(),
+        "process_create_time": None,
+        "claimed_at": "2020-01-01T00:00:00Z",
+    }) + "\n")
+
+    # Confirm starts as stale
+    cand = classify_worktree(workspace)
+    assert cand.reason == "stale"
+
+    # Run safe_cleanup_lock — acquire, then release. Must NOT unlink.
+    with safe_cleanup_lock(workspace) as held:
+        assert held is not None  # acquired
+
+    # Lock file still exists — never unlinked.
+    assert lock_path.exists(), (
+        "cleanup unlinked the lock file path; this reintroduces the "
+        "split-brain attack from reviewer round 2 F1"
+    )
+    # Sentinel content was overwritten under flock with current owner
+    # metadata (reviewer expected behavior).
+    new_data = json.loads(lock_path.read_text().strip())
+    assert new_data["pid"] == os.getpid()
+    assert new_data["pid"] != 99999999
 
 
 # ---------------------------------------------------------------------------

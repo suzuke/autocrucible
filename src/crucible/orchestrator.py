@@ -979,6 +979,7 @@ class Orchestrator:
 
     def _run_loop_serial(self, max_iterations: int | None = None) -> None:
         """Serial loop for greedy and restart strategies."""
+        import platform as _platform
         from crucible.locking import WorktreeMutex, WorktreeLocked
 
         if max_iterations is None:
@@ -994,20 +995,30 @@ class Orchestrator:
         # future parallel BFTS workers will rely on. Timeout default is
         # short (5s) — if another process is here, we want to fail
         # loudly rather than block.
-        try:
-            mutex = WorktreeMutex(self.workspace, timeout=5.0)
-            mutex.acquire()
-        except WorktreeLocked as exc:
-            logger.error(
-                "Cannot start serial loop — worktree is already locked: %s",
-                exc,
+        #
+        # Reviewer round 2 F4: Windows is explicitly unsupported (matches
+        # `TrialLedger`'s POSIX-flock-only stance). On Windows we DO NOT
+        # silently swallow the failure — we skip the mutex entirely and
+        # log a clear warning so operators understand the cross-process
+        # invariant is not enforced.
+        mutex: WorktreeMutex | None = None
+        if _platform.system() == "Windows":
+            logger.warning(
+                "WorktreeMutex unsupported on Windows in v1.0 — running in "
+                "single-process mode without cross-process lock enforcement. "
+                "Concurrent crucible runs against the same workspace will "
+                "race; use one process at a time."
             )
-            return
-        except RuntimeError:
-            # Windows path: WorktreeMutex.acquire raises. Fall through
-            # in unsafe single-process mode (matches TrialLedger v1.0
-            # Windows stance).
-            mutex = None
+        else:
+            try:
+                mutex = WorktreeMutex(self.workspace, timeout=5.0)
+                mutex.acquire()
+            except WorktreeLocked as exc:
+                logger.error(
+                    "Cannot start serial loop — worktree is already locked: %s",
+                    exc,
+                )
+                return
         try:
             while True:
                 if max_iterations is not None and session_count >= max_iterations:

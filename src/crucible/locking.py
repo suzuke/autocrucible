@@ -17,9 +17,14 @@ without stepping on each other.
   - Stale sentinel after acquisition: the lock acquired the file
     cleanly, the previous owner's metadata is just leftover. We
     overwrite with our own owner info and log a recovery line.
-  - The sentinel lives at `<workspace>/logs/locks/<id>.lock`, a
-    platform-owned area not configurable by the user / agent. No
-    reliance on `files.hidden` config.
+  - The sentinel lives OUTSIDE the workspace at
+    `{tempdir}/crucible-locks/{sha256(resolved_workspace_path)}.lock`.
+    This is unreachable by any agent's filesystem tools (smolagents
+    `_path_acl` rejects absolute paths and `..` escapes; Claude Code's
+    Read hook can't see paths outside the workspace either). Reviewer
+    round 2 F3: in-workspace lock files were agent-readable via
+    Claude Code's default Read/Glob/Grep hooks, so we can't keep
+    them inside.
 
 Windows: `fcntl` unavailable. Calling `acquire()` raises
 `RuntimeError` mirroring `TrialLedger`'s behaviour (spec §11 INV-4).
@@ -30,11 +35,13 @@ M2+ may add `msvcrt.locking`.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import logging
 import os
 import platform
 import socket
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -51,6 +58,29 @@ if not _WINDOWS:
 # Module-level default: enough for normal contention; the orchestrator
 # can pass a longer / shorter override via constructor.
 DEFAULT_TIMEOUT_SECONDS = 30.0
+
+
+_LOCK_DIR_ENV_VAR = "CRUCIBLE_LOCK_DIR"
+
+
+def lock_dir() -> Path:
+    """Return the global directory for crucible worktree locks.
+
+    Resolution order:
+      1. `CRUCIBLE_LOCK_DIR` env var if set (used by tests + lets ops
+         pin a known location, e.g. for subprocess coordination).
+      2. `{tempdir}/crucible-locks/`. `tempfile.gettempdir()` respects
+         `TMPDIR` / `XDG_RUNTIME_DIR` per platform.
+    Reviewer round 2 F3: locks live outside any workspace so the
+    agent's filesystem tools cannot reach them across any backend.
+    """
+    override = os.environ.get(_LOCK_DIR_ENV_VAR)
+    if override:
+        base = Path(override)
+    else:
+        base = Path(tempfile.gettempdir()) / "crucible-locks"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
 
 # Polling cadence while waiting for an unheld lock.
 _POLL_INTERVAL_SECONDS = 0.1
@@ -242,9 +272,16 @@ class WorktreeMutex:
     ) -> None:
         self.workspace = Path(workspace).resolve()
         self.timeout = float(timeout)
-        # Lock file ID: sanitised workspace name; caller can override.
-        sanitised = (lock_id or self.workspace.name or "default").replace("/", "_")
-        self.lock_path = self.workspace / "logs" / "locks" / f"{sanitised}.lock"
+        # Reviewer round 2 F3: lock file MUST be outside the workspace
+        # so it's unreachable by any agent's filesystem tools. Hash the
+        # resolved workspace path for uniqueness; basename alone would
+        # collide if two different projects share a name.
+        if lock_id is not None:
+            stem = lock_id.replace("/", "_").replace("\\", "_")
+        else:
+            digest = hashlib.sha256(str(self.workspace).encode("utf-8")).hexdigest()
+            stem = digest[:32]  # 128 bits of collision resistance — plenty
+        self.lock_path = lock_dir() / f"{stem}.lock"
         self._fh = None
         self._held = False
 
@@ -335,7 +372,8 @@ def classify_worktree(worktree_path: Path) -> CleanupCandidate:
     kernel lock non-blocking (handled by `try_cleanup_worktree`).
     """
     workspace = Path(worktree_path).resolve()
-    lock_path = workspace / "logs" / "locks" / f"{workspace.name}.lock"
+    digest = hashlib.sha256(str(workspace).encode("utf-8")).hexdigest()
+    lock_path = lock_dir() / f"{digest[:32]}.lock"
 
     if not lock_path.exists():
         return CleanupCandidate(
