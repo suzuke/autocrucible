@@ -225,10 +225,18 @@ def test_dual_log_records_match_in_full_run(fake_orchestrator, workspace):
     nodes = fake_orchestrator.ledger.all_nodes()
     assert [n.id for n in nodes] == [f"n00000{i}" for i in range(1, 6)]
     assert [n.outcome for n in nodes] == statuses
-    # Parent chain is correct
+
+    # M1b PR 8a code-ancestry parent chain:
+    #   n000001 crash    parent=None     (no kept yet)
+    #   n000002 keep     parent=None     (no prior kept either)
+    #   n000003 discard  parent=n000002
+    #   n000004 keep     parent=n000002  (extends from last kept, not n000003)
+    #   n000005 violation parent=n000004
     assert nodes[0].parent_id is None
-    for i in range(1, 5):
-        assert nodes[i].parent_id == nodes[i - 1].id
+    assert nodes[1].parent_id is None
+    assert nodes[2].parent_id == "n000002"
+    assert nodes[3].parent_id == "n000002"
+    assert nodes[4].parent_id == "n000004"
 
 
 # ---------------------------------------------------------------------------
@@ -291,24 +299,28 @@ def test_no_commit_description_capped_at_500(fake_orchestrator):
     assert len(nodes[0].description) == 500
 
 
-def test_no_commit_parent_chain_extends(fake_orchestrator):
-    """Violation/skip should still extend the parent chain so subsequent
-    keep/discard nodes have a parent_id pointing back to the rejection."""
+def test_no_commit_parent_does_not_advance(fake_orchestrator):
+    """M1b PR 8a: violation/skip do NOT advance the code-parent pointer.
+    iter 1 keep, iter 2 violation, iter 3 keep should produce:
+      n000001 (keep)    parent=None
+      n000002 (violation) parent=n000001
+      n000003 (keep)    parent=n000001    ← extends from kept iter 1, not violation
+    """
     agent_result = _agent_result_with_cost()
     # iter 1: keep
     fake_orchestrator._dual_log(_record(iteration=1, status="keep"), agent_result, None)
-    # iter 2: violation (no commit)
+    # iter 2: violation (no commit, doesn't advance parent)
     fake_orchestrator._iteration = 2
     fake_orchestrator._current_beam_id = None
     fake_orchestrator._ledger_log_no_commit("violation", agent_result, "bad edit")
-    # iter 3: keep
+    # iter 3: keep — parent should be n000001 (not n000002)
     fake_orchestrator._dual_log(_record(iteration=3, status="keep"), agent_result, None)
 
     nodes = fake_orchestrator.ledger.all_nodes()
     assert [n.id for n in nodes] == ["n000001", "n000002", "n000003"]
     assert nodes[0].parent_id is None
     assert nodes[1].parent_id == "n000001"
-    assert nodes[2].parent_id == "n000002"
+    assert nodes[2].parent_id == "n000001"  # CODE ANCESTRY: skips n000002
 
 
 def test_no_commit_ledger_failure_logged_not_raised(fake_orchestrator):
@@ -329,31 +341,30 @@ def test_no_commit_ledger_failure_logged_not_raised(fake_orchestrator):
 def test_resume_reads_ledger_for_iteration_max(fake_orchestrator):
     """If ledger has more entries than ResultsLog (because violation/skip
     only write ledger), _iteration must be set from the LEDGER max so the
-    next iteration doesn't reuse an existing AttemptNode id."""
-    # Stub git checkout so we don't need a real repo
+    next iteration doesn't reuse an existing AttemptNode id.
+
+    M1b PR 8a: parent chain rebuild only tracks KEPT nodes (code ancestry)."""
     fake_orchestrator.git = MagicMock()
     fake_orchestrator.results.read_all = MagicMock(return_value=[
         SimpleNamespace(iteration=1, status="keep"),
-        # Only one ResultsLog entry. Ledger has one more (violation).
     ])
-    # Pre-populate ledger with 2 nodes (1 keep + 1 violation)
-    fake_orchestrator.ledger.append_node(SimpleNamespace.__class__ and __import__("crucible.ledger", fromlist=["AttemptNode"]).AttemptNode(
-        id="n000001", commit="abc", outcome="keep", created_at="2026-04-25T12:00:00+00:00",
-    ))
     from crucible.ledger import AttemptNode
+    fake_orchestrator.ledger.append_node(AttemptNode(
+        id="n000001", commit="abc", outcome="keep",
+        created_at="2026-04-25T12:00:00+00:00",
+    ))
     fake_orchestrator.ledger.append_node(AttemptNode(
         id="n000002", parent_id="n000001", commit="", outcome="violation",
         description="bad edit", created_at="2026-04-25T12:01:00+00:00",
     ))
 
-    # Run resume
     from crucible.orchestrator import Orchestrator
     Orchestrator.resume(fake_orchestrator)
 
-    # _iteration must reflect ledger max (2), not ResultsLog len (1)
+    # _iteration must reflect ledger max (2)
     assert fake_orchestrator._iteration == 2
-    # parent chain rebuilt
-    assert fake_orchestrator._last_attempt_id_by_beam[None] == "n000002"
+    # parent chain holds last KEPT node (n000001), not the violation
+    assert fake_orchestrator._last_attempt_id_by_beam[None] == "n000001"
 
 
 def test_resume_handles_empty_state(fake_orchestrator):
@@ -367,21 +378,23 @@ def test_resume_handles_empty_state(fake_orchestrator):
 
 
 def test_resume_reconstructs_beam_chain(fake_orchestrator):
-    """Per-beam parent chains must be rebuilt from b<beam>n<seq> ids."""
+    """Per-beam parent chains must be rebuilt from b<beam>n<seq> ids.
+    M1b PR 8a: rebuild only tracks KEPT nodes per beam (code ancestry)."""
     fake_orchestrator.git = MagicMock()
     fake_orchestrator.results.read_all = MagicMock(return_value=[])
     from crucible.ledger import AttemptNode
-    # beam 0: n000001 → n000002
+    # beam 0: keep n1 → discard n2 (the discard does NOT advance the chain)
     fake_orchestrator.ledger.append_node(AttemptNode(id="b0n000001", outcome="keep"))
     fake_orchestrator.ledger.append_node(AttemptNode(id="b0n000002", parent_id="b0n000001", outcome="discard"))
-    # beam 1: n000001 only
+    # beam 1: keep only
     fake_orchestrator.ledger.append_node(AttemptNode(id="b1n000001", outcome="keep"))
 
     from crucible.orchestrator import Orchestrator
     Orchestrator.resume(fake_orchestrator)
-    assert fake_orchestrator._last_attempt_id_by_beam[0] == "b0n000002"
+    # beam 0 last KEPT is b0n000001 (not the discard b0n000002)
+    assert fake_orchestrator._last_attempt_id_by_beam[0] == "b0n000001"
     assert fake_orchestrator._last_attempt_id_by_beam[1] == "b1n000001"
-    # Iteration is max sequence across all ids
+    # Iteration is max sequence across all ids (still includes discard's seq)
     assert fake_orchestrator._iteration == 2
 
 

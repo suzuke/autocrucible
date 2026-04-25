@@ -225,10 +225,14 @@ class Orchestrator:
         self._iteration = max(len(existing), results_max, ledger_max)
 
         # Rebuild parent chain from ledger so the next AttemptNode links
-        # correctly. Walk in append order and remember the last id seen
-        # per beam (None for linear).
+        # correctly. Walk in append order and remember the last KEPT id
+        # seen per beam (None for linear). Only kept attempts carry code
+        # commits; discard/crash/violation/skip nodes appear in the ledger
+        # but do not advance the code-parent pointer (M1b PR 8a semantics).
         self._last_attempt_id_by_beam = {}
         for n in ledger_nodes:
+            if n.outcome != "keep":
+                continue
             beam: int | None = None
             if n.id.startswith("b") and "n" in n.id:
                 try:
@@ -695,8 +699,15 @@ class Orchestrator:
             worktree_path=str(self.workspace),
         )
 
-        # Track for next iteration's parent_id link.
-        self._last_attempt_id_by_beam[beam] = attempt_id
+        # M1b PR 8a (reviewer F3): parent_id is CODE ancestry, not sequence
+        # ancestry. Only "keep" outcomes advance the parent pointer because
+        # only kept nodes leave a commit on the branch. discard / crash /
+        # violation / skip nodes still appear in the ledger (with this same
+        # parent_id), but the NEXT attempt runs from the previous kept
+        # state, so its parent must point at the kept node — not the
+        # rejected one.
+        if record.status == "keep":
+            self._last_attempt_id_by_beam[beam] = attempt_id
         return node
 
     def _dual_log(
@@ -764,7 +775,9 @@ class Orchestrator:
                 worktree_path=str(self.workspace),
                 description=description[:500] if description else None,
             )
-            self._last_attempt_id_by_beam[beam] = attempt_id
+            # M1b PR 8a: violation/skip do NOT advance the code-parent
+            # pointer. The next attempt runs from the previous kept state,
+            # so its parent must point at the kept node.
             self.ledger.append_node(node)
         except Exception as exc:
             logger.warning("ledger append failed (no-commit outcome %s): %s",
