@@ -880,7 +880,13 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
 @click.option("--no-ai", is_flag=True, help=_("Skip AI insights (data only)."))
 @click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
 @click.option("--tokens", is_flag=True, help=_("Show token profiling analysis."))
-def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool, tokens: bool) -> None:
+@click.option("--html", "html_output", is_flag=True,
+              help=_("Render the v1.0 attempt-tree as a static HTML report "
+                     "(reads logs/run-<tag>/ledger.jsonl)."))
+@click.option("--html-out", default=None,
+              help=_("Output path for the HTML report (default: postmortem-<tag>.html in project)."))
+def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool,
+               tokens: bool, html_output: bool, html_out: str | None) -> None:
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -888,6 +894,45 @@ def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool, tokens: b
         raise click.ClickException(str(e))
 
     from crucible.postmortem import PostmortemAnalyzer, render_text
+
+    # M1a: --html reads the new ledger.jsonl, not results-<tag>.jsonl
+    if html_output:
+        from crucible.reporter import render_static_html
+        ledger_path = project / "logs" / f"run-{tag}" / "ledger.jsonl"
+        # Build a metric_lookup from results-{tag}.jsonl when present,
+        # so the HTML report can highlight best-of-run.
+        metric_lookup: dict[str, float] = {}
+        results_path = project / results_filename(tag)
+        if results_path.exists():
+            try:
+                import json as _json
+                with results_path.open() as fp:
+                    for i, line in enumerate(fp, start=1):
+                        rec = _json.loads(line)
+                        if rec.get("metric_value") is None:
+                            continue
+                        # Match the orchestrator's id scheme: linear → "n000042";
+                        # beam → "b<beam>n000042". records carry beam_id when set.
+                        beam_id = rec.get("beam_id")
+                        iteration = rec.get("iteration", i)
+                        if beam_id is None:
+                            attempt_id = f"n{iteration:06d}"
+                        else:
+                            attempt_id = f"b{beam_id}n{iteration:06d}"
+                        metric_lookup[attempt_id] = float(rec["metric_value"])
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "could not build metric_lookup: %s", exc
+                )
+        out = render_static_html(
+            ledger_path,
+            title=f"Crucible Postmortem — {tag}",
+            metric_lookup=metric_lookup,
+        )
+        target = Path(html_out) if html_out else (project / f"postmortem-{tag}.html")
+        target.write_text(out)
+        click.echo(_("Wrote HTML report to {path}").format(path=target))
+        return
 
     results_path = project / results_filename(tag)
     if not results_path.exists():
