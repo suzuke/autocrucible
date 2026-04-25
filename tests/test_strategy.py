@@ -418,6 +418,15 @@ def test_make_strategy_forwards_prune_threshold():
     assert isinstance(make_strategy("greedy", prune_threshold=5), GreedyStrategy)
 
 
+def test_bfts_rejects_zero_or_negative_prune_threshold():
+    """Defence-in-depth: __post_init__ rejects prune_threshold < 1 even if
+    the config validator is bypassed (e.g. direct construction in tests)."""
+    with pytest.raises(ValueError, match="prune_threshold must be a positive int"):
+        BFTSLiteStrategy(prune_threshold=0)
+    with pytest.raises(ValueError, match="prune_threshold must be a positive int"):
+        BFTSLiteStrategy(prune_threshold=-1)
+
+
 # ---------------------------------------------------------------------------
 # StrategyAction immutability + equality
 # ---------------------------------------------------------------------------

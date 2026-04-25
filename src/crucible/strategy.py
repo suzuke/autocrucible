@@ -199,6 +199,12 @@ class BFTSLiteStrategy:
     name: str = "bfts-lite"
     prune_threshold: int = 3
 
+    def __post_init__(self) -> None:
+        if self.prune_threshold < 1:
+            raise ValueError(
+                f"prune_threshold must be a positive int, got {self.prune_threshold!r}"
+            )
+
     def decide(self, ctx: StrategyContext) -> StrategyAction:
         if ctx.max_iterations is not None and ctx.iteration_count >= ctx.max_iterations:
             return Stop(reason=f"max_iterations={ctx.max_iterations} reached")
