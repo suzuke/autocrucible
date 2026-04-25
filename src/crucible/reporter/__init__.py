@@ -8,6 +8,7 @@ M1b will add tree-view styling for BFTS expansions.
 M3 will add d3.js interactive expand/collapse.
 """
 
+from crucible.reporter.compare import render_comparison_html
 from crucible.reporter.html_tree import render_static_html
 
-__all__ = ["render_static_html"]
+__all__ = ["render_static_html", "render_comparison_html"]

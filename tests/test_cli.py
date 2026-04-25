@@ -135,6 +135,98 @@ def test_compare_command(tmp_path):
     assert "b" in result.output
 
 
+def _make_ledger_for_tag(project: Path, tag: str, *, num_keep: int = 2) -> None:
+    """Helper for compare --html tests: create a logs/run-<tag>/ledger.jsonl
+    with `num_keep` keep nodes so the renderer has something to draw."""
+    from crucible.ledger import AttemptNode, TrialLedger
+
+    ledger_dir = project / "logs" / f"run-{tag}"
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    ledger = TrialLedger(ledger_dir / "ledger.jsonl")
+    parent: str | None = None
+    for i in range(1, num_keep + 1):
+        node = AttemptNode(
+            id=AttemptNode.short_id(i),
+            parent_id=parent,
+            commit=f"sha-{tag}-{i:08x}",
+            outcome="keep",
+            cost_usd=0.001 * i,
+            created_at="2026-04-25T12:00:00+00:00",
+        )
+        ledger.append_node(node)
+        parent = node.id
+
+
+def test_compare_html_writes_report(tmp_path):
+    """`crucible compare a b --html` writes a side-by-side HTML report to
+    <project>/reports/compare-a-vs-b.html with both labels present."""
+    setup_project(tmp_path)
+    _make_ledger_for_tag(tmp_path, "a", num_keep=2)
+    _make_ledger_for_tag(tmp_path, "b", num_keep=3)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["compare", "a", "b", "--html", "--project-dir", str(tmp_path)]
+    )
+    assert result.exit_code == 0, result.output
+
+    target = tmp_path / "reports" / "compare-a-vs-b.html"
+    assert target.exists()
+    body = target.read_text()
+    assert "compare-grid" in body
+    assert ">a</h2>" in body or "side-label" in body
+    assert ">b</h2>" in body or "side-label" in body
+    # Both ledgers' nodes appear
+    assert "n000001" in body
+    assert "n000003" in body  # only present on side b
+
+
+def test_compare_html_custom_output(tmp_path):
+    setup_project(tmp_path)
+    _make_ledger_for_tag(tmp_path, "x")
+    _make_ledger_for_tag(tmp_path, "y")
+
+    out_path = tmp_path / "explicit-out.html"
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["compare", "x", "y", "--html",
+               "--html-out", str(out_path),
+               "--project-dir", str(tmp_path)]
+    )
+    assert result.exit_code == 0, result.output
+    assert out_path.exists()
+    assert "compare-grid" in out_path.read_text()
+
+
+def test_compare_html_missing_ledger_errors_clearly(tmp_path):
+    """If one side's ledger.jsonl is missing, the command exits non-zero
+    with a clear message — does NOT silently render an empty side."""
+    setup_project(tmp_path)
+    _make_ledger_for_tag(tmp_path, "only-left")
+    # No ledger for "missing-tag"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["compare", "only-left", "missing-tag",
+               "--html", "--project-dir", str(tmp_path)]
+    )
+    assert result.exit_code != 0
+    assert "ledger not found" in result.output.lower()
+
+
+def test_compare_right_project_requires_html(tmp_path):
+    """--right-project is only meaningful with --html for v1."""
+    setup_project(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        main, ["compare", "a", "b",
+               "--right-project", str(tmp_path),
+               "--project-dir", str(tmp_path)]
+    )
+    assert result.exit_code != 0
+    assert "--right-project" in result.output
+
+
 def test_compare_json_output(tmp_path):
     setup_project(tmp_path)
     runner = CliRunner()
