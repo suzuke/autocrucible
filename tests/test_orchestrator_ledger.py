@@ -455,3 +455,104 @@ def test_build_strategy_context_populates_metric_lookup(fake_orchestrator):
     assert ctx.plateau_streak == 2
     assert ctx.plateau_threshold == 8
     assert ctx.baseline_commit == "abc"
+
+
+# ---------------------------------------------------------------------------
+# M1b PR 6 — sealed EvalResult artefact write
+# ---------------------------------------------------------------------------
+
+
+def test_write_eval_result_artifact_creates_json_with_seal(fake_orchestrator, workspace):
+    """Per spec §4 / §11: the host process is the SOLE writer of
+    eval-result.json. Verify the file appears at the spec path with
+    a content-sha256 seal and that the returned hash matches the disk."""
+    import hashlib
+    import json as _json
+    from types import SimpleNamespace
+
+    fake_orchestrator.config = SimpleNamespace(
+        commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
+        metric=SimpleNamespace(name="ratio", direction="maximize"),
+    )
+    fake_orchestrator._current_beam_id = None
+    run_result = SimpleNamespace(
+        stdout="metric: 1.42\n", stderr_tail="", exit_code=0, timed_out=False,
+    )
+
+    from crucible.orchestrator import Orchestrator
+    rel_path, sha = Orchestrator._write_eval_result_artifact(
+        fake_orchestrator,
+        iteration=3,
+        commit_hash="abc1234",
+        run_result=run_result,
+        metric_value=1.42,
+        run_duration_seconds=0.5,
+    )
+
+    assert rel_path == "logs/run-t1/iter-3/eval-result.json"
+    assert sha is not None
+    target = workspace / rel_path
+    assert target.exists()
+    payload = _json.loads(target.read_text())
+    assert payload["metric_value"] == 1.42
+    assert payload["metric_name"] == "ratio"
+    assert payload["seal"].startswith("content-sha256:")
+    assert payload["valid"] is True
+    assert payload["exit_code"] == 0
+    # Returned sha matches disk
+    assert sha == hashlib.sha256(target.read_bytes()).hexdigest()
+
+
+def test_write_eval_result_artifact_handles_missing_metric(fake_orchestrator, workspace):
+    """metric_value=None → valid=False, seal still computed."""
+    import json as _json
+    from types import SimpleNamespace
+
+    fake_orchestrator.config = SimpleNamespace(
+        commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
+        metric=SimpleNamespace(name="ratio", direction="maximize"),
+    )
+    fake_orchestrator._current_beam_id = None
+    run_result = SimpleNamespace(
+        stdout="", stderr_tail="boom", exit_code=1, timed_out=False,
+    )
+
+    from crucible.orchestrator import Orchestrator
+    rel_path, sha = Orchestrator._write_eval_result_artifact(
+        fake_orchestrator,
+        iteration=1,
+        commit_hash="",
+        run_result=run_result,
+        metric_value=None,
+        run_duration_seconds=0.1,
+    )
+
+    target = workspace / rel_path
+    payload = _json.loads(target.read_text())
+    assert payload["metric_value"] is None
+    assert payload["valid"] is False
+    assert payload["exit_code"] == 1
+
+
+def test_write_eval_result_artifact_handles_io_failure(fake_orchestrator):
+    """If the write fails, returns (None, None) and does not raise."""
+    from types import SimpleNamespace
+    fake_orchestrator.config = SimpleNamespace(
+        commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
+        metric=SimpleNamespace(name="ratio", direction="maximize"),
+    )
+    fake_orchestrator._current_beam_id = None
+    fake_orchestrator.workspace = Path("/no/such/dir/that/exists")
+    run_result = SimpleNamespace(stdout="", stderr_tail="", exit_code=0, timed_out=False)
+
+    from crucible.orchestrator import Orchestrator
+    rel_path, sha = Orchestrator._write_eval_result_artifact(
+        fake_orchestrator,
+        iteration=1,
+        commit_hash="abc",
+        run_result=run_result,
+        metric_value=1.0,
+        run_duration_seconds=0.1,
+    )
+    assert rel_path is None
+    assert sha is None

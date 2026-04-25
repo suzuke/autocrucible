@@ -364,6 +364,18 @@ class Orchestrator:
             self._iteration, agent_result, prompt=prompt, diff_text=diff_text,
         )
 
+        # M1b PR 6: write sealed EvalResult artefact for this iteration.
+        # Reference + integrity hash are then attached to the AttemptNode.
+        eval_result_ref, eval_result_sha256 = self._write_eval_result_artifact(
+            iteration=self._iteration,
+            commit_hash=commit_hash,
+            run_result=run_result,
+            metric_value=metric_value,
+            run_duration_seconds=run_duration,
+        )
+        self._pending_eval_result_ref = eval_result_ref
+        self._pending_eval_result_sha256 = eval_result_sha256
+
         # 10. Handle crash (metric is None or invalid)
         if metric_value is None or not self.guardrails.check_metric(metric_value):
             self._fail_seq += 1
@@ -459,6 +471,105 @@ class Orchestrator:
             log_dir=f"logs/iter-{self._iteration}",
             beam_id=self._current_beam_id,
         )
+
+    def _write_eval_result_artifact(
+        self,
+        iteration: int,
+        commit_hash: str,
+        run_result,
+        metric_value: float | None,
+        run_duration_seconds: float,
+    ) -> tuple[str, str] | tuple[None, None]:
+        """Write a sealed EvalResult JSON artefact for this iteration.
+
+        Returns (relative_path, sha256_hash) on success, or (None, None) on
+        failure (does not raise — never breaks the experiment loop).
+
+        Per spec §4 / §11: the host process is the SOLE writer; agent
+        code never produces this file. The integrity hash is the sha256
+        of canonical JSON (M1) — M2 will upgrade to HMAC-SHA256 once
+        secret-key management lands.
+        """
+        import hashlib
+        import json as _json
+        from datetime import datetime, timezone
+
+        from crucible.ledger import LEDGER_SCHEMA_VERSION, EvalResult
+
+        try:
+            beam = self._current_beam_id
+            attempt_id = (
+                AttemptNode.short_id(iteration)
+                if beam is None
+                else f"b{beam}{AttemptNode.short_id(iteration)}"
+            )
+
+            # Manifest hash: combines eval_command, run_command, metric_name.
+            # M2 may include entry_file_hash + config_hash for stronger
+            # tampering detection.
+            manifest_payload = (
+                f"{self.config.commands.eval}|"
+                f"{self.config.commands.run}|"
+                f"{self.config.metric.name}"
+            )
+            manifest_hash = hashlib.sha256(
+                manifest_payload.encode("utf-8")
+            ).hexdigest()
+
+            stdout_hash = hashlib.sha256(
+                (run_result.stdout or "").encode("utf-8")
+            ).hexdigest()
+            stderr_hash = hashlib.sha256(
+                (run_result.stderr_tail or "").encode("utf-8")
+            ).hexdigest()
+
+            payload = EvalResult(
+                schema_version=LEDGER_SCHEMA_VERSION,
+                run_id=self.tag,
+                attempt_id=attempt_id,
+                commit=commit_hash or "",
+                eval_command=self.config.commands.eval,
+                eval_manifest_hash=manifest_hash,
+                metric_name=self.config.metric.name,
+                metric_value=metric_value,
+                metric_direction=self.config.metric.direction,
+                diagnostics={},  # M2 will best-effort parse from stdout
+                valid=metric_value is not None,
+                exit_code=getattr(run_result, "exit_code", 0),
+                timed_out=getattr(run_result, "timed_out", False),
+                duration_ms=int(run_duration_seconds * 1000),
+                stdout_sha256=stdout_hash,
+                stderr_sha256=stderr_hash,
+                seal=None,  # populated below
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+
+            # Canonical JSON for sealing (sorted keys, no whitespace variability).
+            from dataclasses import asdict
+            payload_dict = asdict(payload)
+            canonical = _json.dumps(
+                payload_dict, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            payload.seal = "content-sha256:" + hashlib.sha256(canonical).hexdigest()
+            payload_dict["seal"] = payload.seal
+
+            # Write under logs/run-<tag>/iter-<N>/eval-result.json (per spec §4).
+            # Co-located with prompt.md and diff.patch so HTML reporter can
+            # cross-reference.
+            target_dir = self.workspace / "logs" / f"run-{self.tag}" / f"iter-{iteration}"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target_path = target_dir / "eval-result.json"
+            target_path.write_text(_json.dumps(payload_dict, indent=2))
+
+            # Compute sha256 of the bytes actually on disk (may differ from
+            # canonical_json if json.dumps with indent=2 reorders / spaces).
+            disk_hash = hashlib.sha256(target_path.read_bytes()).hexdigest()
+
+            rel_path = target_path.relative_to(self.workspace).as_posix()
+            return rel_path, disk_hash
+        except Exception as exc:
+            logger.warning("could not write eval-result.json: %s", exc)
+            return None, None
 
     def _lookup_commit_for_node(self, node_id: str) -> str | None:
         """Resolve an AttemptNode id back to its commit sha by reading the
@@ -557,6 +668,12 @@ class Orchestrator:
             cost_usd = record.usage.total_cost_usd
             usage_source = "api"
 
+        # M1b PR 6: thread sealed EvalResult artefact refs onto the node.
+        # Set lazily by _write_eval_result_artifact in the iteration that
+        # produced this record; cleared after consumption.
+        eval_result_ref = getattr(self, "_pending_eval_result_ref", None)
+        eval_result_sha256 = getattr(self, "_pending_eval_result_sha256", None)
+
         node = AttemptNode(
             id=attempt_id,
             parent_id=parent_id,
@@ -568,6 +685,8 @@ class Orchestrator:
             prompt_ref=prompt_ref,
             diff_text=diff_inline,
             diff_ref=diff_ref,
+            eval_result_ref=eval_result_ref,
+            eval_result_sha256=eval_result_sha256,
             outcome=record.status,
             node_state="frontier",
             cost_usd=cost_usd,
