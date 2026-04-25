@@ -458,6 +458,62 @@ class Orchestrator:
             beam_id=self._current_beam_id,
         )
 
+    def _lookup_commit_for_node(self, node_id: str) -> str | None:
+        """Resolve an AttemptNode id back to its commit sha by reading the
+        ledger. Returns None if not found or commit is empty (e.g., a
+        violation/skip node has no commit)."""
+        try:
+            for node in self.ledger.all_nodes():
+                if node.id == node_id and node.commit:
+                    return node.commit
+        except Exception as exc:
+            logger.warning("ledger lookup failed for %s: %s", node_id, exc)
+        return None
+
+    def _build_strategy_context(
+        self,
+        session_count: int,
+        plateau_threshold: int,
+        max_iterations: int | None,
+    ) -> StrategyContext:
+        """Snapshot the orchestrator state for SearchStrategy.decide().
+
+        Reads ledger + ResultsLog so strategies (notably BFTSLite) have
+        the full attempt-tree view. metric_lookup is built from the
+        committed ResultsLog records keyed by AttemptNode id scheme.
+        """
+        try:
+            ledger_nodes = list(self.ledger.all_nodes())
+        except Exception:
+            ledger_nodes = []
+
+        # Map iteration → metric_value via ResultsLog (keep records only;
+        # discards/crashes have no useful metric for "best").
+        metric_lookup: dict[str, float] = {}
+        try:
+            for r in self.results.read_all():
+                if r.metric_value is None or r.iteration is None:
+                    continue
+                if r.beam_id is None:
+                    attempt_id = AttemptNode.short_id(r.iteration)
+                else:
+                    attempt_id = f"b{r.beam_id}{AttemptNode.short_id(r.iteration)}"
+                metric_lookup[attempt_id] = float(r.metric_value)
+        except Exception:
+            pass
+
+        streak = self._count_plateau_streak()
+        return StrategyContext(
+            ledger_nodes=tuple(ledger_nodes),
+            metric_lookup=metric_lookup,
+            metric_direction=self.config.metric.direction,
+            iteration_count=session_count,
+            plateau_streak=streak,
+            plateau_threshold=plateau_threshold,
+            max_iterations=max_iterations,
+            baseline_commit=self._baseline_commit,
+        )
+
     def _record_to_attempt_node(
         self,
         record: ExperimentRecord,
@@ -795,24 +851,16 @@ class Orchestrator:
                     )
                     break
 
-                # M1b PR 2: SearchStrategy decides plateau→Restart vs Continue
-                # vs Stop. Falls back to legacy string-branching if no
-                # strategy was instantiated (unknown name / "beam" path).
+                # M1b PR 2+3: SearchStrategy decides next action (Continue /
+                # Restart / BranchFrom / Stop). Falls back to legacy string-
+                # branching if no strategy was instantiated.
                 if self.strategy is not None:
-                    streak = self._count_plateau_streak()
-                    sctx = StrategyContext(
-                        ledger_nodes=tuple(),  # ledger nodes not yet
-                                                # consumed by Greedy/Restart;
-                                                # BFTS-lite (M1b PR 3) will
-                                                # need this populated
-                        metric_lookup={},
-                        metric_direction=self.config.metric.direction,
-                        iteration_count=session_count,
-                        plateau_streak=streak,
+                    sctx = self._build_strategy_context(
+                        session_count=session_count,
                         plateau_threshold=plateau_threshold,
                         max_iterations=max_iterations,
-                        baseline_commit=self._baseline_commit,
                     )
+                    streak = sctx.plateau_streak
                     action = self.strategy.decide(sctx)
                     if isinstance(action, StrategyStop):
                         logger.info(f"[strategy] {action.reason}")
@@ -832,12 +880,31 @@ class Orchestrator:
                             self._consecutive_failures = 0
                             self._consecutive_skips = 0
                     elif isinstance(action, BranchFrom):
-                        # M1b PR 3 will implement git checkout + workspace reset
-                        # to the BranchFrom.parent_id commit. PR 2 logs only.
-                        logger.info(
-                            f"[strategy] BranchFrom({action.parent_id}) — "
-                            "not yet wired; treating as Continue"
-                        )
+                        # M1b PR 3: lift the workspace to the requested
+                        # parent's commit. The next iteration runs from there.
+                        target_commit = self._lookup_commit_for_node(action.parent_id)
+                        if target_commit is None:
+                            logger.warning(
+                                f"[strategy] BranchFrom({action.parent_id}) — "
+                                f"could not resolve commit; treating as Continue"
+                            )
+                        else:
+                            logger.info(
+                                f"[iter {self._iteration}] "
+                                f"BranchFrom({action.parent_id}) commit={target_commit[:7]}"
+                                f"{f' — {action.reason}' if action.reason else ''}"
+                            )
+                            self.git.reset_to_commit(target_commit)
+                            self.context.add_error(
+                                f"⤴ BRANCH — search strategy redirected to attempt "
+                                f"{action.parent_id} (commit {target_commit[:7]}). "
+                                f"Reasoning carried forward from that point."
+                            )
+                            # Wire the parent chain so the next AttemptNode's
+                            # parent_id points at the requested ancestor.
+                            self._last_attempt_id_by_beam[None] = action.parent_id
+                            self._consecutive_failures = 0
+                            self._consecutive_skips = 0
                     # Continue → fall through to next iteration
                 elif strategy == "restart" and self._baseline_commit:
                     # Legacy path (only reached if make_strategy failed).

@@ -383,3 +383,75 @@ def test_resume_reconstructs_beam_chain(fake_orchestrator):
     assert fake_orchestrator._last_attempt_id_by_beam[1] == "b1n000001"
     # Iteration is max sequence across all ids
     assert fake_orchestrator._iteration == 2
+
+
+# ---------------------------------------------------------------------------
+# M1b PR 3 — BranchFrom commit lookup + strategy context build
+# ---------------------------------------------------------------------------
+
+
+def test_lookup_commit_for_node_returns_committed_sha(fake_orchestrator):
+    from crucible.ledger import AttemptNode
+    fake_orchestrator.ledger.append_node(
+        AttemptNode(id="n000001", commit="abc1234", outcome="keep")
+    )
+    fake_orchestrator.ledger.append_node(
+        AttemptNode(id="n000002", parent_id="n000001",
+                    commit="def5678", outcome="keep")
+    )
+    from crucible.orchestrator import Orchestrator
+    sha = Orchestrator._lookup_commit_for_node(fake_orchestrator, "n000002")
+    assert sha == "def5678"
+
+
+def test_lookup_commit_for_violation_node_returns_none(fake_orchestrator):
+    """Violation/skip nodes have empty commit (no commit happened) → None."""
+    from crucible.ledger import AttemptNode
+    fake_orchestrator.ledger.append_node(AttemptNode(
+        id="n000001", commit="", outcome="violation",
+        description="bad edit",
+    ))
+    from crucible.orchestrator import Orchestrator
+    sha = Orchestrator._lookup_commit_for_node(fake_orchestrator, "n000001")
+    assert sha is None
+
+
+def test_lookup_commit_for_unknown_node_returns_none(fake_orchestrator):
+    from crucible.orchestrator import Orchestrator
+    sha = Orchestrator._lookup_commit_for_node(fake_orchestrator, "n999999")
+    assert sha is None
+
+
+def test_build_strategy_context_populates_metric_lookup(fake_orchestrator):
+    """_build_strategy_context maps ResultsLog records to the AttemptNode
+    id schema so BFTSLiteStrategy can pick the best kept node."""
+    from crucible.ledger import AttemptNode
+    from crucible.results import ExperimentRecord
+    fake_orchestrator.ledger.append_node(AttemptNode(id="n000001", outcome="keep"))
+    fake_orchestrator.ledger.append_node(AttemptNode(id="n000002", outcome="discard"))
+    fake_orchestrator.results.read_all = MagicMock(return_value=[
+        ExperimentRecord(commit="x", metric_value=1.5, status="keep",
+                          description="", iteration=1),
+        ExperimentRecord(commit="y", metric_value=0.8, status="discard",
+                          description="", iteration=2),
+    ])
+    fake_orchestrator._iteration = 0
+    fake_orchestrator._baseline_commit = "abc"
+
+    cfg = SimpleNamespace(metric=SimpleNamespace(direction="maximize"))
+    fake_orchestrator.config = cfg
+    fake_orchestrator._count_plateau_streak = MagicMock(return_value=2)
+
+    from crucible.orchestrator import Orchestrator
+    ctx = Orchestrator._build_strategy_context(
+        fake_orchestrator,
+        session_count=2,
+        plateau_threshold=8,
+        max_iterations=10,
+    )
+    assert ctx.metric_lookup == {"n000001": 1.5, "n000002": 0.8}
+    assert ctx.metric_direction == "maximize"
+    assert ctx.iteration_count == 2
+    assert ctx.plateau_streak == 2
+    assert ctx.plateau_threshold == 8
+    assert ctx.baseline_commit == "abc"
