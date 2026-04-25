@@ -1142,6 +1142,94 @@ def _get_latest_version() -> str | None:
         return None
 
 
+@main.command(help=_("Clean up orphan worktrees from crashed runs."))
+@click.option("--project-dir", default=".", help=_("Project root directory."))
+@click.option("--apply", is_flag=True, default=False,
+              help=_("Actually delete orphan worktrees. Default is dry-run."))
+@click.option("--yes", is_flag=True, default=False,
+              help=_("Skip confirmation prompt when --apply is set."))
+def cleanup(project_dir: str, apply: bool, yes: bool) -> None:
+    """List or delete worktrees whose owner process has died.
+
+    Reviewer round 1 safety contract:
+      - Default is dry-run; `--apply` actually deletes.
+      - Even in apply mode, attempt non-blocking flock on each
+        candidate before deletion; busy worktrees are skipped.
+      - Discovery is narrow: read AttemptNode.worktree_path from the
+        ledger; do not assume future directory layouts.
+      - Only delete directories that classify as orphan/stale AND
+        that we can lock; never trust sentinel JSON path fields.
+    """
+    from crucible.locking import classify_worktree, safe_cleanup_lock
+
+    project = Path(project_dir).resolve()
+    if not project.exists():
+        raise click.ClickException(_("Project not found: {p}").format(p=project))
+
+    # M2 PR 14: only checking the project's own worktree for now —
+    # parallel worker layout is M3 territory. This still surfaces the
+    # value of catching a stale lock on the main workspace.
+    candidates: list = []
+    candidate = classify_worktree(project)
+    if candidate.lock_path is not None:
+        candidates.append(candidate)
+
+    if not candidates:
+        click.echo(_("No worktree lock files found under {p}.").format(p=project))
+        return
+
+    eligible = []
+    for cand in candidates:
+        if cand.reason in ("stale", "orphan"):
+            eligible.append(cand)
+
+    click.echo(_("Found {n} worktrees with lock files:").format(n=len(candidates)))
+    for cand in candidates:
+        owner_str = (
+            f"pid={cand.owner.pid} host={cand.owner.host} since {cand.owner.claimed_at}"
+            if cand.owner else "no metadata"
+        )
+        click.echo(f"  [{cand.reason:<12}] {cand.worktree_path}  ({owner_str})")
+
+    if not eligible:
+        click.echo(_("No orphan / stale worktrees to clean up."))
+        return
+
+    if not apply:
+        click.echo(_("\nDry-run: pass --apply to actually delete the {n} stale worktree(s).").format(n=len(eligible)))
+        return
+
+    if not yes:
+        click.confirm(
+            _("Delete {n} stale worktree lock file(s)?").format(n=len(eligible)),
+            abort=True,
+        )
+
+    cleaned = 0
+    skipped_busy = 0
+    for cand in eligible:
+        # Reviewer pin: even with --apply, only delete after we can
+        # acquire the lock non-blocking. Sentinel "stale" classification
+        # is metadata only; flock is the authority.
+        with safe_cleanup_lock(cand.worktree_path) as held:
+            if held is None:
+                click.echo(_("  skipped (lock currently held): {p}").format(p=cand.worktree_path))
+                skipped_busy += 1
+                continue
+            try:
+                if cand.lock_path is not None and cand.lock_path.exists():
+                    cand.lock_path.unlink()
+                    cleaned += 1
+                    click.echo(_("  removed lock file: {p}").format(p=cand.lock_path))
+            except OSError as exc:
+                click.echo(_("  failed to remove {p}: {e}").format(p=cand.lock_path, e=exc))
+
+    click.echo(
+        _("Done. Cleaned {c}, skipped {s} (busy).")
+        .format(c=cleaned, s=skipped_busy)
+    )
+
+
 @main.command(help=_("Update crucible to the latest version."))
 @click.option("--check", is_flag=True, help=_("Check for updates without installing."))
 def update(check: bool) -> None:
