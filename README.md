@@ -130,6 +130,17 @@ crucible postmortem --tag run1 --tokens           # analyze after run
 
 Shows prompt section breakdown, cache hit rates, and per-iteration timing. See [docs/PROFILING.md](docs/PROFILING.md) for details.
 
+### HTML attempt-tree report (v1.0 ledger)
+
+```bash
+crucible postmortem --tag run1 --html            # writes postmortem-run1.html
+crucible postmortem --tag run1 --html --html-out report.html
+```
+
+Renders the v1.0 `TrialLedger` (logs/run-<tag>/ledger.jsonl) as a self-contained HTML page — vertical timeline of attempt cards, outcome-coloured (keep / discard / crash / violation / skip), best-of-run starred (direction-aware: works for both maximize and minimize objectives). Open offline in any browser. No JS, no external assets.
+
+See [docs/LEDGER.md](docs/LEDGER.md) for the JSONL schema and how to read the ledger programmatically.
+
 ## How It Works
 
 ```
