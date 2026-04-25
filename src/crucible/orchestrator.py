@@ -82,6 +82,8 @@ class Orchestrator:
         self.guardrails = GuardRails(
             editable=config.files.editable,
             readonly=config.files.readonly,
+            hidden=config.files.hidden,
+            workspace=self.workspace,  # M1b: enable SSOT mode (symlink/hardlink defenses)
         )
         self.results = ResultsLog(self.workspace / results_filename(tag))
         # M1a: dual-write to TrialLedger alongside ResultsLog. Storage is
@@ -111,7 +113,7 @@ class Orchestrator:
 
         # Allow agent to install packages via requirements.txt
         if config.constraints.allow_install:
-            self.guardrails.editable.add("requirements.txt")
+            self.guardrails.add_editable("requirements.txt")
             req = self.workspace / "requirements.txt"
             if not req.exists():
                 req.touch()
