@@ -979,6 +979,9 @@ class Orchestrator:
 
     def _run_loop_serial(self, max_iterations: int | None = None) -> None:
         """Serial loop for greedy and restart strategies."""
+        import platform as _platform
+        from crucible.locking import WorktreeMutex, WorktreeLocked
+
         if max_iterations is None:
             max_iterations = self.config.constraints.max_iterations
 
@@ -986,6 +989,36 @@ class Orchestrator:
         plateau_threshold = self.config.search.plateau_threshold
         max_retries = self.config.constraints.max_retries
         session_count = 0
+        # M2 PR 14: hold the worktree mutex for the whole serial run.
+        # In single-process mode this is a near-free no-op; the
+        # invariant ("one attempt per worktree at any time") is what
+        # future parallel BFTS workers will rely on. Timeout default is
+        # short (5s) — if another process is here, we want to fail
+        # loudly rather than block.
+        #
+        # Reviewer round 2 F4: Windows is explicitly unsupported (matches
+        # `TrialLedger`'s POSIX-flock-only stance). On Windows we DO NOT
+        # silently swallow the failure — we skip the mutex entirely and
+        # log a clear warning so operators understand the cross-process
+        # invariant is not enforced.
+        mutex: WorktreeMutex | None = None
+        if _platform.system() == "Windows":
+            logger.warning(
+                "WorktreeMutex unsupported on Windows in v1.0 — running in "
+                "single-process mode without cross-process lock enforcement. "
+                "Concurrent crucible runs against the same workspace will "
+                "race; use one process at a time."
+            )
+        else:
+            try:
+                mutex = WorktreeMutex(self.workspace, timeout=5.0)
+                mutex.acquire()
+            except WorktreeLocked as exc:
+                logger.error(
+                    "Cannot start serial loop — worktree is already locked: %s",
+                    exc,
+                )
+                return
         try:
             while True:
                 if max_iterations is not None and session_count >= max_iterations:
@@ -1127,6 +1160,10 @@ class Orchestrator:
 
         except KeyboardInterrupt:
             logger.info(_("Stopped after {n} iterations.").format(n=self._iteration))
+        finally:
+            # Release the worktree mutex held for the whole serial run.
+            if mutex is not None and mutex.held:
+                mutex.release()
 
     @contextmanager
     def _beam_swap(self, beam: BeamState):

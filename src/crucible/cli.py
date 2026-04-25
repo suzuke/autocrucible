@@ -1142,6 +1142,77 @@ def _get_latest_version() -> str | None:
         return None
 
 
+@main.command(help=_("Inspect / refresh stale worktree lock metadata."))
+@click.option("--project-dir", default=".", help=_("Project root directory."))
+@click.option("--refresh", is_flag=True, default=False,
+              help=_("Rewrite stale sentinel metadata for the current project "
+                     "(only effective when the lock is unheld)."))
+@click.option("--yes", is_flag=True, default=False,
+              help=_("Skip confirmation prompt when --refresh is set."))
+def cleanup(project_dir: str, refresh: bool, yes: bool) -> None:
+    """Inspect worktree lock state and (optionally) refresh stale metadata.
+
+    M2 PR 14 v1 scope: this command only deals with the WorktreeMutex
+    SENTINEL FILE for the current project. It does NOT prune worktree
+    directories — that's M3 territory once the parallel-worker layout
+    exists.
+
+    Reviewer round 2 F1 / F2 safety contract:
+      - Default is read-only inspect (dry-run).
+      - `--refresh` rewrites stale sentinel metadata under flock; it
+        does NOT unlink the lock file (unlinking the path while
+        another process may hold the inode reintroduces split-brain).
+      - Even with `--refresh`, the operation requires acquiring flock
+        non-blocking; busy locks are skipped and reported.
+      - Worktree directories are NEVER deleted by this command.
+    """
+    from crucible.locking import classify_worktree, safe_cleanup_lock
+
+    project = Path(project_dir).resolve()
+    if not project.exists():
+        raise click.ClickException(_("Project not found: {p}").format(p=project))
+
+    candidate = classify_worktree(project)
+
+    owner_str = (
+        f"pid={candidate.owner.pid} host={candidate.owner.host} "
+        f"since {candidate.owner.claimed_at}"
+        if candidate.owner else "no metadata"
+    )
+    click.echo(_("Worktree: {p}").format(p=candidate.worktree_path))
+    click.echo(_("  status: [{r}]  ({o})").format(r=candidate.reason, o=owner_str))
+    if candidate.lock_path is not None:
+        click.echo(_("  lock file: {lp}").format(lp=candidate.lock_path))
+
+    if candidate.reason not in ("stale", "orphan"):
+        click.echo(_("Nothing to refresh."))
+        return
+
+    if not refresh:
+        click.echo(_("\nDry-run. Pass --refresh to rewrite stale sentinel metadata "
+                     "under flock (worktree directory is never modified)."))
+        return
+
+    if not yes:
+        click.confirm(
+            _("Rewrite stale sentinel metadata for this worktree?"),
+            abort=True,
+        )
+
+    with safe_cleanup_lock(candidate.worktree_path) as held:
+        if held is None:
+            click.echo(_("  skipped: lock currently held by another process."))
+            return
+        # Reviewer round 2 F1: do NOT unlink the lock file. The
+        # mutex's `acquire()` already overwrote the sentinel with
+        # current owner metadata when we acquired the lock above; the
+        # held context manager will release on exit, leaving the file
+        # with our (just-acquired-then-released) metadata. Subsequent
+        # `acquire()` calls will see the path/inode unchanged and
+        # behave correctly.
+        click.echo(_("  refreshed sentinel metadata under flock."))
+
+
 @main.command(help=_("Update crucible to the latest version."))
 @click.option("--check", is_flag=True, help=_("Check for updates without installing."))
 def update(check: bool) -> None:
