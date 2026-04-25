@@ -44,6 +44,9 @@ packages = ["src/crucible"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "expensive: opt-in slow / real-LLM tests, run with `pytest -m expensive`",
+]
 
 [dependency-groups]
 dev = [
