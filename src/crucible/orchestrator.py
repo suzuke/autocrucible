@@ -341,6 +341,9 @@ class Orchestrator:
         # 8. Execute experiment (with optional repeat)
         t0_run = time.monotonic()
         eval_cfg = self.config.evaluation
+        metric_parse_result = None  # M1b PR 8b: only the non-repeat path
+                                    # populates this; repeat path uses its
+                                    # own aggregated metric.
         if eval_cfg.repeat > 1:
             run_result, metric_value = self.runner.execute_with_repeat(
                 self.config.commands.run, self.config.commands.eval,
@@ -354,11 +357,22 @@ class Orchestrator:
             )
             metric_value = None
             if run_result.exit_code == 0 and not run_result.timed_out:
-                metric_value = self.runner.parse_metric(
-                    self.config.commands.eval,
-                    self.config.metric.name,
-                    timeout=self.config.constraints.timeout_seconds,
-                )
+                # Prefer parse_metric_result (M1b PR 8b) for full eval streams.
+                # Fall back to legacy parse_metric for runners that haven't
+                # been upgraded yet (e.g., custom backends or test mocks).
+                if hasattr(self.runner, "parse_metric_result"):
+                    metric_parse_result = self.runner.parse_metric_result(
+                        self.config.commands.eval,
+                        self.config.metric.name,
+                        timeout=self.config.constraints.timeout_seconds,
+                    )
+                    metric_value = metric_parse_result.metric_value
+                else:
+                    metric_value = self.runner.parse_metric(
+                        self.config.commands.eval,
+                        self.config.metric.name,
+                        timeout=self.config.constraints.timeout_seconds,
+                    )
         run_duration = time.monotonic() - t0_run
 
         total_duration = agent_duration + run_duration
@@ -368,12 +382,30 @@ class Orchestrator:
             self._iteration, agent_result, prompt=prompt, diff_text=diff_text,
         )
 
-        # M1b PR 6: write sealed EvalResult artefact for this iteration.
-        # Reference + integrity hash are then attached to the AttemptNode.
+        # M1b PR 6 + 8b: write sealed EvalResult artefact for this iteration.
+        # PR 8b (reviewer F1): hash the EVAL command's stdout/stderr (not
+        # the run command's), so the integrity hash actually proves the
+        # bytes that produced metric_value.
+        if metric_parse_result is not None:
+            seal_stdout = metric_parse_result.stdout
+            seal_stderr_tail = metric_parse_result.stderr_tail
+            seal_exit = metric_parse_result.exit_code
+            seal_timed_out = metric_parse_result.timed_out
+        else:
+            # Crashed before eval ran — seal empty bytes for the eval, but
+            # keep the run's exit_code so the artefact reflects what happened.
+            seal_stdout = ""
+            seal_stderr_tail = run_result.stderr_tail or ""
+            seal_exit = run_result.exit_code
+            seal_timed_out = run_result.timed_out
+
         eval_result_ref, eval_result_sha256 = self._write_eval_result_artifact(
             iteration=self._iteration,
             commit_hash=commit_hash,
-            run_result=run_result,
+            seal_stdout=seal_stdout,
+            seal_stderr_tail=seal_stderr_tail,
+            seal_exit_code=seal_exit,
+            seal_timed_out=seal_timed_out,
             metric_value=metric_value,
             run_duration_seconds=run_duration,
         )
@@ -480,7 +512,10 @@ class Orchestrator:
         self,
         iteration: int,
         commit_hash: str,
-        run_result,
+        seal_stdout: str,
+        seal_stderr_tail: str,
+        seal_exit_code: int,
+        seal_timed_out: bool,
         metric_value: float | None,
         run_duration_seconds: float,
     ) -> tuple[str, str] | tuple[None, None]:
@@ -493,6 +528,12 @@ class Orchestrator:
         code never produces this file. The integrity hash is the sha256
         of canonical JSON (M1) — M2 will upgrade to HMAC-SHA256 once
         secret-key management lands.
+
+        PR 8b (reviewer F1): seal_stdout / seal_stderr_tail come from the
+        EVAL command (not run_cmd), so the hash actually proves the
+        bytes that produced metric_value. seal_stderr_tail is the tail
+        only — RunResult does not carry full stderr — so this is named
+        stderr_TAIL_sha256 honestly.
         """
         import hashlib
         import json as _json
@@ -521,10 +562,10 @@ class Orchestrator:
             ).hexdigest()
 
             stdout_hash = hashlib.sha256(
-                (run_result.stdout or "").encode("utf-8")
+                (seal_stdout or "").encode("utf-8")
             ).hexdigest()
             stderr_hash = hashlib.sha256(
-                (run_result.stderr_tail or "").encode("utf-8")
+                (seal_stderr_tail or "").encode("utf-8")
             ).hexdigest()
 
             payload = EvalResult(
@@ -539,8 +580,8 @@ class Orchestrator:
                 metric_direction=self.config.metric.direction,
                 diagnostics={},  # M2 will best-effort parse from stdout
                 valid=metric_value is not None,
-                exit_code=getattr(run_result, "exit_code", 0),
-                timed_out=getattr(run_result, "timed_out", False),
+                exit_code=seal_exit_code,
+                timed_out=seal_timed_out,
                 duration_ms=int(run_duration_seconds * 1000),
                 stdout_sha256=stdout_hash,
                 stderr_sha256=stderr_hash,

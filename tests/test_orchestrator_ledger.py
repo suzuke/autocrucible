@@ -477,8 +477,9 @@ def test_build_strategy_context_populates_metric_lookup(fake_orchestrator):
 
 def test_write_eval_result_artifact_creates_json_with_seal(fake_orchestrator, workspace):
     """Per spec §4 / §11: the host process is the SOLE writer of
-    eval-result.json. Verify the file appears at the spec path with
-    a content-sha256 seal and that the returned hash matches the disk."""
+    eval-result.json. PR 8b: hash the EVAL command's stdout/stderr,
+    not the run command's, so the seal proves the bytes that produced
+    metric_value."""
     import hashlib
     import json as _json
     from types import SimpleNamespace
@@ -488,16 +489,16 @@ def test_write_eval_result_artifact_creates_json_with_seal(fake_orchestrator, wo
         metric=SimpleNamespace(name="ratio", direction="maximize"),
     )
     fake_orchestrator._current_beam_id = None
-    run_result = SimpleNamespace(
-        stdout="metric: 1.42\n", stderr_tail="", exit_code=0, timed_out=False,
-    )
 
     from crucible.orchestrator import Orchestrator
     rel_path, sha = Orchestrator._write_eval_result_artifact(
         fake_orchestrator,
         iteration=3,
         commit_hash="abc1234",
-        run_result=run_result,
+        seal_stdout="metric: 1.42\n",
+        seal_stderr_tail="",
+        seal_exit_code=0,
+        seal_timed_out=False,
         metric_value=1.42,
         run_duration_seconds=0.5,
     )
@@ -526,16 +527,16 @@ def test_write_eval_result_artifact_handles_missing_metric(fake_orchestrator, wo
         metric=SimpleNamespace(name="ratio", direction="maximize"),
     )
     fake_orchestrator._current_beam_id = None
-    run_result = SimpleNamespace(
-        stdout="", stderr_tail="boom", exit_code=1, timed_out=False,
-    )
 
     from crucible.orchestrator import Orchestrator
     rel_path, sha = Orchestrator._write_eval_result_artifact(
         fake_orchestrator,
         iteration=1,
         commit_hash="",
-        run_result=run_result,
+        seal_stdout="",
+        seal_stderr_tail="boom",
+        seal_exit_code=1,
+        seal_timed_out=False,
         metric_value=None,
         run_duration_seconds=0.1,
     )
@@ -556,16 +557,55 @@ def test_write_eval_result_artifact_handles_io_failure(fake_orchestrator):
     )
     fake_orchestrator._current_beam_id = None
     fake_orchestrator.workspace = Path("/no/such/dir/that/exists")
-    run_result = SimpleNamespace(stdout="", stderr_tail="", exit_code=0, timed_out=False)
 
     from crucible.orchestrator import Orchestrator
     rel_path, sha = Orchestrator._write_eval_result_artifact(
         fake_orchestrator,
         iteration=1,
         commit_hash="abc",
-        run_result=run_result,
+        seal_stdout="",
+        seal_stderr_tail="",
+        seal_exit_code=0,
+        seal_timed_out=False,
         metric_value=1.0,
         run_duration_seconds=0.1,
     )
     assert rel_path is None
     assert sha is None
+
+
+def test_write_eval_result_artifact_seals_eval_stdout_not_run_stdout(
+    fake_orchestrator, workspace
+):
+    """Reviewer F1 regression: the sealed payload must hash bytes from the
+    EVAL command, not from the run command. We pass distinct stdouts to
+    verify the seal reflects seal_stdout (eval), not what run produced."""
+    import hashlib
+    import json as _json
+    from types import SimpleNamespace
+
+    fake_orchestrator.config = SimpleNamespace(
+        commands=SimpleNamespace(eval="cat run.log", run="python evaluate.py"),
+        metric=SimpleNamespace(name="ratio", direction="maximize"),
+    )
+    fake_orchestrator._current_beam_id = None
+
+    eval_stdout = "metric: 0.42\n"  # what eval produced
+    expected_stdout_hash = hashlib.sha256(eval_stdout.encode("utf-8")).hexdigest()
+
+    from crucible.orchestrator import Orchestrator
+    rel_path, _sha = Orchestrator._write_eval_result_artifact(
+        fake_orchestrator,
+        iteration=1,
+        commit_hash="aaa",
+        seal_stdout=eval_stdout,
+        seal_stderr_tail="",
+        seal_exit_code=0,
+        seal_timed_out=False,
+        metric_value=0.42,
+        run_duration_seconds=0.1,
+    )
+    payload = _json.loads((workspace / rel_path).read_text())
+    assert payload["stdout_sha256"] == expected_stdout_hash, (
+        f"stdout hash should reflect eval bytes, got {payload['stdout_sha256']}"
+    )

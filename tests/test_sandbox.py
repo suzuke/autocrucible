@@ -68,10 +68,18 @@ def test_parse_metric_native_when_backend_none(tmp_path):
     """In backend='none' mode, parse_metric still delegates to the native
     ExperimentRunner. Renamed from `test_parse_metric_always_native`,
     which asserted the now-fixed v3.2 trust break: in docker mode,
-    parse_metric runs INSIDE the container, not on the host."""
+    parse_metric runs INSIDE the container, not on the host.
+
+    M1b PR 8b: parse_metric is a backward-compat shim over
+    parse_metric_result. Native delegation goes through the result
+    method now."""
+    from crucible.runner import MetricParseResult
     cfg = SandboxConfig(backend="none")
     runner = SandboxRunner(config=cfg, workspace=tmp_path)
-    with patch.object(runner._native, "parse_metric", return_value=0.5) as mock_pm:
+    fake_result = MetricParseResult(metric_value=0.5, stdout="metric: 0.5\n",
+                                    stderr_tail="", exit_code=0, timed_out=False)
+    with patch.object(runner._native, "parse_metric_result",
+                      return_value=fake_result) as mock_pm:
         val = runner.parse_metric("python eval.py", "accuracy")
         mock_pm.assert_called_once()
         assert val == 0.5
@@ -464,12 +472,15 @@ def test_parse_metric_docker_uses_isolation(tmp_path: Path):
 
 
 def test_parse_metric_native_falls_through(tmp_path: Path):
-    """When backend='none', parse_metric still delegates to native runner
-    (unchanged behavior)."""
+    """When backend='none', parse_metric still delegates to native runner.
+    M1b PR 8b: now goes through parse_metric_result internally."""
+    from crucible.runner import MetricParseResult
     config = SandboxConfig(backend="none")
     runner = SandboxRunner(config=config, workspace=tmp_path)
-
-    with patch.object(runner._native, "parse_metric", return_value=0.99) as native_pm:
+    fake_result = MetricParseResult(metric_value=0.99, stdout="metric: 0.99\n",
+                                    stderr_tail="", exit_code=0, timed_out=False)
+    with patch.object(runner._native, "parse_metric_result",
+                      return_value=fake_result) as native_pm:
         value = runner.parse_metric("python eval.py", "metric")
 
     assert value == 0.99
