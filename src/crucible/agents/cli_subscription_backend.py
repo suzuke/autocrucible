@@ -205,9 +205,16 @@ class SubscriptionCLIBackend(AgentInterface):
                 f"{workspace}. Construct a new backend per workspace."
             )
 
-        # Lazy import to avoid pulling adapter modules at backend import
-        # time (the typed-auth-error pattern: PR 16a R1 #4).
-        from crucible.agents.cli_subscription.codex_cli import CodexCLIAuthError
+        # Catch the CLISubscriptionAuthError BASE class so any
+        # adapter-specific subclass (CodexCLIAuthError, GeminiCLIAuthError,
+        # future) routes to AgentErrorType.AUTH without needing per-
+        # adapter except clauses. PR 16b introduced the base class once
+        # GeminiCLIAdapter became the second concrete instance; before
+        # that the abstraction would have been premature.
+        from crucible.agents.cli_subscription.base import (
+            CLISubscriptionAuthError,
+            ParsedAdapterOutput,
+        )
 
         auth_error_evidence: Optional[str] = None
 
@@ -222,11 +229,10 @@ class SubscriptionCLIBackend(AgentInterface):
             raw = self._adapter.run_subprocess(ctx)
             try:
                 parsed = self._adapter.parse_output(raw)
-            except CodexCLIAuthError as exc:
+            except CLISubscriptionAuthError as exc:
                 # Adapter detected a typed auth-failure signal in the
                 # event stream. Build a minimal ParsedAdapterOutput so
                 # the rest of the metadata path still populates.
-                from crucible.agents.cli_subscription.base import ParsedAdapterOutput
                 auth_error_evidence = exc.evidence
                 parsed = ParsedAdapterOutput(
                     modified_files=[],

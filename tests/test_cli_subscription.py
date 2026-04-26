@@ -344,16 +344,26 @@ def test_codex_adapter_no_longer_a_stub(monkeypatch):
     assert "--json" in argv
 
 
-def test_gemini_stub_raises_with_clear_message(monkeypatch):
+def test_gemini_adapter_no_longer_a_stub(monkeypatch):
+    """PR 16b landed GeminiCLIAdapter; build_argv must succeed (not raise)."""
     from crucible.agents.cli_subscription.gemini_cli import GeminiCLIAdapter
-    from crucible.agents.cli_subscription.base import AdapterNotImplementedError
+    from crucible.agents.cli_subscription.base import AdapterRunContext
 
     monkeypatch.setattr(GeminiCLIAdapter, "_resolve_binary", lambda self, p: Path("/fake/gemini"))
-    monkeypatch.setattr(GeminiCLIAdapter, "_read_version", lambda self: "stub")
+    monkeypatch.setattr(GeminiCLIAdapter, "_read_version", lambda self: "0.39.1")
     adapter = GeminiCLIAdapter()
 
-    with pytest.raises(AdapterNotImplementedError, match="PR 16c"):
-        adapter.build_argv(MagicMock())
+    ctx = AdapterRunContext(
+        prompt="say hi",
+        scratch_dir=Path("/tmp/scratch"),
+        workspace_root=Path("/tmp/scratch"),
+        timeout_seconds=30,
+        stdout_cap_bytes=1_000_000,
+    )
+    argv = list(adapter.build_argv(ctx))
+    assert argv[0] == "/fake/gemini"
+    assert "-p" in argv
+    assert "stream-json" in argv
 
 
 # ---------------------------------------------------------------------------

@@ -60,6 +60,28 @@ class CLIBinaryError(RuntimeError):
     """Raised when the CLI binary cannot be located or doesn't run."""
 
 
+class CLISubscriptionAuthError(RuntimeError):
+    """Base class for adapter-raised auth-failure exceptions.
+
+    `SubscriptionCLIBackend` isinstance-catches this base in its
+    `generate_edit` pipeline and maps to `AgentErrorType.AUTH`.
+    Concrete adapters (CodexCLIAdapter, GeminiCLIAdapter, future) raise
+    a subclass with adapter-specific `evidence` and an instructional
+    next-step in the message — never a phantom command (PR 16 R2 lesson).
+
+    Why a base class: typed isinstance dispatch lets the backend route
+    auth failures by exception TYPE rather than by string-matching the
+    exception message (PR 19 round 2 lesson). Per PR 16a R2 follow-up
+    #4, the abstraction was deferred until a second concrete adapter
+    motivated it. PR 16b (this one, GeminiCLIAdapter) is that second
+    instance.
+    """
+
+    def __init__(self, evidence: str) -> None:
+        super().__init__(evidence)
+        self.evidence = evidence
+
+
 @dataclass
 class AdapterRunContext:
     """Per-call context the adapter needs to construct argv + parse output."""
