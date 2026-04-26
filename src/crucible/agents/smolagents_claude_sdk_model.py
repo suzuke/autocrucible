@@ -56,6 +56,14 @@ from typing import TYPE_CHECKING, Any, Optional
 if TYPE_CHECKING:
     from smolagents import ChatMessage
 
+# Import smolagents.Model lazily at class-definition time so ClaudeAgentSDKModel
+# can subclass it. This makes `parse_tool_calls`, `tool_name_key`, and other
+# Model methods available without us re-implementing them.
+try:
+    from smolagents.models import Model as _SmolagentsModelBase
+except ImportError:
+    _SmolagentsModelBase = object  # smolagents not installed; class still importable
+
 logger = logging.getLogger(__name__)
 
 
@@ -96,13 +104,20 @@ class ClaudeAgentSDKAuthError(RuntimeError):
         self.original_exc = original_exc
 
 
-class ClaudeAgentSDKModel:
+class ClaudeAgentSDKModel(_SmolagentsModelBase):
     """smolagents `Model`-like adapter that drives `claude_agent_sdk`.
 
     Implements the `generate(messages, ...)` interface smolagents'
     ToolCallingAgent expects. Returns a `ChatMessage` with the model's
     text response — smolagents then parses for tool calls and dispatches
     via its OWN tools (which are ACL-enforced via `CheatResistancePolicy`).
+
+    NB: subclasses smolagents.Model so `parse_tool_calls` and friends
+    are inherited (end-to-end discovery: smolagents 1.24+ ToolCallingAgent
+    invokes `model.parse_tool_calls()` on the returned ChatMessage; a
+    duck-typed wrapper without the base class causes
+    `AttributeError: 'ClaudeAgentSDKModel' object has no attribute
+    'parse_tool_calls'`).
     """
 
     def __init__(
@@ -119,6 +134,17 @@ class ClaudeAgentSDKModel:
                 "ClaudeAgentSDKModel requires `claude-agent-sdk` (>=0.1.50, <0.2). "
                 "Already pinned via crucible's base dependencies."
             ) from exc
+
+        # Initialise smolagents Model base so parse_tool_calls,
+        # tool_name_key, tool_arguments_key are populated. If smolagents
+        # isn't installed _SmolagentsModelBase falls back to object —
+        # the base init is a no-op.
+        if _SmolagentsModelBase is object:
+            raise RuntimeError(
+                "ClaudeAgentSDKModel requires smolagents (used by SmolagentsBackend). "
+                "Add smolagents to your environment."
+            )
+        super().__init__(model_id=model)
 
         self._model = model
         self._max_thinking_tokens = max_thinking_tokens
@@ -237,6 +263,13 @@ class ClaudeAgentSDKModel:
         a `can_use_tool=lambda: False` callback. This forces the SDK to
         return a single text response with NO internal tool execution —
         smolagents' ACL boundary is the only one that fires.
+
+        End-to-end discovery (post-merge): SDK 0.1.50 rejects
+        `can_use_tool` callbacks unless the prompt is an AsyncIterable
+        (streaming mode). String prompts → "can_use_tool callback
+        requires streaming mode". We wrap the prompt in an async
+        generator so all three defense layers (allowed_tools=[],
+        disallowed_tools=[...], can_use_tool) remain active.
         """
         from claude_agent_sdk import (
             AssistantMessage,
@@ -255,10 +288,16 @@ class ClaudeAgentSDKModel:
             permission_mode="default",
         )
 
+        async def _prompt_stream():
+            yield {
+                "type": "user",
+                "message": {"role": "user", "content": prompt},
+            }
+
         text_parts: list[str] = []
         events: list[dict] = []
         try:
-            async for event in query(prompt=prompt, options=options):
+            async for event in query(prompt=_prompt_stream(), options=options):
                 # Record event metadata for AttemptNode debug
                 events.append({"type": type(event).__name__})
                 if isinstance(event, AssistantMessage):
