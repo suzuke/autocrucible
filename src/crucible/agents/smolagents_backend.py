@@ -109,7 +109,7 @@ class SmolagentsBackend(AgentInterface):
         system_prompt: str | None = None,
     ) -> None:
         _import_smolagents()  # lazy: raises with install hint if missing
-        from smolagents import LiteLLMModel, ToolCallingAgent
+        from smolagents import ToolCallingAgent
 
         from crucible.agents._smolagents_tools import build_default_tools
 
@@ -119,31 +119,17 @@ class SmolagentsBackend(AgentInterface):
         self._system_prompt = system_prompt
         self._backend_version = _resolve_backend_version()
 
-        # API key: read env var name from config; LiteLLM reads VALUE
-        # at request time. Never store the value on this object.
-        self._api_key_env = config.api_key_env
-
-        # Surface a clear error early if the env is missing — but don't
-        # block construction (POC patterns may set it later).
-        if not os.environ.get(self._api_key_env):
-            logger.warning(
-                "smolagents backend: env var %s is not set — model calls "
-                "will fail at request time unless set before generate_edit().",
-                self._api_key_env,
-            )
-
-        # Provider/model are forwarded verbatim to LiteLLM. The provider
-        # prefix tells LiteLLM which backend to route to (anthropic/,
-        # openai/, openrouter/, etc.).
-        model_id = (
-            config.model
-            if "/" in config.model
-            else f"{config.provider}/{config.model}"
-        )
-        self._model = LiteLLMModel(
-            model_id=model_id,
-            api_key=None,  # let LiteLLM read from env at request time
-        )
+        # M3 PR 19: model dispatch by `provider`. Most values go through
+        # LiteLLM with API key. The special "claude-subscription" value
+        # uses claude_agent_sdk + OAuth from `~/.claude/credentials.json`
+        # (NO API key needed). See `smolagents_claude_sdk_model.py` for
+        # the ACL-preservation invariant (SDK forced single-turn,
+        # allowed_tools=[]).
+        self._api_key_env = config.api_key_env  # informational only
+        if config.provider == "claude-subscription":
+            self._model = self._build_claude_subscription_model(config)
+        else:
+            self._model = self._build_litellm_model(config)
 
         self._tools = build_default_tools(policy=policy, workspace=workspace)
         self._agent = ToolCallingAgent(
@@ -240,6 +226,44 @@ class SmolagentsBackend(AgentInterface):
         if not self._system_prompt:
             return user_prompt
         return f"{self._system_prompt}\n\n---\n\n{user_prompt}"
+
+    def _build_litellm_model(self, config: "SmolagentsConfig"):
+        """Build the LiteLLM-driven model (default API-key path)."""
+        from smolagents import LiteLLMModel
+
+        if not os.environ.get(config.api_key_env):
+            logger.warning(
+                "smolagents backend: env var %s is not set — model calls "
+                "will fail at request time unless set before generate_edit().",
+                config.api_key_env,
+            )
+        # Provider/model are forwarded verbatim to LiteLLM. The provider
+        # prefix tells LiteLLM which backend to route to (anthropic/,
+        # openai/, openrouter/, etc.).
+        model_id = (
+            config.model
+            if "/" in config.model
+            else f"{config.provider}/{config.model}"
+        )
+        return LiteLLMModel(
+            model_id=model_id,
+            api_key=None,  # let LiteLLM read from env at request time
+        )
+
+    def _build_claude_subscription_model(self, config: "SmolagentsConfig"):
+        """Build the claude_agent_sdk-driven model (M3 PR 19, OAuth path).
+
+        Uses `claude_agent_sdk` to read OAuth credentials from
+        `~/.claude/credentials.json` (no API key required). The SDK
+        is configured as a single-turn text generator (allowed_tools=[],
+        max_turns=1) so smolagents' CheatResistancePolicy boundary is
+        the only one that fires — see `smolagents_claude_sdk_model.py`
+        for the ACL invariant.
+        """
+        from crucible.agents.smolagents_claude_sdk_model import (
+            ClaudeAgentSDKModel,
+        )
+        return ClaudeAgentSDKModel(model=config.model)
 
 
 # ---------------------------------------------------------------------------
