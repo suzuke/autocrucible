@@ -166,6 +166,12 @@ class SmolagentsBackend(AgentInterface):
         snapshot_before = _snapshot_mtimes(self._workspace)
         t0 = time.monotonic()
 
+        # M3 PR 19a: reset the cost-estimate accumulator on the model
+        # (if it has one) so the AttemptNode's recorded cost reflects
+        # only this attempt, not the whole session.
+        if hasattr(self._model, "reset_cumulative_cost"):
+            self._model.reset_cumulative_cost()
+
         try:
             result = self._agent.run(full_prompt, max_steps=self._config.max_steps)
             description = str(result) if result is not None else ""
@@ -190,6 +196,20 @@ class SmolagentsBackend(AgentInterface):
         # so the orchestrator doesn't show misleading zeros.
         usage = None
 
+        # M3 PR 19a: surface API-equivalent cost estimate for the
+        # claude-subscription path via backend_metadata. The orchestrator
+        # reads `cost_usd` + `usage_source` from this dict and writes
+        # them onto the AttemptNode (per spec §4.1 enum). For
+        # subscription auth, `usage_source="oauth_estimated"` so
+        # postmortem doesn't mislead users into thinking they're
+        # double-billed.
+        backend_metadata = {}
+        if hasattr(self._model, "cumulative_cost_estimate_usd"):
+            est = float(self._model.cumulative_cost_estimate_usd)
+            if est > 0.0:
+                backend_metadata["cost_usd"] = est
+                backend_metadata["usage_source"] = "oauth_estimated"
+
         return AgentResult(
             modified_files=modified,
             description=description,
@@ -197,6 +217,7 @@ class SmolagentsBackend(AgentInterface):
             duration_seconds=duration,
             agent_output=agent_output,
             error_type=error_type,
+            backend_metadata=backend_metadata,
         )
 
     def capabilities(self) -> set[str]:

@@ -773,6 +773,17 @@ class Orchestrator:
             cost_usd = record.usage.total_cost_usd
             usage_source = "api"
 
+        # M3 PR 19a: backend_metadata can override (e.g.
+        # `usage_source="oauth_estimated"` for the smolagents +
+        # claude-subscription path where the cost is API-equivalent
+        # estimate, not metered). Backend_metadata wins because the
+        # backend knows its own billing model better than the
+        # orchestrator's `record.usage` heuristic.
+        bm_for_cost = _extract_backend_metadata(agent_result)
+        if bm_for_cost.get("usage_source") and bm_for_cost.get("cost_usd") is not None:
+            cost_usd = float(bm_for_cost["cost_usd"])
+            usage_source = bm_for_cost["usage_source"]
+
         # M1b PR 6: thread sealed EvalResult artefact refs onto the node.
         # Set lazily by _write_eval_result_artifact in the iteration that
         # produced this record; cleared after consumption.

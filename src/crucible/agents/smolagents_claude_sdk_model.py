@@ -122,6 +122,11 @@ class ClaudeAgentSDKModel:
 
         self._model = model
         self._max_thinking_tokens = max_thinking_tokens
+        # M3 PR 19a: track API-equivalent cost across generate() calls so
+        # SmolagentsBackend.generate_edit can populate AttemptNode with
+        # `usage_source="oauth_estimated"` + cumulative cost. Reset by
+        # caller (SmolagentsBackend) at the start of each agent.run().
+        self._cumulative_cost_estimate_usd: float = 0.0
 
     # ------------------------------------------------------------------
     # smolagents Model interface
@@ -166,6 +171,27 @@ class ClaudeAgentSDKModel:
     # smolagents may also call __call__; mirror generate
     def __call__(self, messages: list[Any], **kwargs) -> "ChatMessage":
         return self.generate(messages, **kwargs)
+
+    # ------------------------------------------------------------------
+    # M3 PR 19a: cost-tracking accessors for SmolagentsBackend
+    # ------------------------------------------------------------------
+
+    def reset_cumulative_cost(self) -> None:
+        """Zero the cumulative cost. SmolagentsBackend calls this at the
+        start of each `agent.run()` so the cost reflects only that
+        attempt, not the whole session."""
+        self._cumulative_cost_estimate_usd = 0.0
+
+    @property
+    def cumulative_cost_estimate_usd(self) -> float:
+        """Sum of `ResultMessage.total_cost_usd` across generate() calls
+        since the last `reset_cumulative_cost()`. This is API-equivalent
+        ESTIMATE — what would have been billed at metered API rates.
+        On subscription auth, the actual bill is a flat subscription fee
+        regardless of this number. Surfaced via `backend_metadata` so
+        AttemptNode can record `usage_source="oauth_estimated"` per
+        spec §4.1."""
+        return self._cumulative_cost_estimate_usd
 
     # ------------------------------------------------------------------
     # Helpers
@@ -244,6 +270,9 @@ class ClaudeAgentSDKModel:
                     cost = getattr(event, "total_cost_usd", None)
                     if cost is not None:
                         events[-1]["estimated_cost_usd"] = cost
+                        # M3 PR 19a: accumulate API-equivalent estimate
+                        # across generate() calls within one agent.run().
+                        self._cumulative_cost_estimate_usd += float(cost)
         except FileNotFoundError as exc:
             raise ClaudeAgentSDKAuthError(exc) from exc
         except OSError as exc:
