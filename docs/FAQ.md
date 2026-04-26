@@ -71,14 +71,20 @@ This gives you full control over which directions to explore in parallel, with z
 
 ## Is it safe to let the agent modify code that gets executed?
 
-The agent cannot run arbitrary commands — it only has access to Read, Edit, Write, Glob, and Grep tools. However, the code it writes into editable files **is** executed by `commands.run`. If the editable file can make network requests, delete files, or perform other dangerous operations, guard rails won't catch that.
+What the agent can do depends on the **backend**:
+
+- `agent.type: claude-code` (default, SDK) — restricted to Read / Edit / Write / Glob / Grep tools. No shell access exposed; the agent cannot run arbitrary commands directly.
+- `agent.type: smolagents` (opt-in via `pip install autocrucible[smolagents]`) — same five-tool surface enforced by `CheatResistancePolicy` at the tool boundary. No bypass observed across the adversarial test corpus in `tests/security/` (re-verifiable via `pytest tests/security/ --collect-only`).
+- `agent.type: cli-subscription` (M3, EXPERIMENTAL) — wraps a complete agent CLI; the CLI runs unsandboxed on the host filesystem and Crucible's ACL does NOT constrain it. Two-flag opt-in required. See [CLI-SUBSCRIPTION-BACKEND.md](CLI-SUBSCRIPTION-BACKEND.md).
+
+Across all backends, the code the agent writes into editable files **is** executed by `commands.run`. If the editable file can make network requests, delete files, or perform other dangerous operations, guard rails won't catch that.
 
 **Mitigations:**
 
 - **Scope the editable files narrowly.** If `sort.py` only contains a sort function, the blast radius is limited even if the agent writes bad code.
 - **Always set the evaluation harness as `hidden`, not `readonly`.** Readonly files are readable — the agent **will** study them and exploit implementation details (fixed seeds, scoring formulas, test data) to game the metric. In the `optimize-regression` example, the agent read `evaluate.py`, found `seed=42`, reconstructed the exact noise vector, and achieved MSE=0.0 in 3 iterations by memorizing the test set instead of learning regression. Hidden files are moved out of reach during agent execution but restored for the experiment subprocess.
 - **Use `constraints.timeout_seconds`** to kill runaway experiments.
-- **Use Docker sandbox** (`sandbox.backend: "docker"`) for untrusted workloads. Experiments run with network isolation, memory limits, and readonly filesystem.
+- **Use Docker sandbox** (`sandbox.backend: "docker"`). Containers run with `network=none`, `read_only_root=True`, `cap_drop=["ALL"]`, `pids_limit=128`, and a non-root user per spec §INV-2 — the configuration is enforced by `crucible/sandbox.py`.
 - **Review the git log.** Every change is committed — you can audit exactly what the agent did.
 
 This is the same trust model as CI/CD: you review the code, the system runs it. Crucible just automates the iteration loop.

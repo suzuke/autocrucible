@@ -159,7 +159,10 @@ crucible run --tag run1
 └─────────────────────────────────┘
 ```
 
-- **Agent**: Uses the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) with a tool allowlist (Read, Edit, Write, Glob, Grep). The agent can read files, make targeted edits, and search the codebase — but cannot execute arbitrary commands.
+- **Agent backends** (per `agent.type` in config):
+  - **`claude-code`** (default) — uses the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) with a fixed tool allowlist (Read, Edit, Write, Glob, Grep). No shell access exposed to the agent.
+  - **`smolagents`** (M2 PR 13, opt-in via `pip install autocrucible[smolagents]`) — same five-tool surface enforced by `CheatResistancePolicy` at the tool boundary; no bypass observed across the adversarial test corpus in `tests/security/` (re-verifiable via `pytest tests/security/ --collect-only`).
+  - **`cli-subscription`** (M3 PR 16, EXPERIMENTAL) — wraps complete agent CLIs (Claude Code, Codex, Gemini). The CLI runs unsandboxed on the host filesystem; Crucible's ACL does NOT constrain it. Two-flag opt-in required; runs are tagged `isolation=cli_subscription_unsandboxed` in the ledger. See [docs/CLI-SUBSCRIPTION-BACKEND.md](docs/CLI-SUBSCRIPTION-BACKEND.md).
 - **Environment**: If your project has a `.venv/`, crucible automatically activates it when running experiment commands, so `python3 evaluate.py` uses the correct interpreter and packages.
 - **Git**: Every attempt is committed. Improvements advance the branch; failures are tagged and reset, preserving the diff for analysis.
 
