@@ -1033,12 +1033,19 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
 @click.option("--tokens", is_flag=True, help=_("Show token profiling analysis."))
 @click.option("--html", "html_output", is_flag=True,
-              help=_("Render the v1.0 attempt-tree as a static HTML report "
+              help=_("Render the v1.0 attempt-tree as an HTML report "
                      "(reads logs/run-<tag>/ledger.jsonl)."))
+@click.option("--html-mode", type=click.Choice(["static", "interactive"]),
+              default="static",
+              help=_("HTML report mode (default: static). M3: 'interactive' "
+                     "embeds d3.js v7 for click-collapse + pan/zoom + "
+                     "details pane. Static is byte-stable for archival; "
+                     "interactive is for exploration."))
 @click.option("--html-out", default=None,
               help=_("Output path for the HTML report (default: postmortem-<tag>.html in project)."))
 def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool,
-               tokens: bool, html_output: bool, html_out: str | None) -> None:
+               tokens: bool, html_output: bool, html_mode: str,
+               html_out: str | None) -> None:
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -1049,7 +1056,7 @@ def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool,
 
     # M1a: --html reads the new ledger.jsonl, not results-<tag>.jsonl
     if html_output:
-        from crucible.reporter import render_static_html
+        from crucible.reporter import render_interactive_html, render_static_html
         ledger_path = project / "logs" / f"run-{tag}" / "ledger.jsonl"
         # Build a metric_lookup from results-{tag}.jsonl when present,
         # so the HTML report can highlight best-of-run.
@@ -1076,12 +1083,20 @@ def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool,
                 logging.getLogger(__name__).warning(
                     "could not build metric_lookup: %s", exc
                 )
-        out = render_static_html(
-            ledger_path,
-            title=f"Crucible Postmortem — {tag}",
-            metric_lookup=metric_lookup,
-            metric_direction=config.metric.direction,
-        )
+        if html_mode == "interactive":
+            out = render_interactive_html(
+                ledger_path,
+                title=f"Crucible Postmortem — {tag}",
+                metric_lookup=metric_lookup,
+                metric_direction=config.metric.direction,
+            )
+        else:
+            out = render_static_html(
+                ledger_path,
+                title=f"Crucible Postmortem — {tag}",
+                metric_lookup=metric_lookup,
+                metric_direction=config.metric.direction,
+            )
         target = Path(html_out) if html_out else (project / f"postmortem-{tag}.html")
         target.write_text(out)
         click.echo(_("Wrote HTML report to {path}").format(path=target))
