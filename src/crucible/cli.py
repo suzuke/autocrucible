@@ -1290,3 +1290,156 @@ def update(check: bool) -> None:
         raise click.ClickException(_("Update failed: {error}").format(error=result.stderr.strip()))
 
     click.echo(_("Updated to v{version} ✓").format(version=latest))
+
+
+# ---------------------------------------------------------------------------
+# compliance-check — M3 PR 16c
+# ---------------------------------------------------------------------------
+
+
+_SUPPORTED_COMPLIANCE_ADAPTERS = ("claude-code-cli", "codex-cli", "gemini-cli")
+
+
+@main.command(
+    "compliance-check",
+    help=_(
+        "Run the benign-parse compliance gate against a CLI subscription "
+        "adapter. Persists a JSONL report to "
+        "<project-dir>/compliance-reports/. Required before "
+        "SubscriptionCLIBackend will admit the adapter at run time."
+    ),
+)
+@click.option(
+    "--adapter",
+    type=click.Choice(_SUPPORTED_COMPLIANCE_ADAPTERS),
+    required=True,
+    help=_("Adapter to gate-test."),
+)
+@click.option(
+    "--project-dir",
+    default=".",
+    help=_(
+        "Project root directory (the report lands in "
+        "<project-dir>/compliance-reports/)."
+    ),
+)
+@click.option(
+    "--cli-binary-path",
+    default=None,
+    help=_(
+        "Override PATH lookup. Use when the CLI binary lives outside "
+        "$PATH or when you want to gate a specific build."
+    ),
+)
+@click.option(
+    "--timeout",
+    default=60,
+    type=int,
+    help=_("Per-task subprocess timeout in seconds."),
+)
+@click.option(
+    "--limit",
+    default=None,
+    type=int,
+    help=_(
+        "Run only the first N benign tasks (useful for smoke checks). "
+        "A real release-gate run should leave this unset."
+    ),
+)
+def compliance_check(
+    adapter: str,
+    project_dir: str,
+    cli_binary_path: str | None,
+    timeout: int,
+    limit: int | None,
+) -> None:
+    """Run the benign-parse compliance gate and persist a report."""
+    # Lazy imports — heavy adapter machinery shouldn't load on every CLI invocation.
+    from crucible.agents.cli_subscription.base import CLIBinaryError
+    from crucible.agents.cli_subscription.claude_code_cli import ClaudeCodeCLIAdapter
+    from crucible.agents.cli_subscription.codex_cli import CodexCLIAdapter
+    from crucible.agents.cli_subscription.compliance import (
+        ADMIT_THRESHOLD,
+        BENIGN_TASK_SUITE,
+        RELEASE_THRESHOLD,
+        TrialClassification,
+        run_compliance_harness,
+    )
+    from crucible.agents.cli_subscription.gemini_cli import GeminiCLIAdapter
+
+    registry = {
+        "claude-code-cli": ClaudeCodeCLIAdapter,
+        "codex-cli": CodexCLIAdapter,
+        "gemini-cli": GeminiCLIAdapter,
+    }
+    cls = registry[adapter]
+
+    project = Path(project_dir).resolve()
+    if not project.exists():
+        raise click.ClickException(
+            _("project-dir {p} does not exist").format(p=str(project))
+        )
+
+    try:
+        adapter_inst = cls(cli_binary_path=cli_binary_path)
+    except CLIBinaryError as exc:
+        raise click.ClickException(str(exc))
+
+    tasks = BENIGN_TASK_SUITE
+    if limit is not None:
+        if limit <= 0:
+            raise click.ClickException(_("--limit must be a positive integer"))
+        tasks = tasks[:limit]
+
+    click.echo(_("Running compliance gate: {adapter} v{version} ({n} tasks)").format(
+        adapter=adapter_inst.cli_name,
+        version=adapter_inst.cli_version,
+        n=len(tasks),
+    ))
+
+    report = run_compliance_harness(
+        adapter_inst,
+        tasks=tasks,
+        project_dir=project,
+        timeout_seconds=timeout,
+    )
+
+    # Per-class breakdown
+    bucket_counts: dict[str, int] = {}
+    for trial in report.trials:
+        key = trial.classification.value
+        bucket_counts[key] = bucket_counts.get(key, 0) + 1
+
+    click.echo("")
+    click.echo(_("Compliance report:"))
+    click.echo(_("  adapter      : {a}").format(a=report.adapter))
+    click.echo(_("  cli_version  : {v}").format(v=report.cli_version))
+    click.echo(_("  cli_binary   : {p}").format(p=report.cli_binary_path))
+    click.echo(_("  total trials : {n}").format(n=report.total))
+    click.echo(_("  passes       : {p} ({r:.1%})").format(
+        p=report.passes, r=report.pass_rate,
+    ))
+    for label, count in sorted(bucket_counts.items()):
+        click.echo(_("    {label:14s} {count}").format(label=label, count=count))
+
+    # Threshold disposition — informational; the operator decides what
+    # to do (e.g. file a fix vs run with allow_stale_compliance=true).
+    click.echo("")
+    if report.meets(RELEASE_THRESHOLD):
+        click.echo(_("✓ Release threshold met (≥{t:.0%})").format(t=RELEASE_THRESHOLD))
+    elif report.meets(ADMIT_THRESHOLD):
+        click.echo(_(
+            "⚠ Admit threshold met (≥{a:.0%}) but below release "
+            "threshold (≥{r:.0%}). Adapter is poc-eligible only."
+        ).format(a=ADMIT_THRESHOLD, r=RELEASE_THRESHOLD))
+    else:
+        click.echo(_(
+            "✗ Below admit threshold (<{a:.0%}). Investigate failures "
+            "before relying on this adapter."
+        ).format(a=ADMIT_THRESHOLD))
+
+    # Persist already happened inside run_compliance_harness; tell the
+    # operator where it landed so they can attach to a PR / pass to
+    # the run loop.
+    from crucible.agents.cli_subscription.compliance import reports_dir_for
+    click.echo(_("Report persisted to {d}").format(d=str(reports_dir_for(project))))

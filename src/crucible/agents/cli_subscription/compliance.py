@@ -28,6 +28,17 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Sequence
 
+# Module-level import (NOT lazy): keeps the binding stable across
+# sys.modules eviction by tests like test_agents_factory. If the import
+# becomes lazy inside the harness function body, the harness's
+# `except CLISubscriptionAuthError as exc:` resolves to a freshly-
+# imported class object after eviction — which doesn't match exception
+# instances raised by callers that hold the pre-eviction class.
+from crucible.agents.cli_subscription.base import (
+    AdapterRunContext,
+    CLISubscriptionAuthError,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -304,3 +315,179 @@ BENIGN_TASK_SUITE: tuple[BenignTask, ...] = (
     # is a separate exercise and would inflate this PR significantly.
     # Reviewer round 1 acknowledged the gate execution is post-merge.
 )
+
+
+# ---------------------------------------------------------------------------
+# Harness runner — M3 PR 16c
+# ---------------------------------------------------------------------------
+
+
+# Phrases that signal model refusal of a benign task. Matched
+# intentionally against an explicitly declared set (PR 19 R2 lesson).
+# Conservative: only obvious refusals, not edge cases. The harness
+# falls back to PARSE_SUCCESS if `tool_was_called` is True regardless.
+_MODEL_REFUSAL_PHRASES = (
+    "I can't",
+    "I cannot",
+    "I'm not able to",
+    "I am not able to",
+    "I won't",
+    "I will not",
+    "Sorry, I",
+    "I'm sorry, I can",
+    "unable to comply",
+    "refuse to",
+)
+
+
+def _classify_trial(
+    raw: "AdapterRawResult",  # type: ignore[name-defined]
+    parsed: Optional["ParsedAdapterOutput"],  # type: ignore[name-defined]
+    auth_error_evidence: Optional[str],
+) -> tuple[TrialClassification, str]:
+    """Classify one trial outcome into a spec §3.2 label.
+
+    Order matters — earliest-matching wins:
+      1. CLI_ERROR for hard failures: timeout, auth-failure, non-zero
+         exit (auth failure DURING the gate run means the gate run is
+         invalid, not that the adapter is non-compliant — but we still
+         classify as CLI_ERROR so the operator sees the gate as
+         non-passing rather than silently scoring it).
+      2. PARSE_FAILURE for unknown_schema (parser saw events it didn't
+         recognise → schema drift).
+      3. PARSE_SUCCESS if a tool was called (the CLI engaged the tool
+         loop, the adapter parsed it, all good).
+      4. MODEL_REFUSAL if the description contains a declared refusal
+         phrase AND no tool was called.
+      5. FORMAT_DRIFT for the residual: CLI ran, exited cleanly, parser
+         was happy, but no tool engagement and no refusal phrase. The
+         CLI returned text instead of using its tool surface.
+    """
+    if raw.timed_out:
+        return TrialClassification.CLI_ERROR, "subprocess timeout"
+    if auth_error_evidence is not None:
+        return TrialClassification.CLI_ERROR, f"auth: {auth_error_evidence[:200]}"
+    if raw.exit_code != 0:
+        return TrialClassification.CLI_ERROR, f"exit_code={raw.exit_code}"
+    if parsed is None:
+        return TrialClassification.CLI_ERROR, "parser raised"
+    if parsed.unknown_schema:
+        return TrialClassification.PARSE_FAILURE, "unknown_schema"
+    if parsed.tool_was_called:
+        return TrialClassification.PARSE_SUCCESS, ""
+    desc = parsed.description or ""
+    for phrase in _MODEL_REFUSAL_PHRASES:
+        if phrase in desc:
+            return TrialClassification.MODEL_REFUSAL, f"phrase: {phrase!r}"
+    return TrialClassification.FORMAT_DRIFT, "no tool call, no refusal phrase"
+
+
+def run_compliance_harness(
+    adapter,  # SubscriptionCLIAdapter; type avoided to keep import surface narrow
+    *,
+    tasks: Sequence[BenignTask] = BENIGN_TASK_SUITE,
+    project_dir: Path,
+    timeout_seconds: int = 60,
+    stdout_cap_bytes: int = 1_000_000,
+) -> ComplianceReport:
+    """Run the benign-parse compliance gate against `adapter`.
+
+    For each task in `tasks`:
+      1. Materialise `task.workspace_files` into a temp scratch dir.
+      2. Build an AdapterRunContext pointing at the scratch dir.
+      3. Call `adapter.run_subprocess(ctx)` to invoke the CLI.
+      4. Call `adapter.parse_output(raw)` (catching CLISubscriptionAuthError).
+      5. Classify the trial via `_classify_trial`.
+      6. Accumulate into ComplianceReport.
+
+    Persists the report to `reports_dir_for(project_dir)` and returns it.
+    Raises nothing on individual trial failures — the gate's purpose is
+    to MEASURE the adapter's behaviour, not to short-circuit on first
+    error. Genuine framework errors (binary missing, dir permissions)
+    propagate.
+
+    NB: the harness intentionally does NOT use `SubscriptionCLIBackend`'s
+    full pipeline (scratch_dir context manager + copy-back + safety
+    filter). The compliance gate is about parser conformance against
+    benign tasks; it doesn't need policy ACL enforcement.
+    """
+    import tempfile
+
+    started_at = datetime.now(tz=timezone.utc).isoformat()
+    trials: list[TrialResult] = []
+
+    for task in tasks:
+        with tempfile.TemporaryDirectory(
+            prefix=f"crucible-compliance-{task.task_id}-",
+        ) as tmpdir:
+            scratch = Path(tmpdir)
+            for rel, content in task.workspace_files.items():
+                p = scratch / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(content)
+
+            ctx = AdapterRunContext(
+                prompt=task.prompt,
+                scratch_dir=scratch,
+                workspace_root=scratch,
+                timeout_seconds=timeout_seconds,
+                stdout_cap_bytes=stdout_cap_bytes,
+            )
+
+            try:
+                raw = adapter.run_subprocess(ctx)
+            except Exception as exc:
+                # Framework-level failure (binary not found mid-run,
+                # OS permissions). Classify as CLI_ERROR with the
+                # exception text for forensics.
+                logger.warning(
+                    "compliance: %s subprocess raised: %s", task.task_id, exc,
+                )
+                trials.append(TrialResult(
+                    task_id=task.task_id,
+                    classification=TrialClassification.CLI_ERROR,
+                    description=f"subprocess raise: {type(exc).__name__}",
+                    evidence=str(exc)[:500],
+                ))
+                continue
+
+            parsed = None
+            auth_evidence: Optional[str] = None
+            try:
+                parsed = adapter.parse_output(raw)
+            except CLISubscriptionAuthError as exc:
+                auth_evidence = exc.evidence
+            except Exception as exc:
+                logger.warning(
+                    "compliance: %s parser raised: %s", task.task_id, exc,
+                )
+                trials.append(TrialResult(
+                    task_id=task.task_id,
+                    classification=TrialClassification.CLI_ERROR,
+                    description=f"parser raise: {type(exc).__name__}",
+                    evidence=str(exc)[:500],
+                ))
+                continue
+
+            classification, evidence = _classify_trial(raw, parsed, auth_evidence)
+            description = (parsed.description if parsed else "")[:500]
+            trials.append(TrialResult(
+                task_id=task.task_id,
+                classification=classification,
+                description=description,
+                evidence=evidence,
+            ))
+
+    ended_at = datetime.now(tz=timezone.utc).isoformat()
+    report = ComplianceReport(
+        adapter=adapter.cli_name,
+        cli_binary_path=str(adapter.cli_binary_path),
+        cli_version=adapter.cli_version,
+        started_at=started_at,
+        ended_at=ended_at,
+        trials=trials,
+    )
+
+    dest_dir = reports_dir_for(project_dir)
+    persist_report(report, dest_dir=dest_dir)
+    return report
