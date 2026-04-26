@@ -46,8 +46,53 @@ class SmolagentsConfig:
 
 
 @dataclass
+class CLISubscriptionConfig:
+    """M3 PR 16: configuration for the experimental SubscriptionCLIBackend.
+
+    Per spec §3.1+§3.2: wraps subscription CLIs (Claude Code / Codex /
+    Gemini) as agent backends. Gated behind ≥99% benign-parse compliance
+    per spec §3.2 release threshold. CLI is a "complete agent product"
+    (§3.3) so we cannot enforce ACL via tool boundaries — see the
+    `acknowledge_unsandboxed_cli` requirement.
+    """
+    # Adapter selector. "claude-code-cli" is the only adapter wired in
+    # PR 16; "codex-cli" and "gemini-cli" are stubs gated to PR 16b/c.
+    adapter: str = "claude-code-cli"
+    # Optional explicit path to the CLI binary. PATH lookup if None.
+    cli_binary_path: str | None = None
+    # Per-call subprocess timeout in seconds (matches constraints default).
+    timeout_seconds: int = 600
+    # Hard cap on captured stdout size (10 MB). Subprocess is killed if
+    # the cap is exceeded — not just truncated — so the CLI doesn't keep
+    # running and racking up subscription quota off-budget.
+    stdout_cap_bytes: int = 10 * 1024 * 1024
+
+
+@dataclass
+class ExperimentalConfig:
+    """M3 PR 16: opt-in flags for experimental / unsupported features.
+
+    These are off by default. Each flag must be explicitly set true in
+    config to opt in; the friction is the security feature for §INV-1
+    "no bypass observed in N adversarial trials" wording. We do NOT
+    market experimental features as production-grade.
+    """
+    # Two-flag opt-in for SubscriptionCLIBackend (reviewer round 1 Q8):
+    # The first acknowledges the backend is experimental. The second
+    # acknowledges that L1 ACL via CheatResistancePolicy does NOT apply
+    # — the CLI sees the host filesystem unmediated. Both must be true.
+    allow_cli_subscription: bool = False
+    acknowledge_unsandboxed_cli: bool = False
+    # Allow construction even when no recent ≥99% compliance report
+    # exists for the CLI version. RED-LETTER WARNING at startup.
+    # Default off — adapters refuse to construct without a passing gate.
+    allow_stale_compliance: bool = False
+
+
+@dataclass
 class AgentConfig:
-    type: str = "claude-code"          # "claude-code" | "smolagents"
+    # "claude-code" | "smolagents" | "cli-subscription"
+    type: str = "claude-code"
     instructions: Optional[str] = None
     system_prompt: Optional[str] = None
     model: str | None = None
@@ -57,6 +102,8 @@ class AgentConfig:
     critic: CriticConfig = field(default_factory=CriticConfig)
     context_window: ContextWindowConfig = field(default_factory=ContextWindowConfig)
     smolagents: SmolagentsConfig = field(default_factory=SmolagentsConfig)
+    cli_subscription: CLISubscriptionConfig = field(default_factory=CLISubscriptionConfig)
+    experimental: ExperimentalConfig = field(default_factory=ExperimentalConfig)
 
 
 @dataclass
@@ -196,7 +243,8 @@ def _build_critic(data: dict | None) -> CriticConfig:
     )
 
 
-_SUPPORTED_AGENT_TYPES = ("claude-code", "smolagents")
+_SUPPORTED_AGENT_TYPES = ("claude-code", "smolagents", "cli-subscription")
+_SUPPORTED_CLI_ADAPTERS = ("claude-code-cli", "codex-cli", "gemini-cli")
 
 
 def _build_smolagents(data: dict) -> SmolagentsConfig:
@@ -212,6 +260,43 @@ def _build_smolagents(data: dict) -> SmolagentsConfig:
         model=data.get("model", "claude-3-5-sonnet-20241022"),
         api_key_env=data.get("api_key_env", "ANTHROPIC_API_KEY"),
         max_steps=max_steps,
+    )
+
+
+def _build_cli_subscription(data: dict) -> CLISubscriptionConfig:
+    if not data:
+        return CLISubscriptionConfig()
+    adapter = data.get("adapter", "claude-code-cli")
+    if adapter not in _SUPPORTED_CLI_ADAPTERS:
+        raise ConfigError(
+            f"agent.cli_subscription.adapter must be one of "
+            f"{list(_SUPPORTED_CLI_ADAPTERS)}, got {adapter!r}"
+        )
+    timeout = data.get("timeout_seconds", 600)
+    if not isinstance(timeout, int) or timeout < 1:
+        raise ConfigError(
+            f"agent.cli_subscription.timeout_seconds must be a positive int, got {timeout!r}"
+        )
+    stdout_cap = data.get("stdout_cap_bytes", 10 * 1024 * 1024)
+    if not isinstance(stdout_cap, int) or stdout_cap < 1024:
+        raise ConfigError(
+            f"agent.cli_subscription.stdout_cap_bytes must be ≥1024, got {stdout_cap!r}"
+        )
+    return CLISubscriptionConfig(
+        adapter=adapter,
+        cli_binary_path=data.get("cli_binary_path"),
+        timeout_seconds=timeout,
+        stdout_cap_bytes=stdout_cap,
+    )
+
+
+def _build_experimental(data: dict) -> ExperimentalConfig:
+    if not data:
+        return ExperimentalConfig()
+    return ExperimentalConfig(
+        allow_cli_subscription=bool(data.get("allow_cli_subscription", False)),
+        acknowledge_unsandboxed_cli=bool(data.get("acknowledge_unsandboxed_cli", False)),
+        allow_stale_compliance=bool(data.get("allow_stale_compliance", False)),
     )
 
 
@@ -235,6 +320,8 @@ def _build_agent(data: dict) -> AgentConfig:
         critic=_build_critic(data.get("critic")),
         context_window=_build_context_window(data.get("context_window", {})),
         smolagents=_build_smolagents(data.get("smolagents", {})),
+        cli_subscription=_build_cli_subscription(data.get("cli_subscription", {})),
+        experimental=_build_experimental(data.get("experimental", {})),
     )
 
 

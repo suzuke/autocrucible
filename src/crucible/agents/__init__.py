@@ -18,23 +18,27 @@ def create_agent(config: AgentConfig, **kwargs) -> AgentInterface:
     """Create an agent instance based on `config.type`.
 
     Supported types:
-      - "claude-code"  → ClaudeCodeAgent (default; existing behavior)
-      - "smolagents"   → SmolagentsBackend (M2 PR 13; requires
-                          `pip install autocrucible[smolagents]`)
+      - "claude-code"      → ClaudeCodeAgent (default; SDK-based)
+      - "smolagents"       → SmolagentsBackend (M2 PR 13)
+      - "cli-subscription" → SubscriptionCLIBackend (M3 PR 16,
+                              EXPERIMENTAL — see two-flag opt-in)
 
-    For smolagents, callers MUST pass `workspace: Path` and
-    `policy: CheatResistancePolicy` kwargs — they're required to
-    construct the ACL-enforced tools.
+    For smolagents and cli-subscription, callers MUST pass
+    `workspace: Path` and `policy: CheatResistancePolicy` kwargs —
+    they're required to construct the ACL-enforced tools / scratch
+    dir setup.
 
-    Reviewer round 1 pin: factory construction is pure (no network
-    calls). Smolagents import is lazy — only triggered when type is
-    actually `"smolagents"`. Loading config alone never imports
-    smolagents.
+    Factory construction is pure (no network calls). Backend imports
+    are lazy — only triggered when the matching `config.type` is
+    requested. Loading config alone never imports smolagents or any
+    CLI subprocess module.
     """
     if config.type == "claude-code":
         return _create_claude_code(config, **kwargs)
     if config.type == "smolagents":
         return _create_smolagents(config, **kwargs)
+    if config.type == "cli-subscription":
+        return _create_cli_subscription(config, **kwargs)
     # Defensive: should be caught by config validator (`_build_agent`),
     # but fail closed if anyone bypasses the config layer.
     raise ValueError(f"unknown agent type: {config.type!r}")
@@ -84,4 +88,35 @@ def _create_smolagents(config: AgentConfig, **kwargs) -> AgentInterface:
         policy=policy,
         workspace=Path(workspace),
         system_prompt=config.system_prompt,
+    )
+
+
+def _create_cli_subscription(config: AgentConfig, **kwargs) -> AgentInterface:
+    """Construct the experimental SubscriptionCLIBackend (M3 PR 16).
+
+    Two-flag opt-in (allow_cli_subscription + acknowledge_unsandboxed_cli)
+    plus compliance gate enforcement happen inside the backend's
+    `__init__`. Lazy import so loading config alone doesn't pull in
+    subprocess management code.
+    """
+    workspace = kwargs.get("workspace")
+    policy = kwargs.get("policy")
+    if workspace is None or policy is None:
+        raise ValueError(
+            "SubscriptionCLIBackend requires `workspace: Path` and "
+            "`policy: CheatResistancePolicy` kwargs."
+        )
+    project_dir = kwargs.get("project_dir")
+
+    from crucible.agents.cli_subscription_backend import (
+        SubscriptionCLIBackend,
+        SubscriptionCLIBackendError,
+    )
+
+    return SubscriptionCLIBackend(
+        cli_config=config.cli_subscription,
+        experimental=config.experimental,
+        policy=policy,
+        workspace=Path(workspace),
+        project_dir=Path(project_dir) if project_dir else None,
     )
