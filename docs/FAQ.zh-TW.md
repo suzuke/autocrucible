@@ -71,14 +71,20 @@ crucible compare algo-focus lowlevel-focus
 
 ## Agent 修改的程式碼會被執行，這安全嗎？
 
-Agent 無法執行任意指令——它只能使用 Read、Edit、Write、Glob、Grep 工具。但它寫入 editable 檔案的程式碼**會**被 `commands.run` 執行。如果 editable 檔案能發網路請求、刪除檔案或執行其他危險操作，guard rails 擋不住。
+Agent 能做什麼取決於 **backend**：
+
+- `agent.type: claude-code`（預設、SDK）— 只能用 Read / Edit / Write / Glob / Grep 工具。Agent 沒有 shell 存取權限，無法直接執行任意指令。
+- `agent.type: smolagents`（opt-in：`pip install autocrucible[smolagents]`）— 相同五個工具的介面，由 `CheatResistancePolicy` 在 tool boundary 強制；在 `tests/security/` 對抗測試集中目前未觀察到逃逸（可用 `pytest tests/security/ --collect-only` 重新驗證）。
+- `agent.type: cli-subscription`（M3，EXPERIMENTAL）— 包裝完整的 agent CLI；CLI 在 host filesystem 上未經 sandbox 執行，Crucible 的 ACL **無法**約束它。需要雙旗 opt-in。詳見 [CLI-SUBSCRIPTION-BACKEND.md](CLI-SUBSCRIPTION-BACKEND.md)。
+
+不論哪個 backend，agent 寫入 editable 檔案的程式碼**都會**被 `commands.run` 執行。如果 editable 檔案能發網路請求、刪除檔案或執行其他危險操作，guard rails 擋不住。
 
 **緩解措施：**
 
 - **縮小 editable 檔案的範圍。** 如果 `sort.py` 只包含一個排序函式，即使 agent 寫了壞程式碼，影響範圍也很有限。
 - **評估碼務必設為 `hidden` 而非 `readonly`。** Readonly 檔案 agent 仍可讀取——它**會**研究實作細節（固定種子、評分公式、測試資料）來鑽漏洞。在 `optimize-regression` 範例中，agent 讀取 `evaluate.py` 後找到 `seed=42`，重建了確切的雜訊向量，3 次迭代就達到 MSE=0.0——它記住了測試集而非學會回歸。Hidden 檔案在 agent 執行期間不可存取，但 subprocess 執行實驗時可用。
 - **設定 `constraints.timeout_seconds`** 來終止失控的實驗。
-- **使用 Docker sandbox**（`sandbox.backend: "docker"`）處理不信任的工作負載。實驗在網路隔離、記憶體限制和唯讀檔案系統下執行。
+- **使用 Docker sandbox**（`sandbox.backend: "docker"`）。容器以 `network=none`、`read_only_root=True`、`cap_drop=["ALL"]`、`pids_limit=128`、非 root 使用者執行（spec §INV-2 預設配置）— 由 `crucible/sandbox.py` 強制。
 - **檢查 git log。** 每個變更都有 commit——你可以審計 agent 做了什麼。
 
 這跟 CI/CD 是同樣的信任模型：你審查程式碼，系統執行它。Crucible 只是把迭代迴圈自動化了。
