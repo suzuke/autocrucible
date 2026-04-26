@@ -1043,14 +1043,42 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
                      "interactive is for exploration."))
 @click.option("--html-out", default=None,
               help=_("Output path for the HTML report (default: postmortem-<tag>.html in project)."))
+@click.option("--strategy-decisions", "strategy_decisions", is_flag=True,
+              help=_("Print the recorded SearchStrategy decision sequence "
+                     "(reads logs/run-<tag>/strategy-decisions.jsonl). "
+                     "M3 PR 17."))
 def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool,
                tokens: bool, html_output: bool, html_mode: str,
-               html_out: str | None) -> None:
+               html_out: str | None, strategy_decisions: bool) -> None:
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
     except ConfigError as e:
         raise click.ClickException(str(e))
+
+    # M3 PR 17: --strategy-decisions prints sidecar contents and exits.
+    # No interaction with --html / --json.
+    if strategy_decisions:
+        from crucible.strategy_decisions import load_all
+        run_dir = project / "logs" / f"run-{tag}"
+        decisions = load_all(run_dir)
+        if not decisions:
+            click.echo(_("No strategy decisions recorded for this run."))
+            click.echo(_("(Sidecar at {p} is missing or empty — older runs / strategies that don't emit decisions.)").format(
+                p=run_dir / "strategy-decisions.jsonl"
+            ))
+            return
+        click.echo(_("Strategy decisions for run '{tag}':").format(tag=tag))
+        for d in decisions:
+            click.echo(
+                f"  iter={d.iteration:>4}  {d.chosen_action:<20}  "
+                f"kept={len(d.kept_candidates):>2}  "
+                f"pruned={len(d.pruned_candidates):>2}  "
+                f"@ {d.timestamp}"
+            )
+            if d.rationale:
+                click.echo(f"    └─ {d.rationale}")
+        return
 
     from crucible.postmortem import PostmortemAnalyzer, render_text
 

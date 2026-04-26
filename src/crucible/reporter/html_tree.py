@@ -120,14 +120,33 @@ def _render(
     best_id = _best_node_id(nodes, metric_lookup, metric_direction)
     cards = _render_tree(nodes, best_id, metric_lookup)
     summary = _render_summary(nodes, metric_lookup, best_id)
+    # M3 PR 17: render truth-in-labeling banners (cli_subscription
+    # unsandboxed, stale compliance) above the summary. Banner copy
+    # lives in reporter/_banners.py — single source of truth across
+    # static + interactive renderers.
+    banners = _render_banners_for_nodes(nodes)
 
     return _PAGE_TEMPLATE.format(
         title=html.escape(title),
         css=_CSS,
-        summary=summary,
+        summary=banners + summary,
         cards=cards,
         generated_at=html.escape(datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")),
     )
+
+
+def _render_banners_for_nodes(nodes: Sequence[AttemptNode]) -> str:
+    """Build per-node metadata dicts and pass to the SSOT banner renderer."""
+    from crucible.reporter._banners import render_banners_html
+    metadatas = [
+        {
+            "isolation": n.isolation,
+            "compliance_report_path": n.compliance_report_path,
+            "backend_kind": n.backend_kind,
+        }
+        for n in nodes
+    ]
+    return render_banners_html(metadatas)
 
 
 def _render_tree(

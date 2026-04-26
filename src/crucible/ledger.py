@@ -113,6 +113,20 @@ class AttemptNode:
     cli_argv: Optional[list[str]] = None
     env_allowlist: list[str] = field(default_factory=list)  # names only, never values
 
+    # M3 PR 17: isolation tag for truth-in-labeling (per spec §11.2 Q5
+    # resolution). Populated by SubscriptionCLIBackend with
+    # "cli_subscription_unsandboxed"; future backends may declare
+    # "local_unsafe" / "docker_strict" / etc. None for legacy backends
+    # that don't declare isolation status.
+    isolation: Optional[str] = None
+    # Path (workspace-relative) to the compliance gate JSONL evidence
+    # file that admitted this run. None means either the gate was
+    # bypassed (allow_stale_compliance) OR the backend doesn't have a
+    # compliance gate (e.g. ClaudeCodeAgent SDK). Reporters branch on
+    # `isolation is not None and compliance_report_path is None` to
+    # surface the "stale compliance" warning banner.
+    compliance_report_path: Optional[str] = None
+
     # Prompt + diff (capped inline; full content via *_ref paths)
     prompt_digest: str = ""           # sha256 of full prompt
     prompt_ref: str = ""              # path to full prompt file
@@ -361,6 +375,93 @@ class TrialLedger:
 
     def children_of(self, parent_id: Optional[str]) -> list[AttemptNode]:
         return [n for n in self.all_nodes() if n.parent_id == parent_id]
+
+    # ------------------------------------------------------------------
+    # M3 PR 17: query helpers for postmortem / compare / analysis tools
+    # ------------------------------------------------------------------
+
+    def kept_path(
+        self, node_id: str, *, include_self: bool = True
+    ) -> list[AttemptNode]:
+        """Walk the parent chain from `node_id`, return only kept ancestors.
+
+        Result is ordered oldest-first (root → ... → node_id).
+
+        Args:
+            node_id: AttemptNode id to start the walk from.
+            include_self: when True (default), the queried node is in
+                the result iff its outcome is "keep". When False, the
+                queried node is dropped from the result regardless of
+                its outcome — useful when callers want only ancestors.
+
+        Reviewer round 1 Q2 pin: walk the parent chain unconditionally,
+        filter to outcome=="keep", drop self when requested. Don't bake
+        heuristics into the helper.
+
+        Defensive: orphan nodes (parent_id set but parent missing from
+        ledger) terminate the walk cleanly. Cycles (shouldn't happen
+        but mirror `_render_tree`'s defense) trip a `visited` guard.
+        """
+        nodes_by_id = {n.id: n for n in self.all_nodes()}
+        chain: list[AttemptNode] = []
+        visited: set[str] = set()
+        cur_id: Optional[str] = node_id
+        while cur_id and cur_id not in visited:
+            visited.add(cur_id)
+            node = nodes_by_id.get(cur_id)
+            if node is None:
+                break
+            chain.append(node)
+            cur_id = node.parent_id
+        # chain is currently node_id → root order; reverse to root → node_id
+        chain.reverse()
+        # Filter to keep-only
+        chain = [n for n in chain if n.outcome == "keep"]
+        if not include_self and chain and chain[-1].id == node_id:
+            chain = chain[:-1]
+        return chain
+
+    def descendants_of(self, node_id: str) -> list[AttemptNode]:
+        """Return all transitive children of `node_id`, DFS order.
+
+        Iteration order matches `_render_tree` in `html_tree.py`:
+        DFS-by-parent with siblings sorted by id (sequential ids →
+        insertion order). Reviewer round 1 Q2 pin: documented order
+        so callers can rely on it; if BFS is needed later, add a
+        separate helper rather than parameterizing.
+
+        Defensive: cycles trip a `visited` guard (mirrors
+        `_render_tree`).
+        """
+        all_nodes = self.all_nodes()
+        by_parent: dict[Optional[str], list[AttemptNode]] = {}
+        for n in all_nodes:
+            by_parent.setdefault(n.parent_id, []).append(n)
+        for siblings in by_parent.values():
+            siblings.sort(key=lambda n: (n.id, n.created_at))
+
+        out: list[AttemptNode] = []
+        visited: set[str] = set()
+
+        def walk(parent: str) -> None:
+            for child in by_parent.get(parent, []):
+                if child.id in visited:
+                    continue
+                visited.add(child.id)
+                out.append(child)
+                walk(child.id)
+
+        walk(node_id)
+        return out
+
+    def find_by_outcome(self, outcome: str) -> list[AttemptNode]:
+        """Return nodes whose outcome matches `outcome` exactly.
+
+        Outcomes are documented as `Literal[...]` in spec §4.1; this
+        helper accepts plain str for forward-compat with custom
+        outcomes future strategies might emit.
+        """
+        return [n for n in self.all_nodes() if n.outcome == outcome]
 
     def best_node(self, direction: MetricDirection = "maximize",
                   metric_lookup: Optional[dict[str, float]] = None) -> Optional[AttemptNode]:

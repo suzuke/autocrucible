@@ -638,6 +638,56 @@ class Orchestrator:
             logger.warning("ledger lookup failed for %s: %s", node_id, exc)
         return None
 
+    def _log_strategy_decision(
+        self,
+        sctx: StrategyContext,
+        action,
+    ) -> None:
+        """M3 PR 17: append one decision record to the sidecar.
+
+        Sidecar lives at `logs/run-<tag>/strategy-decisions.jsonl`.
+        Best-effort: any failure (FS error, serialization issue) is
+        swallowed so a logging hiccup never blocks the run loop.
+        """
+        try:
+            from crucible.strategy_decisions import StrategyDecision, append
+
+            run_dir = self.workspace / "logs" / f"run-{self.tag}"
+            kept = [
+                n.id for n in sctx.ledger_nodes
+                if n.outcome == "keep" and n.id in sctx.metric_lookup
+            ]
+            # Best-effort: ask the strategy which kept candidates it
+            # would prune. BFTSLiteStrategy implements `should_prune`;
+            # other strategies' default is False so the pruned list
+            # ends up empty for them.
+            pruned = []
+            should_prune = getattr(self.strategy, "should_prune", None)
+            if callable(should_prune):
+                pruned = [
+                    nid for nid in kept
+                    if should_prune(sctx, nid)
+                ]
+            chosen = type(action).__name__ if action is not None else "None"
+            rationale = getattr(action, "reason", "") or ""
+            append(
+                run_dir,
+                StrategyDecision(
+                    timestamp=StrategyDecision.now_iso(),
+                    iteration=sctx.iteration_count,
+                    kept_candidates=kept,
+                    pruned_candidates=pruned,
+                    chosen_action=chosen,
+                    rationale=rationale,
+                    extras={
+                        "strategy": getattr(self.strategy, "name", ""),
+                        "plateau_streak": sctx.plateau_streak,
+                    },
+                ),
+            )
+        except Exception as exc:
+            logger.debug("strategy decision log failed: %s", exc)
+
     def _build_strategy_context(
         self,
         session_count: int,
@@ -734,6 +784,11 @@ class Orchestrator:
         # doesn't have backend_kind/backend_version properties.
         backend_kind = getattr(self.agent, "backend_kind", None) or "claude_sdk"
         backend_version = getattr(self.agent, "backend_version", None) or ""
+        # M3 PR 17: propagate AgentResult.backend_metadata onto the
+        # AttemptNode so reporters / audit tools can render the
+        # truth-in-labeling banners (cli_subscription_unsandboxed,
+        # stale compliance) without spelunking through the run dir.
+        bm = _extract_backend_metadata(agent_result)
 
         node = AttemptNode(
             id=attempt_id,
@@ -742,6 +797,12 @@ class Orchestrator:
             backend_kind=backend_kind,
             backend_version=backend_version,
             model=getattr(self.agent, "model", "") or "",
+            cli_binary_path=bm.get("cli_binary_path"),
+            cli_version=bm.get("cli_version"),
+            cli_argv=bm.get("cli_argv"),
+            env_allowlist=bm.get("env_allowlist", []),
+            isolation=bm.get("isolation"),
+            compliance_report_path=bm.get("compliance_report_path"),
             prompt_digest="",  # populated when prompt hashing lands (M1b)
             prompt_ref=prompt_ref,
             diff_text=diff_inline,
@@ -815,6 +876,7 @@ class Orchestrator:
         try:
             backend_kind = getattr(self.agent, "backend_kind", None) or "claude_sdk"
             backend_version = getattr(self.agent, "backend_version", None) or ""
+            bm = _extract_backend_metadata(agent_result)
             node = AttemptNode(
                 id=attempt_id,
                 parent_id=parent_id,
@@ -822,6 +884,12 @@ class Orchestrator:
                 backend_kind=backend_kind,
                 backend_version=backend_version,
                 model=getattr(self.agent, "model", "") or "",
+                cli_binary_path=bm.get("cli_binary_path"),
+                cli_version=bm.get("cli_version"),
+                cli_argv=bm.get("cli_argv"),
+                env_allowlist=bm.get("env_allowlist", []),
+                isolation=bm.get("isolation"),
+                compliance_report_path=bm.get("compliance_report_path"),
                 prompt_digest="",
                 prompt_ref=f"logs/iter-{seq}/prompt.md",
                 diff_text="",
@@ -1079,6 +1147,11 @@ class Orchestrator:
                     )
                     streak = sctx.plateau_streak
                     strategy_action = self.strategy.decide(sctx)
+                    # M3 PR 17: record decision to the sidecar log so
+                    # `crucible postmortem --strategy-decisions` can
+                    # explain why BFTS branched / pruned / stopped at
+                    # each iteration. Best-effort — never raise.
+                    self._log_strategy_decision(sctx, strategy_action)
                     # BranchFrom + Restart need to pre-empt legacy stop checks.
                     if isinstance(strategy_action, BranchFrom):
                         target_commit = self._lookup_commit_for_node(strategy_action.parent_id)
@@ -1265,3 +1338,24 @@ class Orchestrator:
 
         except KeyboardInterrupt:
             logger.info(_("Stopped."))
+
+
+# ---------------------------------------------------------------------------
+# M3 PR 17 helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_backend_metadata(agent_result) -> dict:
+    """Return `agent_result.backend_metadata` if present, else `{}`.
+
+    M3 PR 17: backends like SubscriptionCLIBackend populate
+    `AgentResult.backend_metadata` with cli_binary_path / cli_version /
+    cli_argv / env_allowlist / isolation / compliance_report_path. The
+    orchestrator copies these onto AttemptNode so reporters can render
+    truth-in-labeling banners. Defensive default for legacy backends
+    (ClaudeCodeAgent / SmolagentsBackend) that don't populate it.
+    """
+    if agent_result is None:
+        return {}
+    meta = getattr(agent_result, "backend_metadata", None)
+    return meta if isinstance(meta, dict) else {}
