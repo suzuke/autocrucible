@@ -171,18 +171,21 @@ class SubscriptionCLIBackend(AgentInterface):
         )
         if pair is None:
             if not self._experimental.allow_stale_compliance:
-                # Reviewer round 2 polish: don't reference a phantom CLI
-                # command. The harness exists in `compliance.py`; the
-                # `crucible compliance-check` UX wrapper lands in PR 16a.
+                # Phantom-command-free error: reference the real
+                # `crucible compliance-check` CLI command (landed in
+                # PR 16c) instead of the Python module path. PR 16
+                # R2 caught the original phantom-command issue; PR 16c
+                # R1 review caught the inverse — pointing users at a
+                # module path when the CLI command exists.
                 raise SubscriptionCLIBackendError(
                     f"No recent ≥{int(RELEASE_THRESHOLD * 100)}% compliance "
                     f"report found for adapter={self._adapter.cli_name} "
-                    f"version={self._adapter.cli_version}. Either run the "
-                    f"compliance harness (`crucible.agents.cli_subscription.compliance`) "
-                    f"to produce a passing report, or set "
-                    f"`experimental.allow_stale_compliance: true` to bypass "
-                    f"(NOT RECOMMENDED — bypass implies trial results are "
-                    f"NOT a containment claim)."
+                    f"version={self._adapter.cli_version}. Either run "
+                    f"`crucible compliance-check --adapter "
+                    f"{self._adapter.cli_name}` to produce a passing report, "
+                    f"or set `experimental.allow_stale_compliance: true` to "
+                    f"bypass (NOT RECOMMENDED — bypass implies trial results "
+                    f"are NOT a containment claim)."
                 )
             logger.warning(
                 "RED-LETTER: experimental.allow_stale_compliance=true — "
