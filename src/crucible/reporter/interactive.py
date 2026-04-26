@@ -32,6 +32,7 @@ from crucible.reporter.html_tree import (
     _DEFAULT_COLORS,
     _format_cost,
     _format_iso,
+    _short_commit,
 )
 
 
@@ -145,7 +146,7 @@ def _build_tree_data(
             "is_best": (best_id is not None and n.id == best_id),
             "is_orphan": orphan,
             "parent_id": n.parent_id,
-            "commit": n.commit[:7] if n.commit else "",
+            "commit": _short_commit(n.commit),
             "metric": metric_lookup.get(n.id),
             "cost_usd": n.cost_usd,
             "created_at": n.created_at,
@@ -458,12 +459,16 @@ _PAGE_TEMPLATE = """\
     function update() {{
       treeLayout(root);
 
-      // Translate so the synthetic-root x=0 becomes centered vertically.
+      // Translate so visible-node x range becomes centered vertically.
+      // Reviewer round 2 polish: exclude synthetic root from the calc
+      // so layouts with one real root + a few orphans don't off-center.
       let xMin = Infinity, xMax = -Infinity;
       root.each(d => {{
+        if (d.data && d.data.synthetic_root) return;
         if (d.x < xMin) xMin = d.x;
         if (d.x > xMax) xMax = d.x;
       }});
+      if (!isFinite(xMin)) {{ xMin = 0; xMax = 0; }}
       const tx = 80;  // left padding for first column
       const ty = ((height - 80) / 2) - ((xMax + xMin) / 2);
 

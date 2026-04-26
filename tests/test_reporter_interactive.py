@@ -413,3 +413,22 @@ def test_compare_module_untouched_signature_check():
         f"compare.py signature changed; PR 15 should not touch it. "
         f"Diff: {actual_kwargs ^ expected_kwargs}"
     )
+
+
+def test_unicode_paragraph_separator_escaped(ledger_path: Path):
+    """U+2029 PARAGRAPH SEPARATOR has the same JS-line-terminator hazard
+    as U+2028. Must be escaped to `\\u2029`. Reviewer round 2 polish."""
+    ledger = TrialLedger(ledger_path)
+    ledger.append_node(_make_node(1, description="para1 para2"))
+    out = render_interactive_html(ledger_path)
+    assert " " not in out
+    assert "\\u2029" in out
+
+
+def test_d3_integrity_sha256_pinned():
+    """Reviewer round 2 polish: the vendored d3 file SHA-256 is pinned.
+    If anyone in-place edits `d3.v7.9.0.min.js` without bumping the
+    version, the integrity check fails."""
+    from crucible.reporter._vendor import D3_SHA256, verify_d3_integrity
+    assert isinstance(D3_SHA256, str) and len(D3_SHA256) == 64
+    assert verify_d3_integrity() is True
