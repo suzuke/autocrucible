@@ -57,6 +57,7 @@ from typing import Any, Sequence
 from crucible.agents.cli_subscription.base import (
     AdapterRawResult,
     AdapterRunContext,
+    CLISubscriptionAuthError,
     ParsedAdapterOutput,
     SubscriptionCLIAdapter,
 )
@@ -131,22 +132,26 @@ _AUTH_FAILURE_PHRASES = (
 )
 
 
-class CodexCLIAuthError(RuntimeError):
+class CodexCLIAuthError(CLISubscriptionAuthError):
     """Raised when codex emits an auth-failure signal.
 
-    SubscriptionCLIBackend isinstance-checks this to map to
-    `AgentErrorType.AUTH`. Carries the literal evidence phrase so the
-    operator can see what codex said. The instructional next step
-    references only real, runnable commands (`codex login`).
+    SubscriptionCLIBackend isinstance-checks the `CLISubscriptionAuthError`
+    base to map to `AgentErrorType.AUTH`. Carries the literal evidence
+    phrase so the operator can see what codex said. The instructional
+    next step references only real, runnable commands (`codex login`).
     """
 
     def __init__(self, evidence: str) -> None:
-        super().__init__(
+        message = (
             f"Codex CLI is not authenticated. Run `codex login` to "
             f"sign in, or switch to `agent.cli_subscription.adapter: "
             f"claude-code-cli` if you have a Claude Code subscription. "
             f"Evidence: {evidence!r}"
         )
+        # Bypass base __init__ (which would set evidence to the message);
+        # we want evidence to be the raw phrase + the formatted user
+        # message as the str(exc) output.
+        RuntimeError.__init__(self, message)
         self.evidence = evidence
 
 
