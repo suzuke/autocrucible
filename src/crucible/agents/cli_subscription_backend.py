@@ -205,6 +205,12 @@ class SubscriptionCLIBackend(AgentInterface):
                 f"{workspace}. Construct a new backend per workspace."
             )
 
+        # Lazy import to avoid pulling adapter modules at backend import
+        # time (the typed-auth-error pattern: PR 16a R1 #4).
+        from crucible.agents.cli_subscription.codex_cli import CodexCLIAuthError
+
+        auth_error_evidence: Optional[str] = None
+
         with cli_scratch_dir(workspace=self._workspace, policy=self._policy) as scratch:
             ctx = AdapterRunContext(
                 prompt=prompt,
@@ -214,7 +220,21 @@ class SubscriptionCLIBackend(AgentInterface):
                 stdout_cap_bytes=self._cli_config.stdout_cap_bytes,
             )
             raw = self._adapter.run_subprocess(ctx)
-            parsed = self._adapter.parse_output(raw)
+            try:
+                parsed = self._adapter.parse_output(raw)
+            except CodexCLIAuthError as exc:
+                # Adapter detected a typed auth-failure signal in the
+                # event stream. Build a minimal ParsedAdapterOutput so
+                # the rest of the metadata path still populates.
+                from crucible.agents.cli_subscription.base import ParsedAdapterOutput
+                auth_error_evidence = exc.evidence
+                parsed = ParsedAdapterOutput(
+                    modified_files=[],
+                    description=str(exc),
+                    structured_events=[],
+                    tool_was_called=None,
+                    unknown_schema=False,
+                )
             modified = copy_editable_changes_back(
                 scratch=scratch,
                 workspace=self._workspace,
@@ -229,9 +249,12 @@ class SubscriptionCLIBackend(AgentInterface):
             tool_was_called=parsed.tool_was_called,
         )
 
-        # Error classification
+        # Error classification — typed exceptions take precedence over
+        # exit-code heuristics (PR 16a R1 #4 typed pattern).
         error_type = None
-        if raw.timed_out:
+        if auth_error_evidence is not None:
+            error_type = AgentErrorType.AUTH
+        elif raw.timed_out:
             error_type = AgentErrorType.TIMEOUT
         elif raw.exit_code != 0 or parsed.unknown_schema:
             error_type = AgentErrorType.UNKNOWN

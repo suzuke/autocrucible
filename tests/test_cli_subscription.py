@@ -322,19 +322,26 @@ def test_claude_code_cli_non_json_lines_mark_unknown_schema(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_codex_stub_raises_with_clear_message(monkeypatch):
+def test_codex_adapter_no_longer_a_stub(monkeypatch):
+    """PR 16a landed CodexCLIAdapter; build_argv must succeed (not raise)."""
     from crucible.agents.cli_subscription.codex_cli import CodexCLIAdapter
-    from crucible.agents.cli_subscription.base import (
-        AdapterNotImplementedError,
-        AdapterRunContext,
-    )
+    from crucible.agents.cli_subscription.base import AdapterRunContext
 
     monkeypatch.setattr(CodexCLIAdapter, "_resolve_binary", lambda self, p: Path("/fake/codex"))
-    monkeypatch.setattr(CodexCLIAdapter, "_read_version", lambda self: "stub")
+    monkeypatch.setattr(CodexCLIAdapter, "_read_version", lambda self: "0.1.0")
     adapter = CodexCLIAdapter()
 
-    with pytest.raises(AdapterNotImplementedError, match="PR 16b"):
-        adapter.build_argv(MagicMock())
+    ctx = AdapterRunContext(
+        prompt="say hi",
+        scratch_dir=Path("/tmp/scratch"),
+        workspace_root=Path("/tmp/scratch"),
+        timeout_seconds=30,
+        stdout_cap_bytes=1_000_000,
+    )
+    argv = list(adapter.build_argv(ctx))
+    assert argv[0] == "/fake/codex"
+    assert "exec" in argv
+    assert "--json" in argv
 
 
 def test_gemini_stub_raises_with_clear_message(monkeypatch):
