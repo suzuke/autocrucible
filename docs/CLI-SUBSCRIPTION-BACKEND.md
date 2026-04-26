@@ -22,7 +22,7 @@ What it **does not** give you:
 - It does **not** apply Crucible's ACL.
 - It does **not** make the run "isolated" or "sandboxed" or "secure" in the way the default backend (`claude-code`) is.
 
-For actual isolation, use the Docker sandbox configuration (`sandbox.backend: "docker"`, see `crucible/sandbox.py` for the enforced configuration per spec §INV-2). Wrapping CLI subscription mode in Docker is a valid future direction; it isn't shipped today.
+For stronger filesystem isolation, use the Docker sandbox configuration (`sandbox.backend: "docker"`, see `crucible/sandbox.py` for the enforced configuration per spec §INV-2). Wrapping CLI subscription mode in Docker is a valid future direction; it isn't shipped today.
 
 ## Compliance gate (spec §3.2)
 
