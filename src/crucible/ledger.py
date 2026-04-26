@@ -63,7 +63,20 @@ LedgerEvent = Literal["node", "state_update"]
 # Source of usage measurement (see spec §4.1). For CLI subprocess backends we
 # may not be able to recover token counts; ledger declares this honestly
 # rather than emitting fake zeros.
-UsageSource = Literal["api", "cli_estimated", "unavailable"]
+#
+# Values:
+#   "api"             — real metered API cost (Anthropic API key, etc.)
+#   "cli_estimated"   — CLI subprocess; cost estimated from token counts if
+#                       provider surfaces them, else None
+#   "oauth_estimated" — M3 PR 19a: smolagents+claude-subscription path.
+#                       SDK's ResultMessage.total_cost_usd is the
+#                       API-equivalent estimate of what the call would
+#                       have cost on metered auth — NOT the actual
+#                       subscription bill. Disambiguate from "api"
+#                       (real metered cost) so postmortem doesn't
+#                       mislead users into thinking they're billed twice.
+#   "unavailable"     — backend doesn't / can't report cost
+UsageSource = Literal["api", "cli_estimated", "oauth_estimated", "unavailable"]
 
 
 # ---------------------------------------------------------------------------
