@@ -475,3 +475,70 @@ def test_refusal_phrases_are_explicit_set():
     assert len(_MODEL_REFUSAL_PHRASES) >= 5
     for p in _MODEL_REFUSAL_PHRASES:
         assert isinstance(p, str) and len(p) > 3
+
+
+# ---------------------------------------------------------------------------
+# Phantom-command-free error message (PR 16c R1 reviewer fix)
+# ---------------------------------------------------------------------------
+
+
+def test_check_compliance_error_references_crucible_compliance_check_cli(tmp_path, monkeypatch):
+    """PR 16c R1 reviewer caught: the `_check_compliance` failure
+    message used to point users at the Python module path
+    `crucible.agents.cli_subscription.compliance` instead of the new
+    `crucible compliance-check` CLI command. Same phantom-command
+    failure mode as PR 16 R2, just inverse direction. This test pins
+    the message references the REAL CLI command so a future refactor
+    can't regress it."""
+    from crucible.agents.cli_subscription.codex_cli import CodexCLIAdapter
+    from crucible.agents.cli_subscription_backend import (
+        SubscriptionCLIBackend,
+        SubscriptionCLIBackendError,
+    )
+    from crucible.config import CLISubscriptionConfig, ExperimentalConfig
+    from crucible.security.cheat_resistance_policy import CheatResistancePolicy
+
+    monkeypatch.setattr(
+        CodexCLIAdapter, "_resolve_binary",
+        lambda self, override: Path("/fake/codex"),
+    )
+    monkeypatch.setattr(
+        CodexCLIAdapter, "_read_version", lambda self: "0.124.0",
+    )
+
+    ws = tmp_path
+    (ws / "train.py").write_text("x = 1\n")
+    policy = CheatResistancePolicy.from_lists(
+        workspace=ws, editable=["train.py"]
+    )
+
+    cli_cfg = CLISubscriptionConfig(
+        adapter="codex-cli",
+        timeout_seconds=30,
+        stdout_cap_bytes=1_000_000,
+    )
+    # allow_stale_compliance=False → _check_compliance should raise
+    # with the actionable next-step message
+    exp_cfg = ExperimentalConfig(
+        allow_cli_subscription=True,
+        acknowledge_unsandboxed_cli=True,
+        allow_stale_compliance=False,
+    )
+
+    with pytest.raises(SubscriptionCLIBackendError) as excinfo:
+        SubscriptionCLIBackend(
+            cli_config=cli_cfg,
+            experimental=exp_cfg,
+            workspace=ws,
+            policy=policy,
+        )
+
+    msg = str(excinfo.value)
+    # Real CLI command is referenced
+    assert "crucible compliance-check" in msg
+    assert "--adapter codex-cli" in msg
+    # Real config knob is referenced
+    assert "experimental.allow_stale_compliance" in msg
+    # Phantom Python module path is NOT referenced (PR 16c R1 lesson)
+    assert "crucible.agents.cli_subscription.compliance" not in msg
+    assert "compliance harness (`crucible.agents" not in msg
