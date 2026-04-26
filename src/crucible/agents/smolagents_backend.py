@@ -174,7 +174,11 @@ class SmolagentsBackend(AgentInterface):
         except Exception as exc:
             description = ""
             agent_output = f"smolagents agent error: {exc}"
-            error_type = _classify_error(str(exc))
+            # M3 PR 19 R2 fix #1: type-based classification first so
+            # ClaudeAgentSDKAuthError isn't dependent on a string-match
+            # coincidence. Generic exceptions still go through
+            # `_classify_error`'s pattern-match for back-compat.
+            error_type = _classify_error_typed(exc)
             logger.warning("smolagents backend: agent error: %s", exc)
 
         duration = time.monotonic() - t0
@@ -283,6 +287,30 @@ def _classify_error(msg: str) -> AgentErrorType:
     if "timeout" in lower:
         return AgentErrorType.TIMEOUT
     return AgentErrorType.UNKNOWN
+
+
+def _classify_error_typed(exc: Exception) -> AgentErrorType:
+    """Type-aware classification — M3 PR 19 R2 fix #1.
+
+    Reviewer round 2 caught that `ClaudeAgentSDKAuthError` mapped to
+    `AgentErrorType.AUTH` only by string-match coincidence (the error
+    message happened to contain "api key"). If the message is reworded,
+    classification silently breaks.
+
+    Fix: pre-check known typed errors before falling through to
+    pattern match. Generic exceptions still go through `_classify_error`
+    for back-compat with non-Crucible-typed errors.
+    """
+    # Lazy import to avoid cycles + only load if smolagents-CC path is used
+    try:
+        from crucible.agents.smolagents_claude_sdk_model import (
+            ClaudeAgentSDKAuthError,
+        )
+        if isinstance(exc, ClaudeAgentSDKAuthError):
+            return AgentErrorType.AUTH
+    except ImportError:
+        pass
+    return _classify_error(str(exc))
 
 
 def _snapshot_mtimes(workspace: Path) -> dict[Path, float]:

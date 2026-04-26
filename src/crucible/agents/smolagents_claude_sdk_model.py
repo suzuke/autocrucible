@@ -39,9 +39,11 @@ a token-completion API path with OAuth credential support.
 **Cost reporting nuance**: SDK's `ResultMessage.total_cost_usd` is an
 estimate of *equivalent API pricing* — what the call would have cost
 on metered API auth. On subscription, you do NOT pay that. AttemptNode
-records this as `usage_source="oauth_estimated"` (a new value) to
-disambiguate from `"api"` (actual metered cost) and avoid users
-thinking they're being double-billed.
+WILL record this as `usage_source="oauth_estimated"` (new enum value)
+once PR 19a lands the orchestrator plumbing; today, the field is left
+unset and falls back to the orchestrator default. Users running this
+backend should treat any cost shown by Crucible's existing tooling as
+"if-you-had-paid-api-prices" pricing, not actual subscription bill.
 """
 
 from __future__ import annotations

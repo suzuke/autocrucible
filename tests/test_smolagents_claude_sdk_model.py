@@ -317,6 +317,50 @@ def test_smolagents_backend_uses_claude_sdk_model_when_configured(tmp_path, monk
     assert isinstance(backend._model, ClaudeAgentSDKModel)
 
 
+def test_auth_error_classification_end_to_end(tmp_path, monkeypatch):
+    """**M3 PR 19 R2 fix #1 regression** — locks in the typed-classification
+    coupling between `ClaudeAgentSDKAuthError` and `AgentErrorType.AUTH`.
+
+    Reviewer round 2 caught that the original mapping was a string-match
+    coincidence (error message contained "api key"). If the message is
+    reworded, classification silently breaks. Fix uses isinstance check
+    in `_classify_error_typed` BEFORE falling through to string match.
+
+    This test simulates the SDK raising auth, runs through the full
+    SmolagentsBackend.generate_edit path, asserts the resulting
+    AgentResult.error_type == AgentErrorType.AUTH (not UNKNOWN).
+    """
+    from pathlib import Path
+    from crucible.agents.base import AgentErrorType
+    from crucible.agents.smolagents_backend import SmolagentsBackend
+    from crucible.config import SmolagentsConfig
+    from crucible.security.cheat_resistance_policy import CheatResistancePolicy
+
+    ws = tmp_path
+    (ws / "train.py").write_text("x = 1\n")
+    policy = CheatResistancePolicy.from_lists(workspace=ws, editable=["train.py"])
+    config = SmolagentsConfig(provider="claude-subscription")
+
+    backend = SmolagentsBackend(
+        config=config, policy=policy, workspace=Path(ws),
+    )
+
+    # Replace agent.run with a stub that raises ClaudeAgentSDKAuthError
+    def _raise_auth(*args, **kwargs):
+        raise ClaudeAgentSDKAuthError(
+            FileNotFoundError("Could not find credentials.json")
+        )
+
+    backend._agent.run = _raise_auth
+    result = backend.generate_edit("anything", Path(ws))
+    # Critical assertion: typed classification wins regardless of msg content
+    assert result.error_type == AgentErrorType.AUTH, (
+        f"Expected AUTH classification for ClaudeAgentSDKAuthError, "
+        f"got {result.error_type!r}. The type-based check in "
+        f"_classify_error_typed must fire BEFORE string-match fallback."
+    )
+
+
 def test_smolagents_backend_uses_litellm_for_other_providers(tmp_path, monkeypatch):
     """Backward-compat: existing `provider="anthropic"` (or any other
     LiteLLM-routed value) still uses LiteLLMModel."""
