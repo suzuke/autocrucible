@@ -312,9 +312,17 @@ def _record_env_names_seen() -> list[str]:
     unchanged (CLI tools need provider auth env vars), so this is
     effectively "everything in os.environ at run time."
 
-    We record NAMES only — never values, even for non-secret names.
-    The naming convention is purely so operators can audit which env
-    vars the CLI subprocess could see, without exposing their values.
+    Reviewer round 3 nit: secret-named entries are tagged via
+    `is_secret_env_name()` so the audit trail shows WHICH entries were
+    sensitive without revealing the values. Format: `"NAME"` for benign
+    entries, `"NAME:<secret-name>"` for secret-named entries. Values
+    are NEVER recorded.
     """
     import os
-    return sorted(os.environ.keys())
+    out: list[str] = []
+    for name in sorted(os.environ.keys()):
+        if is_secret_env_name(name):
+            out.append(f"{name}:<secret-name>")
+        else:
+            out.append(name)
+    return out
