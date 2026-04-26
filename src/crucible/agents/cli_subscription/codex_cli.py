@@ -94,20 +94,25 @@ KNOWN_ITEM_TYPES = frozenset({
 # real codex flags whose semantics conflict with the constrained
 # subscription-backend contract. The regression test
 # `test_codex_argv_excludes_forbidden_flags` enforces absence.
+#
+# Real codex 0.124.0 flag names verified against `codex exec --help`
+# during PR 16a round-2 polish (per reviewer follow-up #3).
 _FORBIDDEN_FLAGS = frozenset({
-    # Hypothetical re-enablement flags
+    # Hypothetical re-enablement flags — we'd never pass these even
+    # if a future codex release introduced them.
     "--code-act",
     "--repl",
     "--eval",
     "--shell",
     "--bash",
     "--exec-shell",
-    # Real codex flags we deliberately don't pass: bypassing approvals
-    # would let codex's internal tool loop run unbounded code outside
-    # smolagents' / cli_subscription's outer ACL.
+    # Real codex flags. `--full-auto` runs without approval prompts
+    # ("low-friction sandboxed automatic execution"). The
+    # `--dangerously-bypass-approvals-and-sandbox` flag does both:
+    # skip prompts AND disable the sandbox — explicitly contradicts
+    # spec §INV-3 belt-and-braces.
     "--full-auto",
-    "--bypass-approvals",
-    "--dangerously-skip-permissions",
+    "--dangerously-bypass-approvals-and-sandbox",
 })
 
 
@@ -158,14 +163,35 @@ class CodexCLIAdapter(SubscriptionCLIAdapter):
     default_binary_name = "codex"
 
     def build_argv(self, ctx: AdapterRunContext) -> Sequence[str]:
-        # Flag-by-flag rationale lives in the module docstring. Do NOT
-        # add any flag listed in _FORBIDDEN_FLAGS without first
+        # Flag-by-flag rationale:
+        #   exec --json              non-conversational JSONL stream
+        #   --skip-git-repo-check    scratch dir is not a git repo
+        #   --ephemeral              no persistent session files
+        #                            (clean state across runs)
+        #   --ignore-user-config     do NOT load ~/.codex/config.toml,
+        #                            which could silently override
+        #                            `model` and break reproducibility
+        #                            (cli_version snapshot doesn't
+        #                            catch model drift via config).
+        #                            Round-2 reviewer follow-up #2.
+        #   --ignore-rules           do NOT load user/project execpolicy
+        #                            .rules files, which could re-enable
+        #                            codex tool calls outside the
+        #                            workspace-write sandbox (§INV-3).
+        #   --cd <scratch>           codex sees only the scratch dir
+        #   --sandbox workspace-write   codex's internal sandbox limits
+        #                            writes to cwd (defense in depth)
+        #
+        # Do NOT add any flag listed in _FORBIDDEN_FLAGS without first
         # removing it from that set (and explaining why in the PR).
         return [
             str(self.cli_binary_path),
             "exec",
             "--json",
             "--skip-git-repo-check",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
             "--cd", str(ctx.scratch_dir),
             "--sandbox", "workspace-write",
             ctx.prompt,
@@ -240,6 +266,17 @@ class CodexCLIAdapter(SubscriptionCLIAdapter):
                     "command_execution", "file_change", "web_search"
                 ):
                     tool_was_called = True
+
+        # Round-2 reviewer follow-up #1: also scan stderr_tail. If codex
+        # bails before --json takes effect (e.g., binary finds no auth
+        # before opening the JSONL stream), the auth-failure phrase
+        # surfaces only in stderr — without this fallback the error
+        # would land in error_type=UNKNOWN instead of AUTH.
+        if auth_evidence is None and raw.stderr_tail:
+            for phrase in _AUTH_FAILURE_PHRASES:
+                if phrase in raw.stderr_tail:
+                    auth_evidence = raw.stderr_tail.strip()[:500]
+                    break
 
         if auth_evidence is not None:
             raise CodexCLIAuthError(auth_evidence)

@@ -129,13 +129,39 @@ def test_codex_argv_excludes_forbidden_flags(fake_adapter):
 
 
 def test_forbidden_flags_set_includes_codeact_style_flags():
-    """Sanity: the forbidden set covers known dangerous shapes."""
+    """Sanity: the forbidden set covers known dangerous shapes.
+
+    Real codex 0.124.0 flag names verified against `codex exec --help`
+    during PR 16a round-2 polish.
+    """
     must_be_forbidden = {
+        # Hypothetical CodeAct/REPL/eval shapes
         "--code-act", "--repl", "--eval", "--shell", "--bash",
-        "--full-auto", "--bypass-approvals",
-        "--dangerously-skip-permissions",
+        # Real codex flags that bypass safety
+        "--full-auto",
+        "--dangerously-bypass-approvals-and-sandbox",
     }
     assert must_be_forbidden.issubset(_FORBIDDEN_FLAGS)
+
+
+def test_codex_argv_includes_reproducibility_flags(fake_adapter):
+    """Round-2 reviewer follow-up #2: --ignore-user-config and
+    --ignore-rules are required for reproducibility — without them, a
+    user's `~/.codex/config.toml` could silently override `model`,
+    breaking the cli_version-as-reproducibility-snapshot guarantee.
+    """
+    argv = list(fake_adapter.build_argv(_ctx()))
+    assert "--ignore-user-config" in argv, (
+        "without --ignore-user-config, ~/.codex/config.toml can override "
+        "the model silently — breaks reproducibility"
+    )
+    assert "--ignore-rules" in argv, (
+        "without --ignore-rules, user execpolicy .rules can re-enable "
+        "codex tool calls outside the workspace-write sandbox (§INV-3)"
+    )
+    assert "--ephemeral" in argv, (
+        "without --ephemeral, codex persists session files across runs"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +299,43 @@ def test_codex_quota_error_is_NOT_classified_as_auth(fake_adapter):
     parsed = fake_adapter.parse_output(_raw(stdout, exit_code=1))
     # Event recorded but no auth raise
     assert any(e.get("type") == "error" for e in parsed.structured_events)
+
+
+def test_codex_auth_error_detected_in_stderr_when_no_jsonl(fake_adapter):
+    """Round-2 reviewer follow-up #1: if codex bails before --json
+    takes effect (auth check fails before the JSONL stream opens), the
+    auth phrase is in stderr only. parse_output must scan stderr_tail
+    as a fallback — otherwise the trial lands in error_type=UNKNOWN
+    instead of AUTH."""
+    raw = AdapterRawResult(
+        argv_redacted=["codex", "exec", "--json"],
+        stdout="",
+        stderr_tail="Error: ChatGPT authentication required. Run `codex login`.",
+        exit_code=1,
+        timed_out=False,
+        stdout_cap_exceeded=False,
+        duration_seconds=0.05,
+    )
+    with pytest.raises(CodexCLIAuthError) as excinfo:
+        fake_adapter.parse_output(raw)
+    assert "codex login" in excinfo.value.evidence
+
+
+def test_codex_stderr_unrelated_text_does_NOT_trigger_auth(fake_adapter):
+    """stderr containing other error text but no auth phrase → no
+    CodexCLIAuthError raise."""
+    raw = AdapterRawResult(
+        argv_redacted=["codex"],
+        stdout="",
+        stderr_tail="Error: connection refused\n",
+        exit_code=1,
+        timed_out=False,
+        stdout_cap_exceeded=False,
+        duration_seconds=0.05,
+    )
+    parsed = fake_adapter.parse_output(raw)
+    # Should not raise; should return a parsed result
+    assert parsed.description == ""
 
 
 def test_codex_auth_error_phrases_are_explicit_set():
