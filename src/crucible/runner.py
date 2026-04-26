@@ -19,6 +19,25 @@ class RunResult:
     exit_code: int
     timed_out: bool
     stderr_tail: str = ""
+    stdout: str = ""  # M1b: captured for SandboxRunner.parse_metric (Docker mode)
+
+
+@dataclass
+class MetricParseResult:
+    """Result of running an eval command and extracting a metric.
+
+    Per reviewer F1 (M1b implementation review): EvalResult must seal
+    the bytes that PRODUCED the metric value, not the bytes from
+    run_cmd. This dataclass exposes the eval command's captured stdout
+    and stderr_tail so the orchestrator can hash them when writing
+    the sealed eval-result.json artefact.
+    """
+
+    metric_value: Optional[float]
+    stdout: str = ""
+    stderr_tail: str = ""
+    exit_code: int = 0
+    timed_out: bool = False
 
 
 class ExperimentRunner:
@@ -104,8 +123,20 @@ class ExperimentRunner:
     def parse_metric(self, eval_command: str, metric_name: str, timeout: int = 30) -> Optional[float]:
         """Run an eval command and parse a named metric from its output.
 
-        Looks for lines matching ``<metric_name>: <value>`` and returns the
-        value as a float, or None if not found.
+        Backward-compat shim: returns just the float (or None). New callers
+        should use `parse_metric_result()` to get the captured stdout/stderr
+        for sealing into EvalResult.
+        """
+        return self.parse_metric_result(eval_command, metric_name, timeout).metric_value
+
+    def parse_metric_result(
+        self, eval_command: str, metric_name: str, timeout: int = 30
+    ) -> "MetricParseResult":
+        """M1b PR 8b: run eval, parse metric, AND return the captured streams.
+
+        Per reviewer F1: the orchestrator must seal the eval command's
+        stdout/stderr (not the run command's) into EvalResult so the
+        integrity hash actually proves the bytes that produced the metric.
         """
         try:
             proc = subprocess.run(
@@ -117,13 +148,28 @@ class ExperimentRunner:
                 text=True,
                 timeout=timeout,
             )
+            stdout = proc.stdout
+            stderr_tail = _tail(proc.stderr, 50)
             pattern = re.compile(rf"^{re.escape(metric_name)}:\s*(.+)$", re.MULTILINE)
-            match = pattern.search(proc.stdout)
+            match = pattern.search(stdout)
+            value: Optional[float] = None
             if match:
-                return float(match.group(1).strip())
-        except (subprocess.TimeoutExpired, ValueError):
-            pass
-        return None
+                try:
+                    value = float(match.group(1).strip())
+                except ValueError:
+                    value = None
+            return MetricParseResult(
+                metric_value=value,
+                stdout=stdout,
+                stderr_tail=stderr_tail,
+                exit_code=proc.returncode,
+                timed_out=False,
+            )
+        except subprocess.TimeoutExpired:
+            return MetricParseResult(
+                metric_value=None, stdout="", stderr_tail="",
+                exit_code=-1, timed_out=True,
+            )
 
 
 def run_with_repeat(

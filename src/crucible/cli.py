@@ -347,16 +347,27 @@ def init(tag: str, project_dir: str) -> None:
 
     from crucible.agents import create_agent
     from crucible.orchestrator import Orchestrator
+    from crucible.security.cheat_resistance_policy import CheatResistancePolicy
 
     editable = set(config.files.editable)
     if config.constraints.allow_install:
         editable.add("requirements.txt")
 
+    # Always build the policy so factory paths that need it (smolagents)
+    # have it ready. ClaudeCode backend ignores it.
+    policy = CheatResistancePolicy.from_lists(
+        workspace=project,
+        editable=list(editable),
+        readonly=list(config.files.readonly),
+        hidden=list(config.files.hidden),
+    )
     agent = create_agent(
         config.agent,
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
         editable_files=editable,
+        workspace=project,
+        policy=policy,
     )
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent)
     orch.init()
@@ -420,14 +431,24 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
     except ConfigError as e:
         raise click.ClickException(str(e))
 
-    check_claude_cli()
+    # `check_claude_cli()` only applies to the claude-code backend.
+    if config.agent.type == "claude-code":
+        check_claude_cli()
 
     from crucible.agents import create_agent
     from crucible.orchestrator import Orchestrator
+    from crucible.security.cheat_resistance_policy import CheatResistancePolicy
 
     editable = set(config.files.editable)
     if config.constraints.allow_install:
         editable.add("requirements.txt")
+
+    policy = CheatResistancePolicy.from_lists(
+        workspace=project,
+        editable=list(editable),
+        readonly=list(config.files.readonly),
+        hidden=list(config.files.hidden),
+    )
 
     override_kwargs: dict = {}
     if timeout is not None:
@@ -439,6 +460,8 @@ def run(tag: str, project_dir: str, model: str | None, timeout: int, max_iterati
         system_prompt_file=config.agent.system_prompt,
         hidden_files=set(config.files.hidden),
         editable_files=editable,
+        workspace=project,
+        policy=policy,
         **override_kwargs,
     )
     orch = Orchestrator(config=config, workspace=project, tag=tag, agent=agent, profile=profile)
@@ -691,8 +714,34 @@ def history(tag: str, last: int, project_dir: str, as_json: bool, fmt: str) -> N
 @main.command(help=_("Compare two experiment runs side by side."))
 @click.argument("tags", nargs=2)
 @click.option("--project-dir", default=".", help=_("Project root directory."))
+@click.option("--right-project", default=None,
+              help=_("Project root for the SECOND tag (for cross-project compare). "
+                     "If omitted, both tags are read from --project-dir."))
 @click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
-def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
+@click.option("--html", "html_output", is_flag=True,
+              help=_("Render side-by-side HTML comparison from ledger.jsonl files. "
+                     "M2 PR 11."))
+@click.option("--html-out", default=None,
+              help=_("Output path for the HTML report "
+                     "(default: <project>/reports/compare-<a>-vs-<b>.html)."))
+def compare(tags: tuple[str, str], project_dir: str, right_project: str | None,
+            as_json: bool, html_output: bool, html_out: str | None) -> None:
+    tag_a, tag_b = tags
+
+    if html_output:
+        _render_compare_html(
+            tag_a, tag_b,
+            project_dir=project_dir,
+            right_project_dir=right_project,
+            html_out=html_out,
+        )
+        return
+
+    if right_project is not None:
+        raise click.ClickException(
+            _("--right-project is currently only supported with --html")
+        )
+
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
@@ -727,7 +776,6 @@ def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
         click.echo(json_module.dumps(comparison))
         return
 
-    tag_a, tag_b = tags
     col_w = max(len(tag_a), len(tag_b), 12)
     click.echo(f"{'':>16} {tag_a:>{col_w}} {tag_b:>{col_w}}")
     for key in ("iterations", "kept", "discarded", "crashed", "best_metric", "best_commit"):
@@ -735,6 +783,110 @@ def compare(tags: tuple[str, str], project_dir: str, as_json: bool) -> None:
         vb = comparison[tag_b].get(key, "N/A")
         label = key.replace("_", " ").title()
         click.echo(f"{label:>16} {str(va):>{col_w}} {str(vb):>{col_w}}")
+
+
+def _build_metric_lookup(results_path: Path) -> dict[str, float]:
+    """Build attempt_id → metric_value map from a results-<tag>.jsonl file.
+
+    Mirrors the same id derivation used by `crucible postmortem --html`.
+    Returns {} if the file is missing or unreadable (best-effort).
+    """
+    metric_lookup: dict[str, float] = {}
+    if not results_path.exists():
+        return metric_lookup
+    try:
+        with results_path.open() as fp:
+            for i, line in enumerate(fp, start=1):
+                rec = json_module.loads(line)
+                if rec.get("metric_value") is None:
+                    continue
+                beam_id = rec.get("beam_id")
+                iteration = rec.get("iteration", i)
+                attempt_id = (
+                    f"n{iteration:06d}" if beam_id is None
+                    else f"b{beam_id}n{iteration:06d}"
+                )
+                metric_lookup[attempt_id] = float(rec["metric_value"])
+    except Exception as exc:
+        logging.getLogger(__name__).warning(
+            "could not build metric_lookup from %s: %s", results_path, exc
+        )
+    return metric_lookup
+
+
+def _render_compare_html(
+    tag_a: str,
+    tag_b: str,
+    *,
+    project_dir: str,
+    right_project_dir: str | None,
+    html_out: str | None,
+) -> None:
+    """Render `crucible compare --html` output. Strict read-only."""
+    from crucible.reporter import render_comparison_html
+
+    left_project = Path(project_dir).resolve()
+    right_project = (
+        Path(right_project_dir).resolve() if right_project_dir else left_project
+    )
+    cross_project = right_project != left_project
+
+    left_ledger = left_project / "logs" / f"run-{tag_a}" / "ledger.jsonl"
+    right_ledger = right_project / "logs" / f"run-{tag_b}" / "ledger.jsonl"
+    for label, path in (("left", left_ledger), ("right", right_ledger)):
+        if not path.exists():
+            raise click.ClickException(
+                _("ledger not found for {label} side: {path}").format(
+                    label=label, path=path
+                )
+            )
+
+    # Per-side metric direction: read each project's config independently.
+    # If a config is missing/unreadable, pass None → renderer omits Δ.
+    left_dir = _safe_read_metric_direction(left_project)
+    right_dir = _safe_read_metric_direction(right_project)
+
+    left_metrics = _build_metric_lookup(left_project / results_filename(tag_a))
+    right_metrics = _build_metric_lookup(right_project / results_filename(tag_b))
+
+    title = (
+        f"Crucible Compare — {tag_a} (left) vs {tag_b} (right)"
+        if not cross_project
+        else f"Crucible Compare — {left_project.name}:{tag_a} vs {right_project.name}:{tag_b}"
+    )
+
+    out = render_comparison_html(
+        left_ledger,
+        right_ledger,
+        left_label=tag_a,
+        right_label=tag_b,
+        title=title,
+        left_metric_lookup=left_metrics,
+        right_metric_lookup=right_metrics,
+        left_direction=left_dir,
+        right_direction=right_dir,
+    )
+
+    if html_out:
+        target = Path(html_out)
+    elif cross_project:
+        target = Path.cwd() / f"compare-{tag_a}-vs-{tag_b}.html"
+    else:
+        reports_dir = left_project / "reports"
+        reports_dir.mkdir(exist_ok=True)
+        target = reports_dir / f"compare-{tag_a}-vs-{tag_b}.html"
+
+    target.write_text(out)
+    click.echo(_("Wrote HTML comparison to {path}").format(path=target))
+
+
+def _safe_read_metric_direction(project: Path) -> str | None:
+    """Return `metric.direction` from a project config, or None on failure."""
+    try:
+        cfg = load_config(project)
+        return cfg.metric.direction
+    except (ConfigError, FileNotFoundError, OSError):
+        return None
 
 
 @main.command(help=_("Generate a new experiment from a natural language description."))
@@ -880,14 +1032,103 @@ def _render_token_profile(results_path: Path, as_json: bool) -> None:
 @click.option("--no-ai", is_flag=True, help=_("Skip AI insights (data only)."))
 @click.option("--json", "as_json", is_flag=True, help=_("Output as JSON."))
 @click.option("--tokens", is_flag=True, help=_("Show token profiling analysis."))
-def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool, tokens: bool) -> None:
+@click.option("--html", "html_output", is_flag=True,
+              help=_("Render the v1.0 attempt-tree as an HTML report "
+                     "(reads logs/run-<tag>/ledger.jsonl)."))
+@click.option("--html-mode", type=click.Choice(["static", "interactive"]),
+              default="static",
+              help=_("HTML report mode (default: static). M3: 'interactive' "
+                     "embeds d3.js v7 for click-collapse + pan/zoom + "
+                     "details pane. Static is byte-stable for archival; "
+                     "interactive is for exploration."))
+@click.option("--html-out", default=None,
+              help=_("Output path for the HTML report (default: postmortem-<tag>.html in project)."))
+@click.option("--strategy-decisions", "strategy_decisions", is_flag=True,
+              help=_("Print the recorded SearchStrategy decision sequence "
+                     "(reads logs/run-<tag>/strategy-decisions.jsonl). "
+                     "M3 PR 17."))
+def postmortem(tag: str, project_dir: str, no_ai: bool, as_json: bool,
+               tokens: bool, html_output: bool, html_mode: str,
+               html_out: str | None, strategy_decisions: bool) -> None:
     try:
         project = Path(project_dir).resolve()
         config = load_config(project)
     except ConfigError as e:
         raise click.ClickException(str(e))
 
+    # M3 PR 17: --strategy-decisions prints sidecar contents and exits.
+    # No interaction with --html / --json.
+    if strategy_decisions:
+        from crucible.strategy_decisions import load_all
+        run_dir = project / "logs" / f"run-{tag}"
+        decisions = load_all(run_dir)
+        if not decisions:
+            click.echo(_("No strategy decisions recorded for this run."))
+            click.echo(_("(Sidecar at {p} is missing or empty — older runs / strategies that don't emit decisions.)").format(
+                p=run_dir / "strategy-decisions.jsonl"
+            ))
+            return
+        click.echo(_("Strategy decisions for run '{tag}':").format(tag=tag))
+        for d in decisions:
+            click.echo(
+                f"  iter={d.iteration:>4}  {d.chosen_action:<20}  "
+                f"kept={len(d.kept_candidates):>2}  "
+                f"pruned={len(d.pruned_candidates):>2}  "
+                f"@ {d.timestamp}"
+            )
+            if d.rationale:
+                click.echo(f"    └─ {d.rationale}")
+        return
+
     from crucible.postmortem import PostmortemAnalyzer, render_text
+
+    # M1a: --html reads the new ledger.jsonl, not results-<tag>.jsonl
+    if html_output:
+        from crucible.reporter import render_interactive_html, render_static_html
+        ledger_path = project / "logs" / f"run-{tag}" / "ledger.jsonl"
+        # Build a metric_lookup from results-{tag}.jsonl when present,
+        # so the HTML report can highlight best-of-run.
+        metric_lookup: dict[str, float] = {}
+        results_path = project / results_filename(tag)
+        if results_path.exists():
+            try:
+                import json as _json
+                with results_path.open() as fp:
+                    for i, line in enumerate(fp, start=1):
+                        rec = _json.loads(line)
+                        if rec.get("metric_value") is None:
+                            continue
+                        # Match the orchestrator's id scheme: linear → "n000042";
+                        # beam → "b<beam>n000042". records carry beam_id when set.
+                        beam_id = rec.get("beam_id")
+                        iteration = rec.get("iteration", i)
+                        if beam_id is None:
+                            attempt_id = f"n{iteration:06d}"
+                        else:
+                            attempt_id = f"b{beam_id}n{iteration:06d}"
+                        metric_lookup[attempt_id] = float(rec["metric_value"])
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "could not build metric_lookup: %s", exc
+                )
+        if html_mode == "interactive":
+            out = render_interactive_html(
+                ledger_path,
+                title=f"Crucible Postmortem — {tag}",
+                metric_lookup=metric_lookup,
+                metric_direction=config.metric.direction,
+            )
+        else:
+            out = render_static_html(
+                ledger_path,
+                title=f"Crucible Postmortem — {tag}",
+                metric_lookup=metric_lookup,
+                metric_direction=config.metric.direction,
+            )
+        target = Path(html_out) if html_out else (project / f"postmortem-{tag}.html")
+        target.write_text(out)
+        click.echo(_("Wrote HTML report to {path}").format(path=target))
+        return
 
     results_path = project / results_filename(tag)
     if not results_path.exists():
@@ -942,6 +1183,77 @@ def _get_latest_version() -> str | None:
             return data["info"]["version"]
     except Exception:
         return None
+
+
+@main.command(help=_("Inspect / refresh stale worktree lock metadata."))
+@click.option("--project-dir", default=".", help=_("Project root directory."))
+@click.option("--refresh", is_flag=True, default=False,
+              help=_("Rewrite stale sentinel metadata for the current project "
+                     "(only effective when the lock is unheld)."))
+@click.option("--yes", is_flag=True, default=False,
+              help=_("Skip confirmation prompt when --refresh is set."))
+def cleanup(project_dir: str, refresh: bool, yes: bool) -> None:
+    """Inspect worktree lock state and (optionally) refresh stale metadata.
+
+    M2 PR 14 v1 scope: this command only deals with the WorktreeMutex
+    SENTINEL FILE for the current project. It does NOT prune worktree
+    directories — that's M3 territory once the parallel-worker layout
+    exists.
+
+    Reviewer round 2 F1 / F2 safety contract:
+      - Default is read-only inspect (dry-run).
+      - `--refresh` rewrites stale sentinel metadata under flock; it
+        does NOT unlink the lock file (unlinking the path while
+        another process may hold the inode reintroduces split-brain).
+      - Even with `--refresh`, the operation requires acquiring flock
+        non-blocking; busy locks are skipped and reported.
+      - Worktree directories are NEVER deleted by this command.
+    """
+    from crucible.locking import classify_worktree, safe_cleanup_lock
+
+    project = Path(project_dir).resolve()
+    if not project.exists():
+        raise click.ClickException(_("Project not found: {p}").format(p=project))
+
+    candidate = classify_worktree(project)
+
+    owner_str = (
+        f"pid={candidate.owner.pid} host={candidate.owner.host} "
+        f"since {candidate.owner.claimed_at}"
+        if candidate.owner else "no metadata"
+    )
+    click.echo(_("Worktree: {p}").format(p=candidate.worktree_path))
+    click.echo(_("  status: [{r}]  ({o})").format(r=candidate.reason, o=owner_str))
+    if candidate.lock_path is not None:
+        click.echo(_("  lock file: {lp}").format(lp=candidate.lock_path))
+
+    if candidate.reason not in ("stale", "orphan"):
+        click.echo(_("Nothing to refresh."))
+        return
+
+    if not refresh:
+        click.echo(_("\nDry-run. Pass --refresh to rewrite stale sentinel metadata "
+                     "under flock (worktree directory is never modified)."))
+        return
+
+    if not yes:
+        click.confirm(
+            _("Rewrite stale sentinel metadata for this worktree?"),
+            abort=True,
+        )
+
+    with safe_cleanup_lock(candidate.worktree_path) as held:
+        if held is None:
+            click.echo(_("  skipped: lock currently held by another process."))
+            return
+        # Reviewer round 2 F1: do NOT unlink the lock file. The
+        # mutex's `acquire()` already overwrote the sentinel with
+        # current owner metadata when we acquired the lock above; the
+        # held context manager will release on exit, leaving the file
+        # with our (just-acquired-then-released) metadata. Subsequent
+        # `acquire()` calls will see the path/inode unchanged and
+        # behave correctly.
+        click.echo(_("  refreshed sentinel metadata under flock."))
 
 
 @main.command(help=_("Update crucible to the latest version."))

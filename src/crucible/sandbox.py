@@ -56,12 +56,41 @@ class SandboxRunner:
             return self._docker_run(command, timeout)
         return self._native.execute(command, timeout)
 
-    def parse_metric(self, eval_command: str, metric_name: str):
-        """Parse metric -- always runs natively (reads run.log from host).
+    def parse_metric(self, eval_command: str, metric_name: str, timeout: int = 30):
+        """Backward-compat shim. New callers should use parse_metric_result()."""
+        return self.parse_metric_result(eval_command, metric_name, timeout).metric_value
 
-        Note: eval command runs on host, not in Docker container.
+    def parse_metric_result(
+        self, eval_command: str, metric_name: str, timeout: int = 30
+    ):
+        """M1b PR 8b: returns MetricParseResult including the eval cmd's
+        captured stdout/stderr, regardless of backend, so the orchestrator
+        can seal the right bytes into EvalResult.
+
+        Docker mode runs the eval command inside the same isolation as
+        run_cmd (closes v3.2 trust break at sandbox.py:59-64). Native
+        mode delegates to ExperimentRunner.parse_metric_result.
         """
-        return self._native.parse_metric(eval_command, metric_name)
+        from crucible.runner import MetricParseResult
+        if self.config.backend == "docker":
+            rr = self._docker_run(eval_command, timeout)
+            import re as _re
+            pattern = _re.compile(rf"^{_re.escape(metric_name)}:\s*(.+)$", _re.MULTILINE)
+            match = pattern.search(rr.stdout)
+            value = None
+            if match:
+                try:
+                    value = float(match.group(1).strip())
+                except ValueError:
+                    value = None
+            return MetricParseResult(
+                metric_value=value,
+                stdout=rr.stdout,
+                stderr_tail=rr.stderr_tail,
+                exit_code=rr.exit_code,
+                timed_out=rr.timed_out,
+            )
+        return self._native.parse_metric_result(eval_command, metric_name, timeout)
 
     def execute_with_repeat(
         self,
@@ -135,6 +164,7 @@ class SandboxRunner:
                 exit_code=proc.returncode,
                 timed_out=False,
                 stderr_tail="\n".join(stderr.splitlines()[-50:]),
+                stdout=stdout,
             )
         except subprocess.TimeoutExpired:
             proc.terminate()
@@ -147,6 +177,7 @@ class SandboxRunner:
                 exit_code=-1,
                 timed_out=True,
                 stderr_tail="\n".join(stderr.splitlines()[-50:]),
+                stdout="",
             )
 
     def _ensure_image(self) -> str:

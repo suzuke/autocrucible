@@ -27,7 +27,82 @@ class CriticConfig:
 
 
 @dataclass
+class SmolagentsConfig:
+    """M2 PR 13: configuration for the smolagents AgentBackend.
+
+    Per spec §INV-3: only ToolCallingAgent is supported in default safe
+    mode. CodeAct mode is intentionally NOT exposed via config in PR 13.
+    """
+    # Provider routing. Most values are forwarded to smolagents.LiteLLMModel
+    # ("anthropic", "openai", "openrouter", etc., requires API key via
+    # `api_key_env`).
+    #
+    # M3 PR 19 special value: "claude-subscription" — uses
+    # `claude_agent_sdk` + OAuth from `~/.claude/credentials.json`
+    # instead of LiteLLM + API key. This is a transitional shim until
+    # smolagents ships native subscription auth or Anthropic publishes
+    # a token-completion API path with OAuth. ACL invariant: SDK is
+    # configured as a single-turn text generator (allowed_tools=[],
+    # max_turns=1) so smolagents' CheatResistancePolicy boundary is
+    # the only one that fires. See `smolagents_claude_sdk_model.py`.
+    provider: str = "anthropic"
+    # Model id forwarded to LiteLLM (e.g. "claude-3-5-sonnet-20241022").
+    model: str = "claude-3-5-sonnet-20241022"
+    # Name of the env var to read the API key FROM. The value itself is
+    # never stored in config / logs / prompts (reviewer round 1 Q2).
+    # Ignored when provider="claude-subscription" (auth via OAuth).
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    # Hard cap on agent.run() steps; prevents runaway tool-use loops.
+    max_steps: int = 12
+
+
+@dataclass
+class CLISubscriptionConfig:
+    """M3 PR 16: configuration for the experimental SubscriptionCLIBackend.
+
+    Per spec §3.1+§3.2: wraps subscription CLIs (Claude Code / Codex /
+    Gemini) as agent backends. Gated behind ≥99% benign-parse compliance
+    per spec §3.2 release threshold. CLI is a "complete agent product"
+    (§3.3) so we cannot enforce ACL via tool boundaries — see the
+    `acknowledge_unsandboxed_cli` requirement.
+    """
+    # Adapter selector. "claude-code-cli" is the only adapter wired in
+    # PR 16; "codex-cli" and "gemini-cli" are stubs gated to PR 16b/c.
+    adapter: str = "claude-code-cli"
+    # Optional explicit path to the CLI binary. PATH lookup if None.
+    cli_binary_path: str | None = None
+    # Per-call subprocess timeout in seconds (matches constraints default).
+    timeout_seconds: int = 600
+    # Hard cap on captured stdout size (10 MB). Subprocess is killed if
+    # the cap is exceeded — not just truncated — so the CLI doesn't keep
+    # running and racking up subscription quota off-budget.
+    stdout_cap_bytes: int = 10 * 1024 * 1024
+
+
+@dataclass
+class ExperimentalConfig:
+    """M3 PR 16: opt-in flags for experimental / unsupported features.
+
+    These are off by default. Each flag must be explicitly set true in
+    config to opt in; the friction is the security feature for §INV-1
+    "no bypass observed in N adversarial trials" wording. We do NOT
+    market experimental features as production-grade.
+    """
+    # Two-flag opt-in for SubscriptionCLIBackend (reviewer round 1 Q8):
+    # The first acknowledges the backend is experimental. The second
+    # acknowledges that L1 ACL via CheatResistancePolicy does NOT apply
+    # — the CLI sees the host filesystem unmediated. Both must be true.
+    allow_cli_subscription: bool = False
+    acknowledge_unsandboxed_cli: bool = False
+    # Allow construction even when no recent ≥99% compliance report
+    # exists for the CLI version. RED-LETTER WARNING at startup.
+    # Default off — adapters refuse to construct without a passing gate.
+    allow_stale_compliance: bool = False
+
+
+@dataclass
 class AgentConfig:
+    # "claude-code" | "smolagents" | "cli-subscription"
     type: str = "claude-code"
     instructions: Optional[str] = None
     system_prompt: Optional[str] = None
@@ -37,6 +112,9 @@ class AgentConfig:
     failure_analysis: bool = False
     critic: CriticConfig = field(default_factory=CriticConfig)
     context_window: ContextWindowConfig = field(default_factory=ContextWindowConfig)
+    smolagents: SmolagentsConfig = field(default_factory=SmolagentsConfig)
+    cli_subscription: CLISubscriptionConfig = field(default_factory=CLISubscriptionConfig)
+    experimental: ExperimentalConfig = field(default_factory=ExperimentalConfig)
 
 
 @dataclass
@@ -102,9 +180,33 @@ class SandboxConfig:
 
 @dataclass
 class SearchConfig:
-    strategy: str = "greedy"   # greedy | restart | beam
+    strategy: str = "greedy"   # greedy | restart | beam | bfts-lite
     beam_width: int = 3
     plateau_threshold: int = 8
+    # M2 PR 10: doom-loop pruning threshold for BFTSLiteStrategy.
+    # When a kept node has accumulated this many consecutive trailing
+    # failed-expansion children (discard / crash / non-improving keep),
+    # BFTS stops considering it for BranchFrom and falls back to the
+    # next-best kept node. Other strategies ignore this field.
+    prune_threshold: int = 3
+
+
+@dataclass
+class SealConfig:
+    """M2 PR 12: integrity / authenticity policy for `eval-result.json` seals.
+
+    M1 used `content-sha256:<hex>` (corruption check only). M2 introduces
+    `hmac-sha256:<key-id>:<hex>` (tamper-evidence under Docker isolation,
+    where the agent has no access to the host's CRUCIBLE_SEAL_KEY).
+
+    Default `algorithm: content-sha256` so existing projects keep their
+    M1 byte-identical seal output. Users opt into HMAC explicitly.
+    """
+    algorithm: str = "content-sha256"   # "content-sha256" | "hmac-sha256"
+    key_id: str = "default"             # opaque label; embedded in seal string
+    key_env_var: str = "CRUCIBLE_SEAL_KEY"  # hex-encoded bytes
+    key_file: str | None = None         # path to a hex-encoded keyfile; takes
+                                        # precedence over key_env_var if set
 
 
 @dataclass
@@ -120,6 +222,7 @@ class Config:
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
     sandbox: SandboxConfig | None = None
     search: SearchConfig = field(default_factory=SearchConfig)
+    seal: SealConfig = field(default_factory=SealConfig)
 
 
 def _build_context_window(data: dict) -> ContextWindowConfig:
@@ -151,11 +254,74 @@ def _build_critic(data: dict | None) -> CriticConfig:
     )
 
 
+_SUPPORTED_AGENT_TYPES = ("claude-code", "smolagents", "cli-subscription")
+_SUPPORTED_CLI_ADAPTERS = ("claude-code-cli", "codex-cli", "gemini-cli")
+
+
+def _build_smolagents(data: dict) -> SmolagentsConfig:
+    if not data:
+        return SmolagentsConfig()
+    max_steps = data.get("max_steps", 12)
+    if not isinstance(max_steps, int) or max_steps < 1:
+        raise ConfigError(
+            f"agent.smolagents.max_steps must be a positive int, got {max_steps!r}"
+        )
+    return SmolagentsConfig(
+        provider=data.get("provider", "anthropic"),
+        model=data.get("model", "claude-3-5-sonnet-20241022"),
+        api_key_env=data.get("api_key_env", "ANTHROPIC_API_KEY"),
+        max_steps=max_steps,
+    )
+
+
+def _build_cli_subscription(data: dict) -> CLISubscriptionConfig:
+    if not data:
+        return CLISubscriptionConfig()
+    adapter = data.get("adapter", "claude-code-cli")
+    if adapter not in _SUPPORTED_CLI_ADAPTERS:
+        raise ConfigError(
+            f"agent.cli_subscription.adapter must be one of "
+            f"{list(_SUPPORTED_CLI_ADAPTERS)}, got {adapter!r}"
+        )
+    timeout = data.get("timeout_seconds", 600)
+    if not isinstance(timeout, int) or timeout < 1:
+        raise ConfigError(
+            f"agent.cli_subscription.timeout_seconds must be a positive int, got {timeout!r}"
+        )
+    stdout_cap = data.get("stdout_cap_bytes", 10 * 1024 * 1024)
+    if not isinstance(stdout_cap, int) or stdout_cap < 1024:
+        raise ConfigError(
+            f"agent.cli_subscription.stdout_cap_bytes must be ≥1024, got {stdout_cap!r}"
+        )
+    return CLISubscriptionConfig(
+        adapter=adapter,
+        cli_binary_path=data.get("cli_binary_path"),
+        timeout_seconds=timeout,
+        stdout_cap_bytes=stdout_cap,
+    )
+
+
+def _build_experimental(data: dict) -> ExperimentalConfig:
+    if not data:
+        return ExperimentalConfig()
+    return ExperimentalConfig(
+        allow_cli_subscription=bool(data.get("allow_cli_subscription", False)),
+        acknowledge_unsandboxed_cli=bool(data.get("acknowledge_unsandboxed_cli", False)),
+        allow_stale_compliance=bool(data.get("allow_stale_compliance", False)),
+    )
+
+
 def _build_agent(data: dict) -> AgentConfig:
     if not data:
         return AgentConfig()
+    agent_type = data.get("type", "claude-code")
+    if agent_type not in _SUPPORTED_AGENT_TYPES:
+        raise ConfigError(
+            f"agent.type must be one of {list(_SUPPORTED_AGENT_TYPES)}, "
+            f"got {agent_type!r}"
+        )
     return AgentConfig(
-        type=data.get("type", "claude-code"),
+        type=agent_type,
         instructions=data.get("instructions"),
         system_prompt=data.get("system_prompt"),
         model=data.get("model"),
@@ -164,6 +330,9 @@ def _build_agent(data: dict) -> AgentConfig:
         failure_analysis=data.get("failure_analysis", False),
         critic=_build_critic(data.get("critic")),
         context_window=_build_context_window(data.get("context_window", {})),
+        smolagents=_build_smolagents(data.get("smolagents", {})),
+        cli_subscription=_build_cli_subscription(data.get("cli_subscription", {})),
+        experimental=_build_experimental(data.get("experimental", {})),
     )
 
 
@@ -193,10 +362,48 @@ def _build_search(search_data: dict, constraints_data: dict) -> SearchConfig:
         "plateau_threshold",
         constraints_data.get("plateau_threshold", 8),
     )
+    prune_threshold = search_data.get("prune_threshold", 3)
+    if not isinstance(prune_threshold, int) or prune_threshold < 1:
+        raise ConfigError(
+            f"search.prune_threshold must be a positive int, got {prune_threshold!r}"
+        )
     return SearchConfig(
         strategy=search_data.get("strategy", "greedy"),
         beam_width=search_data.get("beam_width", 3),
         plateau_threshold=plateau,
+        prune_threshold=prune_threshold,
+    )
+
+
+_SUPPORTED_SEAL_ALGORITHMS = ("content-sha256", "hmac-sha256")
+
+
+def _build_seal(seal_data: dict) -> SealConfig:
+    if not seal_data:
+        return SealConfig()
+    algorithm = seal_data.get("algorithm", "content-sha256")
+    if algorithm not in _SUPPORTED_SEAL_ALGORITHMS:
+        raise ConfigError(
+            f"seal.algorithm must be one of {list(_SUPPORTED_SEAL_ALGORITHMS)}, "
+            f"got {algorithm!r}"
+        )
+    key_id = seal_data.get("key_id", "default")
+    if not isinstance(key_id, str) or not key_id:
+        raise ConfigError("seal.key_id must be a non-empty string")
+    # M2 PR 12 reviewer: key_id MUST NOT contain ':' since it terminates
+    # the algorithm/key_id portion of the seal string.
+    if ":" in key_id:
+        raise ConfigError(
+            f"seal.key_id must not contain ':' (got {key_id!r}); "
+            f"the seal format is '<algorithm>:<key-id>:<hex>'"
+        )
+    key_env_var = seal_data.get("key_env_var", "CRUCIBLE_SEAL_KEY")
+    key_file = seal_data.get("key_file")
+    return SealConfig(
+        algorithm=algorithm,
+        key_id=key_id,
+        key_env_var=key_env_var,
+        key_file=key_file,
     )
 
 
@@ -241,9 +448,10 @@ def load_config(project_root: Path) -> Config:
 
     search_data = raw.get("search", {})
     strategy = search_data.get("strategy", "greedy")
-    if strategy not in ("greedy", "restart", "beam"):
+    if strategy not in ("greedy", "restart", "beam", "bfts-lite"):
         raise ConfigError(
-            f"search.strategy must be 'greedy', 'restart', or 'beam', got '{strategy}'"
+            f"search.strategy must be 'greedy', 'restart', 'beam', or 'bfts-lite', "
+            f"got '{strategy}'"
         )
 
     files_data = raw.get("files", {})
@@ -291,4 +499,5 @@ def load_config(project_root: Path) -> Config:
             raw.get("search", {}),
             raw.get("constraints", {}),
         ),
+        seal=_build_seal(raw.get("seal", {})),
     )

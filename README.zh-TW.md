@@ -148,7 +148,10 @@ crucible run --tag run1
 └─────────────────────────────────┘
 ```
 
-- **Agent**：使用 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)，搭配工具白名單（Read、Edit、Write、Glob、Grep）。Agent 可以讀取檔案、精準編輯和搜尋程式碼——但不能執行任意指令。
+- **Agent backend**（依 config 的 `agent.type`）：
+  - **`claude-code`**（預設）— 使用 [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)，搭配固定工具白名單（Read、Edit、Write、Glob、Grep）。Agent 沒有 shell 存取權限。
+  - **`smolagents`**（M2 PR 13，opt-in：`pip install autocrucible[smolagents]`）— 相同五個工具的介面，由 `CheatResistancePolicy` 在 tool boundary 強制；在 `tests/security/` 對抗測試集中目前未觀察到逃逸（可用 `pytest tests/security/ --collect-only` 重新驗證）。
+  - **`cli-subscription`**（M3 PR 16，EXPERIMENTAL）— 包裝完整的 agent CLI（Claude Code、Codex、Gemini）。CLI 在 host filesystem 上未經 sandbox 執行；Crucible 的 ACL **無法**約束它。需要雙旗 opt-in；ledger 中標記為 `isolation=cli_subscription_unsandboxed`。詳見 [docs/CLI-SUBSCRIPTION-BACKEND.md](docs/CLI-SUBSCRIPTION-BACKEND.md)。
 - **執行環境**：如果專案有 `.venv/`，crucible 會自動啟用它來執行實驗指令，確保 `python3 evaluate.py` 使用正確的直譯器和套件。
 - **Git**：每次嘗試都會 commit。改善就推進 branch；失敗則打 tag 後 reset，保留 diff 供事後分析。
 
