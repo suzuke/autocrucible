@@ -33,13 +33,24 @@ class SmolagentsConfig:
     Per spec §INV-3: only ToolCallingAgent is supported in default safe
     mode. CodeAct mode is intentionally NOT exposed via config in PR 13.
     """
-    # LiteLLM provider routing: "anthropic", "openai", "openrouter", etc.
-    # Passed verbatim to smolagents.LiteLLMModel.
+    # Provider routing. Most values are forwarded to smolagents.LiteLLMModel
+    # ("anthropic", "openai", "openrouter", etc., requires API key via
+    # `api_key_env`).
+    #
+    # M3 PR 19 special value: "claude-subscription" — uses
+    # `claude_agent_sdk` + OAuth from `~/.claude/credentials.json`
+    # instead of LiteLLM + API key. This is a transitional shim until
+    # smolagents ships native subscription auth or Anthropic publishes
+    # a token-completion API path with OAuth. ACL invariant: SDK is
+    # configured as a single-turn text generator (allowed_tools=[],
+    # max_turns=1) so smolagents' CheatResistancePolicy boundary is
+    # the only one that fires. See `smolagents_claude_sdk_model.py`.
     provider: str = "anthropic"
     # Model id forwarded to LiteLLM (e.g. "claude-3-5-sonnet-20241022").
     model: str = "claude-3-5-sonnet-20241022"
     # Name of the env var to read the API key FROM. The value itself is
     # never stored in config / logs / prompts (reviewer round 1 Q2).
+    # Ignored when provider="claude-subscription" (auth via OAuth).
     api_key_env: str = "ANTHROPIC_API_KEY"
     # Hard cap on agent.run() steps; prevents runaway tool-use loops.
     max_steps: int = 12
