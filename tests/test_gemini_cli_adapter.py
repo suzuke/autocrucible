@@ -284,6 +284,34 @@ def test_gemini_auth_error_detected_in_stderr_when_no_jsonl(fake_adapter):
     assert "GEMINI_API_KEY" in excinfo.value.evidence
 
 
+def test_gemini_auth_error_real_fixture_from_spike(fake_adapter):
+    """PR 16b R1 #2: regression against REAL gemini 0.39.1 auth-failure
+    output (captured via HOME=tmp + empty GEMINI_API_KEY).
+
+    Verifies _AUTH_FAILURE_PHRASES contains the exact phrase gemini
+    emits, not just extrapolated ones — converts the auth-classification
+    confidence from inference to verified.
+    """
+    fixture = (
+        Path(__file__).parent
+        / "fixtures"
+        / "gemini_auth_failure.stderr.txt"
+    )
+    stderr_text = fixture.read_text()
+    raw = AdapterRawResult(
+        argv_redacted=["gemini", "-p", "<x>", "-o", "stream-json"],
+        stdout="",  # auth fails before stream-json takes effect
+        stderr_tail=stderr_text,
+        exit_code=0,  # gemini 0.39.1 actually exits 0 on auth failure
+        timed_out=False,
+        stdout_cap_exceeded=False,
+        duration_seconds=0.05,
+    )
+    with pytest.raises(GeminiCLIAuthError) as excinfo:
+        fake_adapter.parse_output(raw)
+    assert "Please set an Auth method" in excinfo.value.evidence
+
+
 def test_gemini_quota_or_other_error_NOT_classified_as_auth(fake_adapter):
     """Non-auth error events must NOT raise GeminiCLIAuthError."""
     stdout = json.dumps({

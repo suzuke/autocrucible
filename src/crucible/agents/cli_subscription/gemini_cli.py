@@ -13,11 +13,17 @@ Spec framing & design pins (carried forward from PR 16a CodexCLIAdapter):
   `--full-auto`); `--approval-mode yolo` is the same thing under a
   different surface. Both are forbidden.
 - **Reviewer round 1 PR 16a #1 (sandbox mode)**: gemini's `--sandbox`
-  is a boolean (less granular than codex's three-mode). We pass it as
-  `default` approval mode + scratch-dir `--include-directories` so the
-  blast radius is the scratch dir. Crucible's outer `copy_editable_changes_back`
-  enforces the workspace policy ACL. `--skip-trust` is required for
-  ephemeral / non-trusted scratch directories.
+  is a boolean (less granular than codex's three-mode). We do NOT pass
+  `--sandbox` — the blast-radius limiter is Crucible's outer
+  scratch + `copy_editable_changes_back`, with the subprocess `cwd`
+  pointed at the scratch dir by SubscriptionCLIBackend (`run_subprocess`
+  in base.py sets `cwd=ctx.workspace_root`, which the backend points
+  at scratch). gemini operates only on its `cwd` by default, so no
+  `--include-directories` flag is needed to scope it. `--approval-mode
+  default` (NOT `yolo` / `auto_edit`) prevents auto-approval of tool
+  calls. `--skip-trust` is required because the scratch dir is
+  ephemeral and not a "trusted workspace" in gemini's UX model —
+  without it gemini blocks on stdin asking for trust confirmation.
 - **Typed auth error**: `GeminiCLIAuthError` raised from `parse_output`
   on declared auth-failure phrases; backend isinstance-checks. Mirrors
   the `CodexCLIAuthError` / `ClaudeAgentSDKAuthError` pattern. PR 16c
@@ -102,17 +108,20 @@ _FORBIDDEN_APPROVAL_MODES = frozenset({
 
 # Auth-failure phrases gemini emits. Matched intentionally against an
 # explicitly declared set (PR 19 round 2 lesson — no coincidental
-# substring matching). If gemini changes its instructional copy, this
-# set must be updated. Verified against gemini 0.39.1 help / docs and
-# extrapolated from common phrasing.
+# substring matching). The first entry is verified first-hand against
+# gemini 0.39.1 stderr output (PR 16b polish spike: HOME=tmp + empty
+# GEMINI_API_KEY → `tests/fixtures/gemini_auth_failure.stderr.txt`).
+# The rest are extrapolated from common phrasing for forward-compat
+# coverage if gemini's copy changes.
 _AUTH_FAILURE_PHRASES = (
-    "Not signed in",
-    "Please sign in",
-    "Authentication required",
-    "Run `gemini auth`",
-    "GEMINI_API_KEY is not set",
-    "Invalid API key",
-    "OAuth token expired",
+    "Please set an Auth method",        # verified: gemini 0.39.1 stderr
+    "Not signed in",                    # extrapolated
+    "Please sign in",                   # extrapolated
+    "Authentication required",          # extrapolated
+    "Run `gemini auth`",                # extrapolated
+    "GEMINI_API_KEY is not set",        # extrapolated
+    "Invalid API key",                  # extrapolated
+    "OAuth token expired",              # extrapolated
 )
 
 
