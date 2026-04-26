@@ -41,8 +41,9 @@ from crucible.agents.cli_subscription.base import (
 from crucible.agents.cli_subscription.compliance import (
     RELEASE_THRESHOLD,
     reports_dir_for,
-    verify_recent_pass,
+    verify_recent_pass_with_path,
 )
+from crucible.agents.cli_subscription.redaction import is_secret_env_name
 from crucible.agents.cli_subscription.safety import (
     SafetyFilterState,
     detect_safety_filter,
@@ -115,7 +116,12 @@ class SubscriptionCLIBackend(AgentInterface):
             raise SubscriptionCLIBackendError(str(exc)) from exc
 
         # 3. Compliance gate (reviewer Q2 — enforced not advisory)
-        self._compliance_report = self._check_compliance()
+        # Reviewer round 2 Bug #2: track BOTH the report and the file
+        # path so AttemptNode metadata records the actual report path
+        # for audit trail (not the CLI binary path).
+        self._compliance_report, self._compliance_report_path = (
+            self._check_compliance()
+        )
 
         logger.warning(
             "SubscriptionCLIBackend started: adapter=%s cli=%s version=%s "
@@ -152,23 +158,31 @@ class SubscriptionCLIBackend(AgentInterface):
         return cls(cli_binary_path=self._cli_config.cli_binary_path)
 
     def _check_compliance(self):
-        report = verify_recent_pass(
+        """Check the compliance gate. Reviewer round 2 Bug #2: returns
+        (report, source_path) so AttemptNode metadata records the report
+        file path (audit trail), not the CLI binary path.
+        """
+        pair = verify_recent_pass_with_path(
             adapter=self._adapter.cli_name,
             cli_binary_path=str(self._adapter.cli_binary_path),
             cli_version=self._adapter.cli_version,
             reports_dir=reports_dir_for(self._project_dir),
             threshold=RELEASE_THRESHOLD,
         )
-        if report is None:
+        if pair is None:
             if not self._experimental.allow_stale_compliance:
+                # Reviewer round 2 polish: don't reference a phantom CLI
+                # command. The harness exists in `compliance.py`; the
+                # `crucible compliance-check` UX wrapper lands in PR 16a.
                 raise SubscriptionCLIBackendError(
                     f"No recent ≥{int(RELEASE_THRESHOLD * 100)}% compliance "
                     f"report found for adapter={self._adapter.cli_name} "
-                    f"version={self._adapter.cli_version}. Run "
-                    f"`crucible compliance-check --adapter "
-                    f"{self._adapter.cli_name}` to admit, or set "
+                    f"version={self._adapter.cli_version}. Either run the "
+                    f"compliance harness (`crucible.agents.cli_subscription.compliance`) "
+                    f"to produce a passing report, or set "
                     f"`experimental.allow_stale_compliance: true` to bypass "
-                    f"(NOT RECOMMENDED — see docs/CLI-SUBSCRIPTION-BACKEND.md)."
+                    f"(NOT RECOMMENDED — bypass implies trial results are "
+                    f"NOT a containment claim)."
                 )
             logger.warning(
                 "RED-LETTER: experimental.allow_stale_compliance=true — "
@@ -176,7 +190,8 @@ class SubscriptionCLIBackend(AgentInterface):
                 "Trial results are NOT a containment claim.",
                 self._adapter.cli_name,
             )
-        return report
+            return None, None
+        return pair  # (report, source_path)
 
     # ------------------------------------------------------------------
     # AgentInterface
@@ -238,11 +253,22 @@ class SubscriptionCLIBackend(AgentInterface):
             "provider_safety_filter_evidence": safety.evidence,
             "unknown_schema_detected": parsed.unknown_schema,
             "tool_was_called": parsed.tool_was_called,
+            # Reviewer round 2 Bug #2: actual REPORT FILE path, not CLI
+            # binary path. Auditors following this trail will hit the
+            # JSONL evidence file, not a binary.
             "compliance_report_path": (
-                str(self._compliance_report.cli_binary_path)
-                if self._compliance_report
+                str(self._compliance_report_path)
+                if self._compliance_report_path
                 else None
             ),
+            # Reviewer round 2 polish: spec §4.1 mandates `env_allowlist`
+            # on AttemptNode. CLI subscription mode passes the host env
+            # unchanged (CLI tools rely on provider auth env vars), so
+            # the "allowlist" is "everything visible to host". We record
+            # the NAMES of secret-named env vars we know were passed
+            # but redact their values upstream in `redact_env`. This
+            # gives operators the audit trail without leaking values.
+            "env_allowlist": _record_env_names_seen(),
         }
 
         return AgentResult(
@@ -271,3 +297,24 @@ class SubscriptionCLIBackend(AgentInterface):
     @property
     def backend_version(self) -> str:
         return self._adapter.cli_version
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _record_env_names_seen() -> list[str]:
+    """Return the list of env var NAMES visible to the CLI subprocess.
+
+    Reviewer round 2 polish: spec §4.1 schema mandates `env_allowlist`
+    on every AttemptNode. CLI-subscription backends pass the host env
+    unchanged (CLI tools need provider auth env vars), so this is
+    effectively "everything in os.environ at run time."
+
+    We record NAMES only — never values, even for non-secret names.
+    The naming convention is purely so operators can audit which env
+    vars the CLI subprocess could see, without exposing their values.
+    """
+    import os
+    return sorted(os.environ.keys())

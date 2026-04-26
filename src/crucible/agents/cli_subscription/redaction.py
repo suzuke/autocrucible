@@ -17,13 +17,21 @@ from typing import Iterable, Sequence
 
 # Argv flag names that carry secrets. Both standalone form
 # (`--password hunter2`) and `=` form (`--password=hunter2`) covered.
+#
+# Reviewer round 2 Bug #1: `-p` was previously listed as a heuristic
+# for `--password`, but Claude Code CLI uses `-p` for the PROMPT.
+# Including it here silently redacted every prompt from `cli_argv`,
+# destroying the single most important piece of observability. Lesson:
+# short-flag heuristics are too ambiguous (different CLIs use `-p` for
+# port / project / profile / **print**). Better to under-redact than
+# silently destroy data. Operators can rename / configure their CLI
+# args away from secret-carrying short forms if needed.
 _SECRET_FLAG_NAMES = frozenset({
     "--api-key",
     "--apikey",
     "--token",
     "--password",
     "--secret",
-    "-p",  # common short form for --password (heuristic)
 })
 
 # Env var name pattern. Case-insensitive substring match.

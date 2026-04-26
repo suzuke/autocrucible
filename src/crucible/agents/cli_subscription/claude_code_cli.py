@@ -49,9 +49,14 @@ class ClaudeCodeCLIAdapter(SubscriptionCLIAdapter):
         #   --shell-tool / --bash / --eval / --code-act / etc.
         # If a future CC CLI version ships a CodeAct / REPL flag, it
         # MUST be explicitly forbidden here (spec §INV-3 belt-and-braces).
+        #
+        # Reviewer round 2 polish: use `--print` long form (not `-p`)
+        # so the argv is immune to any future short-flag redaction
+        # heuristic additions. The `-p` short form was the trigger for
+        # round-2 Bug #1 (prompt redaction).
         return [
             str(self.cli_binary_path),
-            "-p", ctx.prompt,
+            "--print", ctx.prompt,
             "--output-format", "stream-json",
             "--verbose",  # required by some CC CLI versions for stream-json
             # NB: do NOT add --shell, --eval, --bash, or any flag that

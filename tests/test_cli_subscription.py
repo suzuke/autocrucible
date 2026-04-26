@@ -85,10 +85,14 @@ def test_redact_argv_token_equals():
     assert "ghp_xxx" not in " ".join(out)
 
 
-def test_redact_argv_secret_short_p_form():
-    out = redact_argv(["claude", "-p", "hunter2"])
-    # -p in our list as a heuristic short form
-    assert out == ["claude", "-p", REDACTED]
+def test_redact_argv_does_not_redact_dash_p():
+    """Reviewer round 2 Bug #1 regression: `-p` is the PROMPT flag in
+    Claude Code CLI (and `--print` short form in many others). Including
+    it in the redaction heuristic destroyed the prompt in every recorded
+    `cli_argv`. The fix removes `-p` from `_SECRET_FLAG_NAMES`. This
+    test asserts the prompt is preserved verbatim."""
+    out = redact_argv(["claude", "-p", "Please optimize solution.py"])
+    assert out == ["claude", "-p", "Please optimize solution.py"]
 
 
 def test_redact_argv_passes_through_safe_args():
@@ -97,6 +101,47 @@ def test_redact_argv_passes_through_safe_args():
     assert "--print" in out
     assert "--output-format" in out
     assert "json" in out
+    # `-p` is no longer redacted (Bug #1 fix); "hunter2" is a benign
+    # prompt argument here, not a password.
+    assert "hunter2" in out
+
+
+def test_claude_code_cli_argv_preserves_prompt_through_redaction(monkeypatch):
+    """Reviewer round 2 Bug #1: end-to-end regression. The prompt the
+    user typed must survive `build_argv` -> `redact_argv` round-trip
+    intact, otherwise observability is destroyed."""
+    from pathlib import Path
+    from crucible.agents.cli_subscription.claude_code_cli import (
+        ClaudeCodeCLIAdapter,
+    )
+    from crucible.agents.cli_subscription.base import AdapterRunContext
+
+    monkeypatch.setattr(
+        ClaudeCodeCLIAdapter, "_resolve_binary",
+        lambda self, p: Path("/fake/claude"),
+    )
+    monkeypatch.setattr(
+        ClaudeCodeCLIAdapter, "_read_version", lambda self: "1.0.0"
+    )
+    adapter = ClaudeCodeCLIAdapter()
+
+    user_prompt = "Please optimize solution.py for tokenizer compression"
+    ctx = AdapterRunContext(
+        prompt=user_prompt,
+        scratch_dir=Path("/tmp/scratch"),
+        workspace_root=Path("/tmp/scratch"),
+        timeout_seconds=600,
+        stdout_cap_bytes=10 * 1024 * 1024,
+    )
+    raw_argv = list(adapter.build_argv(ctx))
+    redacted = redact_argv(raw_argv)
+
+    # The prompt MUST appear verbatim in the redacted argv
+    assert user_prompt in redacted, (
+        f"prompt was redacted out of cli_argv. Got: {redacted!r}"
+    )
+    # And no `<redacted>` token should appear (no secrets in this argv)
+    assert REDACTED not in redacted
 
 
 def test_redact_env_strips_secret_named_values():
@@ -730,3 +775,53 @@ def test_safety_filter_is_separate_dimension_from_compliance():
     safety_values = {s.value for s in SafetyFilterState}
     compliance_values = {c.value for c in TrialClassification}
     assert safety_values.isdisjoint(compliance_values)
+
+
+def test_compliance_report_path_metadata_is_actual_file_path(tmp_path, monkeypatch):
+    """Reviewer round 2 Bug #2 regression: AttemptNode's
+    `compliance_report_path` metadata MUST be the path to the JSONL
+    report file, not the CLI binary path. Auditors follow this trail
+    to find the gate evidence."""
+    from crucible.config import CLISubscriptionConfig, ExperimentalConfig
+    from crucible.agents.cli_subscription.claude_code_cli import (
+        ClaudeCodeCLIAdapter,
+    )
+    from crucible.agents.cli_subscription_backend import (
+        SubscriptionCLIBackend,
+    )
+
+    monkeypatch.setattr(
+        ClaudeCodeCLIAdapter, "_resolve_binary",
+        lambda self, p: Path("/fake/claude"),
+    )
+    monkeypatch.setattr(
+        ClaudeCodeCLIAdapter, "_read_version", lambda self: "1.0.0",
+    )
+
+    workspace, policy = _make_test_workspace(tmp_path)
+    now = datetime.now(timezone.utc)
+    rpt = _make_report(
+        "claude-code-cli", "/fake/claude", "1.0.0", 100, 100,
+        now.isoformat().replace("+00:00", "Z"),
+    )
+    report_path = persist_report(rpt, dest_dir=reports_dir_for(workspace))
+
+    cfg = CLISubscriptionConfig(adapter="claude-code-cli")
+    exp = ExperimentalConfig(
+        allow_cli_subscription=True,
+        acknowledge_unsandboxed_cli=True,
+    )
+    backend = SubscriptionCLIBackend(
+        cli_config=cfg, experimental=exp,
+        policy=policy, workspace=workspace, project_dir=workspace,
+    )
+
+    # The backend stored the path of the actual JSONL report file,
+    # NOT the CLI binary path.
+    assert backend._compliance_report_path == report_path
+    assert str(backend._compliance_report_path).endswith(".jsonl"), (
+        f"compliance_report_path should be the .jsonl report file, "
+        f"got {backend._compliance_report_path!r}"
+    )
+    # Critically: it's NOT the CLI binary path
+    assert str(backend._compliance_report_path) != "/fake/claude"

@@ -157,21 +157,37 @@ def persist_report(report: ComplianceReport, *, dest_dir: Path) -> Path:
 
 
 def load_reports(dest_dir: Path) -> list[ComplianceReport]:
-    """Load all reports under `dest_dir`. Best-effort; bad files skipped."""
+    """Load all reports under `dest_dir`. Best-effort; bad files skipped.
+
+    NOTE: returns reports without source-path attribution. For audit
+    trail purposes (reviewer round 2 Bug #2 — `compliance_report_path`
+    metadata field), use `load_reports_with_paths()` instead.
+    """
+    return [report for report, _path in load_reports_with_paths(dest_dir)]
+
+
+def load_reports_with_paths(dest_dir: Path) -> list[tuple["ComplianceReport", Path]]:
+    """Load all reports + their source file paths.
+
+    Reviewer round 2 Bug #2: the AttemptNode metadata field
+    `compliance_report_path` MUST be the report file path, not the CLI
+    binary path. This loader returns the (report, source_path) pairs so
+    `verify_recent_pass` can thread the path through to the backend.
+    """
     if not dest_dir.exists():
         return []
-    reports: list[ComplianceReport] = []
+    out: list[tuple[ComplianceReport, Path]] = []
     for path in sorted(dest_dir.glob("*.jsonl")):
         try:
             for line in path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if not line:
                     continue
-                reports.append(ComplianceReport.from_json(line))
+                out.append((ComplianceReport.from_json(line), path))
         except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
             logger.debug("skipping unreadable report %s: %s", path, exc)
             continue
-    return reports
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -196,12 +212,44 @@ def verify_recent_pass(
         invalidate prior reports — reviewer Q3 reproducibility pin)
       - Report must be ≤ COMPLIANCE_FRESHNESS old
       - Pass rate ≥ threshold
+
+    Returns just the report. For the report's source file path (audit
+    trail), use `verify_recent_pass_with_path` instead — reviewer
+    round 2 Bug #2 fix.
+    """
+    pair = verify_recent_pass_with_path(
+        adapter=adapter,
+        cli_binary_path=cli_binary_path,
+        cli_version=cli_version,
+        reports_dir=reports_dir,
+        threshold=threshold,
+        now=now,
+    )
+    return pair[0] if pair else None
+
+
+def verify_recent_pass_with_path(
+    *,
+    adapter: str,
+    cli_binary_path: str,
+    cli_version: str,
+    reports_dir: Path,
+    threshold: float = RELEASE_THRESHOLD,
+    now: Optional[datetime] = None,
+) -> Optional[tuple[ComplianceReport, Path]]:
+    """Like `verify_recent_pass` but also returns the report file path.
+
+    Reviewer round 2 Bug #2: the AttemptNode metadata field
+    `compliance_report_path` MUST be the path to the JSONL report file
+    on disk so auditors can follow the trail to the gate evidence.
+    Previously the backend was incorrectly writing the CLI binary path
+    into that metadata field.
     """
     now = now or datetime.now(timezone.utc)
     cutoff = now - COMPLIANCE_FRESHNESS
 
     candidates = [
-        r for r in load_reports(reports_dir)
+        (r, p) for r, p in load_reports_with_paths(reports_dir)
         if r.adapter == adapter
         and r.cli_binary_path == cli_binary_path
         and r.cli_version == cli_version
@@ -210,18 +258,18 @@ def verify_recent_pass(
     if not candidates:
         return None
 
-    # Pick the most recent passing one
-    def _ts(r: ComplianceReport) -> datetime:
+    def _ts(pair) -> datetime:
+        r = pair[0]
         try:
             return datetime.fromisoformat(r.started_at.replace("Z", "+00:00"))
         except ValueError:
             return datetime.min.replace(tzinfo=timezone.utc)
 
     candidates.sort(key=_ts, reverse=True)
-    most_recent = candidates[0]
-    if _ts(most_recent) < cutoff:
-        return None  # all passing reports are too old
-    return most_recent
+    most_recent_report, most_recent_path = candidates[0]
+    if _ts(candidates[0]) < cutoff:
+        return None
+    return most_recent_report, most_recent_path
 
 
 # ---------------------------------------------------------------------------
