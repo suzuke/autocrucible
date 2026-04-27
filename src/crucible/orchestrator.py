@@ -432,13 +432,7 @@ class Orchestrator:
                 run_duration_seconds=run_duration,
                 diff_text=diff_text,
             ), agent_result, diff_text=diff_text)
-            crash_msg = run_result.stderr_tail
-            if run_result.timed_out:
-                crash_msg = (
-                    f"TIMED OUT after {self.config.constraints.timeout_seconds}s. "
-                    "Your changes made the code too slow. Reduce model size, "
-                    "training epochs, or MCTS simulations.\n" + crash_msg
-                )
+            crash_msg = self._build_crash_msg(run_result)
             self.context.add_crash_info(crash_msg)
             self._consecutive_failures += 1
             return "crash"
@@ -930,6 +924,56 @@ class Orchestrator:
         if log_path.exists():
             return log_path.read_text()
         return None
+
+    def _build_crash_msg(self, run_result) -> str:
+        """Construct the crash message that goes into the next iter's prompt.
+
+        Prefers `run_result.stderr_tail`, but many example projects use a
+        shell command like `python script.py 2>&1 | tee run.log` which
+        merges stderr into stdout. The orchestrator's subprocess capture
+        then sees an empty stderr (everything went through the pipe), so
+        the agent gets `## Crash Info` with an empty traceback block —
+        and predictably keeps reproducing the same bug because it has
+        no signal beyond "the previous edit failed."
+
+        Fallback: when `stderr_tail` is empty/short, read the tail of
+        `<workspace>/run.log` if it exists. This file is the canonical
+        eval-output sink across all built-in example projects.
+        """
+        stderr_tail = (run_result.stderr_tail or "").strip()
+        # Threshold for "treat as informative" — 80 chars covers most
+        # one-line shell errors and avoids hitting run.log when stderr
+        # already has the traceback.
+        if len(stderr_tail) >= 80:
+            crash_msg = stderr_tail
+        else:
+            run_log = self.workspace / "run.log"
+            log_tail = ""
+            if run_log.exists():
+                try:
+                    raw = run_log.read_text(errors="replace")
+                except OSError:
+                    raw = ""
+                # Last 80 lines is a good balance between context and
+                # token cost; matches the Runner's stderr-tail budget.
+                lines = raw.splitlines()
+                log_tail = "\n".join(lines[-80:]).strip()
+            # Combine: stderr_tail first (if any), then run.log tail.
+            # Dedup: if stderr_tail is a substring of log_tail, skip it.
+            if log_tail and stderr_tail and stderr_tail not in log_tail:
+                crash_msg = f"{stderr_tail}\n--- run.log tail ---\n{log_tail}"
+            elif log_tail:
+                crash_msg = log_tail
+            else:
+                crash_msg = stderr_tail or "(no stderr or run.log captured)"
+
+        if run_result.timed_out:
+            crash_msg = (
+                f"TIMED OUT after {self.config.constraints.timeout_seconds}s. "
+                "Your changes made the code too slow. Reduce model size, "
+                "training epochs, or MCTS simulations.\n" + crash_msg
+            )
+        return crash_msg
 
     def _save_iteration_logs(
         self,

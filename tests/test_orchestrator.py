@@ -808,3 +808,119 @@ def test_convergence_restart_warning(tmp_path, caplog):
         Orchestrator(cfg, tmp_path, tag="test", agent=mock_agent)
 
     assert "convergence_window (5) <= plateau_threshold (8)" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# _build_crash_msg — fall back to run.log when stderr_tail is empty
+# ---------------------------------------------------------------------------
+
+
+def test_build_crash_msg_uses_stderr_when_informative(tmp_path):
+    """Stderr ≥ 80 chars is treated as the canonical crash signal —
+    don't bother reading run.log."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=MagicMock())
+
+    long_stderr = "Traceback (most recent call last):\n" + "  File trace line\n" * 5
+    run_result = MagicMock(stderr_tail=long_stderr, timed_out=False)
+
+    msg = orch._build_crash_msg(run_result)
+    assert "Traceback" in msg
+    # No run.log fallback should kick in
+    assert "run.log tail" not in msg
+
+
+def test_build_crash_msg_falls_back_to_run_log_when_stderr_empty(tmp_path):
+    """The real-world bug from leaf-classification spike: when the
+    user's `commands.run` does `python script.py 2>&1 | tee run.log`,
+    stderr captured by the orchestrator's subprocess is empty (everything
+    went through the pipe), but run.log has the traceback. Without the
+    fallback, the agent saw `## Crash Info` with an empty code block and
+    repeated the same sklearn API mistake three times."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=MagicMock())
+
+    # Simulate `2>&1 | tee run.log`: stderr is empty, run.log has it
+    (tmp_path / "run.log").write_text(
+        "loaded train=891 test=99\n"
+        "Traceback (most recent call last):\n"
+        "  File \"/private/tmp/demo-leaf/evaluate.py\", line 33, in main\n"
+        "    preds = predict(train_df, test_df, classes)\n"
+        "  File \"/private/tmp/demo-leaf/solver.py\", line 38, in predict\n"
+        "    model = LogisticRegression(\n"
+        "TypeError: LogisticRegression.__init__() got an unexpected "
+        "keyword argument 'multi_class'\n"
+    )
+    run_result = MagicMock(stderr_tail="", timed_out=False)
+
+    msg = orch._build_crash_msg(run_result)
+    assert "TypeError" in msg
+    assert "multi_class" in msg
+    # Make sure the real cause is present, not just "(no stderr)"
+    assert "(no stderr or run.log captured)" not in msg
+
+
+def test_build_crash_msg_combines_stderr_and_run_log_when_both_present(tmp_path):
+    """When stderr_tail is short but informative AND run.log has more
+    detail, concat both with a separator. Don't drop either signal."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=MagicMock())
+
+    (tmp_path / "run.log").write_text("python: detailed traceback here\nline 2\nline 3\n")
+    short_stderr = "exit 1"  # short, not in run.log
+    run_result = MagicMock(stderr_tail=short_stderr, timed_out=False)
+
+    msg = orch._build_crash_msg(run_result)
+    assert "exit 1" in msg
+    assert "detailed traceback" in msg
+    assert "run.log tail" in msg
+
+
+def test_build_crash_msg_dedups_when_stderr_substring_of_log(tmp_path):
+    """Don't show stderr_tail twice if run.log already contains it
+    (common when the user's command does `python ... 2>> run.log`)."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=MagicMock())
+
+    log_content = "loaded data\nshort error message that's also in stderr\n"
+    (tmp_path / "run.log").write_text(log_content)
+    run_result = MagicMock(stderr_tail="short error message that's also in stderr", timed_out=False)
+
+    msg = orch._build_crash_msg(run_result)
+    # Should NOT have the separator (skipped because stderr was substring of log)
+    assert "run.log tail" not in msg
+    assert "short error message" in msg
+
+
+def test_build_crash_msg_empty_when_neither_present(tmp_path):
+    """Pathological case: no stderr, no run.log. Agent gets explicit
+    notice rather than empty code block."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=MagicMock())
+
+    run_result = MagicMock(stderr_tail="", timed_out=False)
+
+    msg = orch._build_crash_msg(run_result)
+    assert "(no stderr or run.log captured)" in msg
+
+
+def test_build_crash_msg_prepends_timeout_notice(tmp_path):
+    """When the run timed out, the notice is prepended to whatever
+    crash content we got (stderr or run.log)."""
+    setup_repo(tmp_path)
+    cfg = make_config()
+    orch = Orchestrator(cfg, tmp_path, tag="test", agent=MagicMock())
+
+    (tmp_path / "run.log").write_text("partial output before timeout\n" * 10)
+    run_result = MagicMock(stderr_tail="", timed_out=True)
+
+    msg = orch._build_crash_msg(run_result)
+    assert "TIMED OUT" in msg
+    assert f"after {cfg.constraints.timeout_seconds}s" in msg
+    # And the run.log content still made it through
+    assert "partial output" in msg
